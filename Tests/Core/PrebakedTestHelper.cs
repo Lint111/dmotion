@@ -2,6 +2,9 @@ using System.Collections;
 using Unity.Entities;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+#if UNITY_EDITOR
+using UnityEditor.SceneManagement;
+#endif
 
 namespace DMotion.Tests
 {
@@ -9,26 +12,67 @@ namespace DMotion.Tests
     /// Helper for tests that need pre-baked animation data with valid ACL clips.
     ///
     /// Usage:
-    /// 1. Run "DMotion/Tests/Setup Test Scene" in editor first
-    /// 2. Open the generated TestAnimationScene.unity to trigger baking
+    /// 1. Run "DMotion/Tests/Setup Test Scene" in editor first (creates subscene structure)
+    /// 2. Wait for subscene baking to complete
     /// 3. In tests, use this helper to load the pre-baked entities
     /// </summary>
     public static class PrebakedTestHelper
     {
         private const string TestSceneName = "TestAnimationScene";
         private const string TestScenePath = "Assets/DMotion.TestData/TestAnimationScene";
+        private const int MaxWaitFrames = 300; // ~5 seconds at 60fps
 
         /// <summary>
         /// Loads the test scene with pre-baked animation entities.
         /// Call this in test setup for integration tests.
+        /// In Editor (play mode): Uses EditorSceneManager.LoadSceneAsyncInPlayMode (no build settings required)
+        /// In Editor (edit mode): Uses EditorSceneManager.OpenScene
+        /// In Player: Requires scene in build settings
         /// </summary>
         public static IEnumerator LoadTestScene()
         {
-            // Load the scene
+#if UNITY_EDITOR
+            // In editor, use EditorSceneManager to bypass build settings requirement
+            var scenePath = TestScenePath + ".unity";
+            if (!System.IO.File.Exists(scenePath))
+            {
+                Debug.LogError($"[PrebakedTestHelper] Scene not found: {scenePath}. Run 'DMotion/Tests/Setup Test Scene' first.");
+                yield break;
+            }
+
+            if (Application.isPlaying)
+            {
+                // In play mode (e.g., Unity Test Runner), use async loading
+                // LoadSceneAsyncInPlayMode allows loading scenes without build settings
+                var loadParams = new LoadSceneParameters(LoadSceneMode.Additive);
+                var asyncOp = EditorSceneManager.LoadSceneAsyncInPlayMode(scenePath, loadParams);
+                if (asyncOp == null)
+                {
+                    Debug.LogError($"[PrebakedTestHelper] Failed to start loading scene: {scenePath}");
+                    yield break;
+                }
+
+                while (!asyncOp.isDone)
+                {
+                    yield return null;
+                }
+            }
+            else
+            {
+                // Edit mode - use synchronous loading
+                var scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Additive);
+                if (!scene.isLoaded)
+                {
+                    Debug.LogError($"[PrebakedTestHelper] Failed to load scene: {scenePath}");
+                    yield break;
+                }
+            }
+#else
+            // In player builds, use runtime SceneManager (requires build settings)
             var asyncOp = SceneManager.LoadSceneAsync(TestSceneName, LoadSceneMode.Additive);
             if (asyncOp == null)
             {
-                Debug.LogError($"[PrebakedTestHelper] Failed to load scene: {TestSceneName}");
+                Debug.LogError($"[PrebakedTestHelper] Failed to load scene: {TestSceneName}. Add to build settings.");
                 yield break;
             }
 
@@ -36,14 +80,54 @@ namespace DMotion.Tests
             {
                 yield return null;
             }
+#endif
 
-            // Wait a few frames for entities to be created
-            for (int i = 0; i < 10; i++)
-            {
-                yield return null;
-            }
+            // Wait for subscene streaming to complete
+            yield return WaitForSubsceneStreaming();
 
             Debug.Log("[PrebakedTestHelper] Test scene loaded");
+        }
+
+        /// <summary>
+        /// Waits for all subscenes to finish streaming/loading by polling for entities.
+        /// </summary>
+        private static IEnumerator WaitForSubsceneStreaming()
+        {
+            var world = World.DefaultGameObjectInjectionWorld;
+            if (world == null)
+            {
+                Debug.LogWarning("[PrebakedTestHelper] No default world - skipping subscene wait");
+                yield break;
+            }
+
+            int frameCount = 0;
+            bool foundEntities = false;
+
+            while (frameCount < MaxWaitFrames && !foundEntities)
+            {
+                frameCount++;
+                yield return null;
+
+                // Check if we have animation entities yet
+                var entities = GetAnimationEntities();
+                if (entities.Length > 0)
+                {
+                    foundEntities = true;
+                    Debug.Log($"[PrebakedTestHelper] Found {entities.Length} animation entities after {frameCount} frames");
+                }
+
+                // Log progress every ~0.5 seconds
+                if (frameCount % 30 == 0)
+                {
+                    Debug.Log($"[PrebakedTestHelper] Waiting for subscene streaming... (frame {frameCount})");
+                }
+            }
+
+            if (!foundEntities)
+            {
+                Debug.LogWarning($"[PrebakedTestHelper] No animation entities found after {MaxWaitFrames} frames. " +
+                               "Subscene may not have baked data - run 'DMotion/Tests/Setup Test Scene' and ensure baking completes.");
+            }
         }
 
         /// <summary>
@@ -54,12 +138,30 @@ namespace DMotion.Tests
             var scene = SceneManager.GetSceneByName(TestSceneName);
             if (scene.isLoaded)
             {
+#if UNITY_EDITOR
+                if (Application.isPlaying)
+                {
+                    // In play mode, use async unloading
+                    var asyncOp = SceneManager.UnloadSceneAsync(scene);
+                    while (asyncOp != null && !asyncOp.isDone)
+                    {
+                        yield return null;
+                    }
+                }
+                else
+                {
+                    // Edit mode - use synchronous close
+                    EditorSceneManager.CloseScene(scene, true);
+                }
+#else
                 var asyncOp = SceneManager.UnloadSceneAsync(scene);
                 while (asyncOp != null && !asyncOp.isDone)
                 {
                     yield return null;
                 }
+#endif
             }
+            yield return null;
         }
 
         /// <summary>

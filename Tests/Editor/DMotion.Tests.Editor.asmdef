@@ -3,7 +3,9 @@
     "rootNamespace": "DMotion.Tests",
     "references": [
         "GUID:c39b61f68344c5e46ad36a286c992104",
-        "GUID:296ad15515401a94e93f996fe4ead36a"
+        "GUID:296ad15515401a94e93f996fe4ead36a",
+        "GUID:a5baed0c9693541a5bd947d336ec7659",
+        "GUID:5f3cf485eb0554709a8abbeace890c86"
     ],
     "includePlatforms": [
         "Editor"

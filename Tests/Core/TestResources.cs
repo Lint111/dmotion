@@ -157,39 +157,34 @@ namespace DMotion.Tests
         }
 
         /// <summary>
-        /// Writes duration and sampleRate to a SkeletonClip using reflection or unsafe code.
+        /// Writes duration and sampleRate to a SkeletonClip.
+        ///
+        /// NOTE: Kinemation 0.14 SkeletonClip has NO duration/sampleRate fields!
+        /// Structure is: compressedClipDataAligned16, events, name
+        /// Duration is computed from ACL compressed data at runtime.
+        ///
+        /// This method creates an empty clip - tests using it will NOT have valid timing.
+        /// Use integration tests with pre-baked scenes for timing-dependent tests.
         /// </summary>
         private static unsafe void WriteSkeletonClipData(ref SkeletonClip clip, float duration, float sampleRate)
         {
-            // First, zero out the entire struct to ensure clean state
+            // Kinemation 0.14 SkeletonClip structure:
+            // - compressedClipDataAligned16 (BlobArray<byte>)
+            // - events (ClipEvents)
+            // - name (FixedString128Bytes)
+            //
+            // NO duration or sampleRate fields exist!
+            // Duration is derived from ACL compressed data.
+            //
+            // We can only zero out the struct - any timing-based tests must use
+            // integration tests with real baked ACL data.
+
             var clipPtr = (byte*)UnsafeUtility.AddressOf(ref clip);
             UnsafeUtility.MemClear(clipPtr, UnsafeUtility.SizeOf<SkeletonClip>());
 
-            // Try reflection approach first (works if fields are accessible)
-            if (_durationField != null && _sampleRateField != null)
-            {
-                // Box the struct, set fields, unbox back
-                object boxed = clip;
-                _durationField.SetValue(boxed, duration);
-                _sampleRateField.SetValue(boxed, sampleRate);
-                clip = (SkeletonClip)boxed;
-            }
-            else
-            {
-                // Fallback: try direct memory write for common layouts
-                // SkeletonClip typically has duration and sampleRate as first fields
-                // This is a best-effort approach for when reflection fails
-                var floatPtr = (float*)clipPtr;
-
-                // Common layouts put duration first, then sampleRate
-                // Offset 0: duration (float)
-                // Offset 4: sampleRate (float)
-                floatPtr[0] = duration;
-                floatPtr[1] = sampleRate;
-
-                Debug.LogWarning($"[TestResources] Using fallback memory write for SkeletonClip. " +
-                               $"Duration={duration}, SampleRate={sampleRate}. Verify test results.");
-            }
+            // Log once per test run to indicate fake clips are being used
+            Debug.Log($"[TestResources] Created empty SkeletonClip (no ACL data). " +
+                     $"Tests accessing clip.duration will fail. Use integration tests for timing-based tests.");
         }
 
         /// <summary>

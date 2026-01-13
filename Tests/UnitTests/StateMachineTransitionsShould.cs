@@ -1,5 +1,6 @@
-﻿using DMotion.Authoring;
+using DMotion.Authoring;
 using NUnit.Framework;
+using Unity.Entities;
 
 namespace DMotion.Tests
 {
@@ -75,6 +76,7 @@ namespace DMotion.Tests
 
             var stateMachineBlob =
                 AnimationStateMachineConversionUtils.CreateStateMachineBlob(stateMachineAsset);
+            TrackBlob(stateMachineBlob);
 
             var newEntity = manager.CreateStateMachineEntity(stateMachineAsset, stateMachineBlob);
             AnimationStateTestUtils.AssertNoOnGoingTransition(manager, newEntity);
@@ -100,6 +102,7 @@ namespace DMotion.Tests
 
             var stateMachineBlob =
                 AnimationStateMachineConversionUtils.CreateStateMachineBlob(stateMachineAsset);
+            TrackBlob(stateMachineBlob);
 
             var newEntity = manager.CreateStateMachineEntity(stateMachineAsset, stateMachineBlob);
             AnimationStateTestUtils.AssertNoOnGoingTransition(manager, newEntity);

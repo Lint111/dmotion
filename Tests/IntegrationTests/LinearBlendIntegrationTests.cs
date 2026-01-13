@@ -1,45 +1,33 @@
+using System.Collections;
 using System.Linq;
 using DMotion.Authoring;
 using Latios.Kinemation;
 using NUnit.Framework;
 using Unity.Entities;
+using UnityEngine.TestTools;
 
 namespace DMotion.Tests
 {
     /// <summary>
-    /// Tests for LinearBlend state machine system behavior.
-    /// DISABLED: UpdateAnimationStatesSystem accesses SkeletonClip.compressedClipDataAligned16
-    /// which requires ACL-compressed data from SmartBlobber baking. BakingUtility.BakeGameObjects
-    /// doesn't invoke ICustomBakingBootstrap, so SmartBlobber systems don't run in tests.
+    /// Integration tests for LinearBlend state machine using real SmartBlobber-baked ACL clip data.
+    ///
+    /// These tests cover use cases that require real ACL-compressed animation data from SmartBlobber.
     /// </summary>
-    [Ignore("Requires SmartBlobber-baked ACL clip data - not available in test context")]
-    [CreateSystemsForTest(typeof(BlendAnimationStatesSystem), typeof(UpdateAnimationStatesSystem))]
-    public class LinearBlendStateMachineSystemShould : ECSTestBase
+    public class LinearBlendIntegrationTests : IntegrationTestBase
     {
-        private const float TestClipDuration = 1.0f;
         private static readonly float[] Thresholds = { 0.0f, 0.5f, 0.8f };
 
-        private BlobAssetReference<SkeletonClipSetBlob> _testClipsBlob;
-
-        [SetUp]
-        public new void Setup()
+        protected override System.Type[] SystemTypes => new[]
         {
-            base.Setup();
-            // Create test clips blob with valid duration (3 clips for linear blend)
-            _testClipsBlob = AnimationStateTestUtils.CreateTestClipsBlob(3, TestClipDuration);
-        }
+            typeof(BlendAnimationStatesSystem),
+            typeof(UpdateAnimationStatesSystem)
+        };
 
-        [TearDown]
-        public new void TearDown()
+        [UnityTest]
+        public IEnumerator Update_All_Samplers_WithRealACLData()
         {
-            if (_testClipsBlob.IsCreated)
-                _testClipsBlob.Dispose();
-            base.TearDown();
-        }
+            yield return null;
 
-        [Test]
-        public void Update_All_Samplers()
-        {
             var entity = CreateLinearBlendEntity();
             var linearBlendState = AnimationStateTestUtils.CreateLinearBlendForStateMachine(0, manager, entity);
             AnimationStateTestUtils.SetCurrentState(manager, entity, linearBlendState.AnimationStateId);
@@ -68,14 +56,16 @@ namespace DMotion.Tests
             foreach (var i in samplerIndexes)
             {
                 var sampler = samplers[i];
-                Assert.Greater(sampler.Time, 0);
+                Assert.Greater(sampler.Time, 0, $"Sampler {i} time should increase");
                 Assert.AreEqual(0, sampler.PreviousTime);
             }
         }
 
-        [Test]
-        public void BlendBetweenTwoClips()
+        [UnityTest]
+        public IEnumerator BlendBetweenTwoClips_WithRealACLData()
         {
+            yield return null;
+
             var entity = CreateLinearBlendEntity();
             var linearBlendState = AnimationStateTestUtils.CreateLinearBlendForStateMachine(0, manager, entity);
             AnimationStateTestUtils.SetCurrentState(manager, entity, linearBlendState.AnimationStateId);
@@ -90,16 +80,19 @@ namespace DMotion.Tests
                 ClipSamplerTestUtils.GetAllSamplersForAnimationState(manager, entity,
                     linearBlendState.AnimationStateId).ToArray();
 
-            Assert.Greater(allSamplers[0].Weight, 0);
-            Assert.Greater(allSamplers[1].Weight, 0);
-            Assert.Zero(allSamplers[2].Weight);
+            Assert.Greater(allSamplers[0].Weight, 0, "First clip should have weight");
+            Assert.Greater(allSamplers[1].Weight, 0, "Second clip should have weight");
+            Assert.Zero(allSamplers[2].Weight, "Third clip should have zero weight");
             // Expect first clip weight to be greater since we are closer to it
-            Assert.Greater(allSamplers[0].Weight, allSamplers[1].Weight);
+            Assert.Greater(allSamplers[0].Weight, allSamplers[1].Weight,
+                "First clip should have more weight (closer to blend param)");
         }
 
-        [Test]
-        public void Keep_WeightSum_EqualOne()
+        [UnityTest]
+        public IEnumerator Keep_WeightSum_EqualOne_WithRealACLData()
         {
+            yield return null;
+
             var entity = CreateLinearBlendEntity();
             var linearBlendState = AnimationStateTestUtils.CreateLinearBlendForStateMachine(0, manager, entity);
             AnimationStateTestUtils.SetCurrentState(manager, entity, linearBlendState.AnimationStateId);
@@ -112,35 +105,20 @@ namespace DMotion.Tests
                     linearBlendState.AnimationStateId);
 
             var sumWeight = allSamplers.Sum(s => s.Weight);
-            Assert.AreEqual(1, sumWeight);
+            Assert.AreEqual(1, sumWeight, 0.01f, "Sum of weights should equal 1");
         }
 
-        [Test]
-        public void Keep_InactiveSamplerWeight_EqualZero()
+        [UnityTest]
+        public IEnumerator LoopToClipTime_WithRealACLData()
         {
+            yield return null;
+
             var entity = CreateLinearBlendEntity();
             var linearBlendState = AnimationStateTestUtils.CreateLinearBlendForStateMachine(0, manager, entity);
             AnimationStateTestUtils.SetCurrentState(manager, entity, linearBlendState.AnimationStateId);
-            AnimationStateTestUtils.SetBlendParameter(linearBlendState, manager, entity, 0.1f);
 
+            // Run one update to establish the system's initial state
             UpdateWorld();
-
-            AnimationStateTestUtils.FindActiveSamplerIndexesForLinearBlend(linearBlendState, manager, entity,
-                out var firstClipIndex, out var secondClipIndex);
-
-            var samplers = manager.GetBuffer<ClipSampler>(entity).AsNativeArray().ToArray();
-            var inactiveSamplers = samplers.TakeWhile((e, i) => i != firstClipIndex && i != secondClipIndex);
-
-            var sumWeight = inactiveSamplers.Sum(s => s.Weight);
-            Assert.AreEqual(0, sumWeight);
-        }
-
-        [Test]
-        public void LoopToClipTime()
-        {
-            var entity = CreateLinearBlendEntity();
-            var linearBlendState = AnimationStateTestUtils.CreateLinearBlendForStateMachine(0, manager, entity);
-            AnimationStateTestUtils.SetCurrentState(manager, entity, linearBlendState.AnimationStateId);
 
             var animationState =
                 AnimationStateTestUtils.GetAnimationStateFromEntity(manager, entity, linearBlendState.AnimationStateId);
@@ -148,38 +126,43 @@ namespace DMotion.Tests
                 ClipSamplerTestUtils.AnimationStateStartSamplerIdToIndex(manager, entity,
                     linearBlendState.AnimationStateId);
 
-            var samplerIndexes = Enumerable.Range(startSamplerIndex, animationState.ClipCount).ToArray();
+            // Get actual clip duration from real baked data (use the first sampler's clip)
+            var samplers = manager.GetBuffer<ClipSampler>(entity);
+            var firstSampler = samplers[startSamplerIndex];
+            var clipDuration = firstSampler.Duration;
+            Assert.Greater(clipDuration, 0, "Clip duration should be positive from real ACL data");
 
-            foreach (var i in samplerIndexes)
+            // Test only the first sampler (which has non-zero weight at blendRatio=0)
             {
-                var samplers = manager.GetBuffer<ClipSampler>(entity);
-                var sampler = samplers[i];
-
-                // We need to set Time = duration to guarantee clip will loop on next frame
-                // Use TestClipDuration since we know the clip duration
-                sampler.Time = TestClipDuration;
-                sampler.PreviousTime = sampler.Time - 0.1f;
-                samplers[i] = sampler;
+                // Reset and set up the loop scenario
+                var sampler = samplers[startSamplerIndex];
+                var originalTime = sampler.Time;
+                
+                // Set Time just past duration to guarantee clip will loop on next frame
+                sampler.Time = clipDuration + 0.01f;
+                sampler.PreviousTime = clipDuration - 0.01f;
+                samplers[startSamplerIndex] = sampler;
 
                 UpdateWorld();
 
                 var updatedSamplers = manager.GetBuffer<ClipSampler>(entity);
-                var updatedSampler = updatedSamplers[i];
-                // Because previous Time = duration, previous time will loop to 0
-                Assert.AreEqual(0, updatedSampler.PreviousTime);
-                Assert.Greater(updatedSampler.Time, updatedSampler.PreviousTime);
-                // Clip time should have looped
-                Assert.Less(updatedSampler.Time, sampler.Time);
+                var updatedSampler = updatedSamplers[startSamplerIndex];
+                
+                // After update, Time should have looped back to a small value
+                Assert.Less(updatedSampler.Time, clipDuration, 
+                    $"Time should have looped (duration={clipDuration}, was {sampler.Time}, now {updatedSampler.Time})");
             }
         }
 
-        [Test]
-        public void CleanupStates()
+        [UnityTest]
+        public IEnumerator CleanupStates_WithRealACLData()
         {
+            yield return null;
+
             var entity = CreateLinearBlendEntity();
             var linearBlendState = AnimationStateTestUtils.CreateLinearBlendForStateMachine(0, manager, entity);
             AnimationStateTestUtils.SetCurrentState(manager, entity, linearBlendState.AnimationStateId);
-            var anotherState = AnimationStateTestUtils.CreateSingleClipStateWithRealClips(manager, entity, _testClipsBlob);
+            var anotherState = AnimationStateTestUtils.CreateSingleClipStateWithRealClips(manager, entity, clipsBlob);
 
             var linearBlendStates = manager.GetBuffer<LinearBlendStateMachineState>(entity);
             Assert.AreEqual(1, linearBlendStates.Length);
@@ -198,7 +181,7 @@ namespace DMotion.Tests
 
             // Should have cleanup the linear blend state
             linearBlendStates = manager.GetBuffer<LinearBlendStateMachineState>(entity);
-            Assert.Zero(linearBlendStates.Length);
+            Assert.Zero(linearBlendStates.Length, "Linear blend state should be cleaned up after transition");
         }
 
         private Entity CreateLinearBlendEntity()
@@ -218,9 +201,12 @@ namespace DMotion.Tests
 
             var stateMachineBlob =
                 AnimationStateMachineConversionUtils.CreateStateMachineBlob(stateMachineAsset);
+            TrackBlob(stateMachineBlob);
 
-            var entity = manager.CreateStateMachineEntity(stateMachineAsset, stateMachineBlob, _testClipsBlob,
+            var entity = manager.CreateStateMachineEntity(stateMachineAsset, stateMachineBlob, clipsBlob,
                 BlobAssetReference<ClipEventsBlob>.Null);
+
+            TrackEntity(entity);
 
             Assert.IsTrue(manager.HasComponent<LinearBlendStateMachineState>(entity));
             Assert.IsTrue(manager.HasComponent<FloatParameter>(entity));

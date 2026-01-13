@@ -1,4 +1,6 @@
-﻿using System.Linq;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using Unity.Collections;
@@ -17,6 +19,7 @@ namespace DMotion.Tests
         private float elapsedTime;
         private NativeArray<SystemHandle> allSystems;
         private BlobAssetStore blobAssetStore;
+        private readonly BlobAndEntityTracker tracker = new BlobAndEntityTracker("ECSTestBase");
 
         public override void Setup()
         {
@@ -146,6 +149,9 @@ namespace DMotion.Tests
 
         public override void TearDown()
         {
+            // Clean up tracked blobs and entities before world disposal
+            tracker.Cleanup(manager);
+
             base.TearDown();
             if (allSystems.IsCreated)
             {
@@ -173,6 +179,23 @@ namespace DMotion.Tests
                 //This is also necessary for performance tests accuracy.
                 manager.CompleteAllTrackedJobs();
             }
+        }
+
+        /// <summary>
+        /// Tracks a BlobAssetReference for disposal during teardown.
+        /// Use this for any blobs created with Allocator.Persistent in tests.
+        /// </summary>
+        protected void TrackBlob<T>(BlobAssetReference<T> blob) where T : unmanaged
+        {
+            tracker.TrackBlob(blob);
+        }
+
+        /// <summary>
+        /// Tracks an entity for cleanup during teardown.
+        /// </summary>
+        protected void TrackEntity(Entity entity)
+        {
+            tracker.TrackEntity(entity);
         }
     }
 }

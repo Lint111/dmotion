@@ -106,6 +106,7 @@ namespace DMotion.Tests
 
             stateMachineBlob =
                 AnimationStateMachineConversionUtils.CreateStateMachineBlob(stateMachineAsset);
+            TrackBlob(stateMachineBlob);
 
             entity = manager.CreateStateMachineEntity(stateMachineAsset, stateMachineBlob);
         }

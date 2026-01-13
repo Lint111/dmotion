@@ -1,4 +1,4 @@
-﻿using DMotion.Authoring;
+using DMotion.Authoring;
 using Latios.Authoring;
 using Latios.Kinemation;
 using Unity.Entities;
@@ -19,7 +19,7 @@ namespace DMotion.PerformanceTests
     }
 
 
-    class PerformanceTestsAuthoring : MonoBehaviour
+    public class PerformanceTestsAuthoring : MonoBehaviour
     {
         public Animator Animator;
         public AnimationClipAsset OneShotClip;
