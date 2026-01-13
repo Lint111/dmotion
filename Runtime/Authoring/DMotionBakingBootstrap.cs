@@ -1,4 +1,5 @@
 ﻿using Latios.Authoring;
+using Unity.Entities;
 
 namespace DMotion.Authoring
 {
@@ -7,11 +8,11 @@ namespace DMotion.Authoring
         /// <summary>
         /// Adds Kinemation bakers and baking systems into baking world and disables the Entities.Graphics's SkinnedMeshRenderer bakers
         /// </summary>
-        /// <param name="world">The conversion world in which to install the Kinemation conversion systems</param>
+        /// <param name="context">The baking bootstrap context in which to install the DMotion baking systems</param>
         public static void InstallDMotionBakersAndSystems(ref CustomBakingBootstrapContext context)
         {
-            context.systemTypesToInject.Add(typeof(AnimationStateMachineSmartBlobberSystem));
-            context.systemTypesToInject.Add(typeof(ClipEventsSmartBlobberSystem));
+            context.bakingSystemTypesToInject.Add(TypeManager.GetSystemTypeIndex<AnimationStateMachineSmartBlobberSystem>());
+            context.bakingSystemTypesToInject.Add(TypeManager.GetSystemTypeIndex<ClipEventsSmartBlobberSystem>());
         }
     }
 }

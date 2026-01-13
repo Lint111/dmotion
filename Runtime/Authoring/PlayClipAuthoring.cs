@@ -47,7 +47,7 @@ namespace DMotion.Authoring
             }
 
             var clip = authoring.Clip;
-            BakeData.Owner = baker.GetEntity(authoring.Owner);
+            BakeData.Owner = baker.GetEntity(authoring.Owner, TransformUsageFlags.Dynamic);
             BakeData.ClipsBlobHandle = baker.RequestCreateBlobAsset(authoring.Animator, clip.Clip);
             BakeData.ClipEventsBlobHandle =
                 baker.RequestCreateBlobAsset(clip.Clip);

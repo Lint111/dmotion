@@ -6,7 +6,7 @@ using Unity.Transforms;
 
 namespace DMotion
 {
-    [UpdateInGroup(typeof(TransformSystemGroup))]
+    [UpdateInGroup(typeof(SimulationSystemGroup), OrderLast = true)]
     [UpdateBefore(typeof(BlendAnimationStatesSystem))]
     [RequireMatchingQueriesForUpdate]
     [BurstCompile]

@@ -31,7 +31,20 @@ namespace DMotion.Authoring
 
         public void Dispose()
         {
-            ClipEvents.Dispose();
+            // Dispose inner event lists first (use ElementAt to avoid struct copy)
+            if (ClipEvents.IsCreated)
+            {
+                for (int i = 0; i < ClipEvents.Length; i++)
+                {
+                    ref var clipEvent = ref ClipEvents.ElementAt(i);
+                    if (clipEvent.Events.IsCreated)
+                    {
+                        clipEvent.Events.Dispose();
+                    }
+                }
+                // Then dispose the outer list
+                ClipEvents.Dispose();
+            }
         }
     }
 }

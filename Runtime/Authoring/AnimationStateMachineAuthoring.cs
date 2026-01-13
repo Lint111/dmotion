@@ -48,13 +48,14 @@ namespace DMotion.Authoring
         public bool Bake(AnimationStateMachineAuthoring authoring, IBaker baker)
         {
             ValidateStateMachine(authoring);
-            Owner = baker.GetEntity(authoring.Owner);
+            Owner = baker.GetEntity(authoring.Owner, TransformUsageFlags.Dynamic);
             RootMotionMode = authoring.RootMotionMode;
             EnableEvents = authoring.EnableEvents && authoring.StateMachineAsset.Clips.Any(c => c.Events.Length > 0);
             clipsBlobHandle = baker.RequestCreateBlobAsset(authoring.Animator, authoring.StateMachineAsset.Clips);
             stateMachineBlobHandle = baker.RequestCreateBlobAsset(authoring.StateMachineAsset);
             clipEventsBlobHandle = baker.RequestCreateBlobAsset(authoring.StateMachineAsset.Clips);
-            AnimationStateMachineConversionUtils.AddStateMachineParameters(baker, baker.GetEntity(),
+            AnimationStateMachineConversionUtils.AddStateMachineParameters(baker,
+                baker.GetEntity(TransformUsageFlags.Dynamic),
                 authoring.StateMachineAsset);
             return true;
         }

@@ -49,7 +49,7 @@ namespace DMotion
                     }
                 }
                     
-                rootDeltaTranslation.Value = root.translation - previousRoot.translation;
+                rootDeltaTranslation.Value = root.position - previousRoot.position;
                 rootDeltaRotation.Value = mathex.delta(root.rotation, previousRoot.rotation);
             }
         }

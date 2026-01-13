@@ -5,7 +5,7 @@ using UnityEngine.Assertions;
 
 namespace DMotion
 {
-    [UpdateInGroup(typeof(TransformSystemGroup))]
+    [UpdateInGroup(typeof(SimulationSystemGroup), OrderLast = true)]
     [UpdateBefore(typeof(AnimationStateMachineSystem))]
     [RequireMatchingQueriesForUpdate]
     [BurstCompile]

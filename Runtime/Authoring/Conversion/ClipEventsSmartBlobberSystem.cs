@@ -46,10 +46,11 @@ namespace DMotion.Authoring
         [BurstCompile]
         partial struct BuildBlobJob : IJobEntity
         {
-            public void Execute(ref SmartBlobberResult result, in ClipEventsBlobConverter converter)
+            public void Execute(ref SmartBlobberResult result, ref ClipEventsBlobConverter converter)
             {
                 var blob = converter.BuildBlob();
                 result.blob = Unity.Entities.LowLevel.Unsafe.UnsafeUntypedBlobAssetReference.Create(blob);
+                converter.Dispose();
             }
         }
     }

@@ -4,7 +4,7 @@ using Unity.Transforms;
 
 namespace DMotion
 {
-    [UpdateInGroup(typeof(TransformSystemGroup))]
+    [UpdateInGroup(typeof(SimulationSystemGroup), OrderLast = true)]
     [UpdateAfter(typeof(AnimationStateMachineSystem))]
     [RequireMatchingQueriesForUpdate]
     [BurstCompile]

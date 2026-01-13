@@ -1,4 +1,5 @@
 using Latios.Kinemation;
+using Latios.Transforms;
 using Unity.Burst;
 using Unity.Entities;
 using Unity.Mathematics;
@@ -8,10 +9,10 @@ namespace DMotion
     [BurstCompile]
     internal static class ClipSamplingUtils
     {
-        public static BoneTransform SampleWeightedFirstIndex(int boneIndex, ref SkeletonClip clip, float time, float weight)
+        public static TransformQvvs SampleWeightedFirstIndex(int boneIndex, ref SkeletonClip clip, float time, float weight)
         {
             var bone = clip.SampleBone(boneIndex, time);
-            bone.translation *= weight;
+            bone.position *= weight;
             var rot = bone.rotation;
             rot.value *= weight;
             bone.rotation = rot;
@@ -19,10 +20,10 @@ namespace DMotion
             return bone;
         }
 
-        public static void SampleWeightedNIndex(ref BoneTransform bone, int boneIndex, ref SkeletonClip clip, float time, float weight)
+        public static void SampleWeightedNIndex(ref TransformQvvs bone, int boneIndex, ref SkeletonClip clip, float time, float weight)
         {
             var otherBone = clip.SampleBone(boneIndex, time);
-            bone.translation += otherBone.translation * weight;
+            bone.position += otherBone.position * weight;
 
             //blends rotation. Negates opposing quaternions to be sure to choose the shortest path
             var otherRot = otherBone.rotation;

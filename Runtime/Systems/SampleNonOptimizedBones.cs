@@ -4,7 +4,12 @@ using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Profiling;
+#if LATIOS_TRANSFORMS_UNITY
 using Unity.Transforms;
+#else
+using Latios.Transforms;
+#endif
+using TransformQvvs = Latios.Transforms.TransformQvvs;
 
 namespace DMotion
 {
@@ -16,9 +21,11 @@ namespace DMotion
         internal ProfilerMarker Marker;
 
         internal void Execute(
-            ref Translation translation,
-            ref Rotation rotation,
-            ref NonUniformScale scale,
+#if LATIOS_TRANSFORMS_UNITY
+            ref LocalTransform localTransform,
+#else
+            TransformAspect transformAspect,
+#endif
             in BoneOwningSkeletonReference skeletonRef,
             in BoneIndex boneIndex
         )
@@ -50,9 +57,15 @@ namespace DMotion
                     bone.rotation = math.normalize(bone.rotation);
                 }
 
-                translation.Value = bone.translation;
-                rotation.Value = bone.rotation;
-                scale.Value = bone.scale;
+#if LATIOS_TRANSFORMS_UNITY
+                localTransform.Position = bone.position;
+                localTransform.Rotation = bone.rotation;
+                localTransform.Scale = bone.scale; // TransformQvvs.scale is already uniform (float)
+#else
+                transformAspect.localPosition = bone.position;
+                transformAspect.localRotation = bone.rotation;
+                transformAspect.localScale = bone.scale;
+#endif
             }
         }
 

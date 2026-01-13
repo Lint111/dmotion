@@ -4,7 +4,11 @@ using Unity.Burst;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Profiling;
+#if LATIOS_TRANSFORMS_UNITY
 using Unity.Transforms;
+#else
+using Latios.Transforms;
+#endif
 
 namespace DMotion
 {
@@ -14,15 +18,23 @@ namespace DMotion
     {
         internal ProfilerMarker Marker;
         internal void Execute(
-            ref Translation translation,
-            ref Rotation rotation,
+#if LATIOS_TRANSFORMS_UNITY
+            ref LocalTransform localTransform,
+#else
+            TransformAspect transformAspect,
+#endif
             in RootDeltaTranslation rootDeltaTranslation,
             in RootDeltaRotation rootDeltaRotation
         )
         {
             using var scope = Marker.Auto();
-            translation.Value += rootDeltaTranslation.Value;
-            rotation.Value = math.mul(rootDeltaRotation.Value, rotation.Value);
+#if LATIOS_TRANSFORMS_UNITY
+            localTransform.Position += rootDeltaTranslation.Value;
+            localTransform.Rotation = math.mul(rootDeltaRotation.Value, localTransform.Rotation);
+#else
+            transformAspect.worldPosition += rootDeltaTranslation.Value;
+            transformAspect.worldRotation = math.mul(rootDeltaRotation.Value, transformAspect.worldRotation);
+#endif
         }
     }
 }

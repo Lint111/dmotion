@@ -8,9 +8,7 @@ using Unity.Transforms;
 
 namespace DMotion
 {
-    [UpdateInGroup(typeof(TransformSystemGroup))]
-    [UpdateAfter(typeof(TRSToLocalToParentSystem))]
-    [UpdateBefore(typeof(TRSToLocalToWorldSystem))]
+    [UpdateInGroup(typeof(SimulationSystemGroup), OrderLast = true)]
     [RequireMatchingQueriesForUpdate]
     [BurstCompile]
     public partial struct ClipSamplingSystem : ISystem

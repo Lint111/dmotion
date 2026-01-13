@@ -4,9 +4,6 @@ using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Profiling;
-using Unity.Profiling.LowLevel;
-using UnityEditor;
-using UnityEngine;
 
 namespace DMotion
 {
@@ -16,13 +13,11 @@ namespace DMotion
         internal ProfilerMarker Marker;
 
         internal void Execute(
-            ref DynamicBuffer<OptimizedBoneToRoot> boneToRootBuffer,
-            in DynamicBuffer<ClipSampler> samplers,
-            in OptimizedSkeletonHierarchyBlobReference hierarchyRef)
+            OptimizedSkeletonAspect skeleton,
+            in DynamicBuffer<ClipSampler> samplers)
         {
             using var scope = Marker.Auto();
 
-            var blender = new BufferPoseBlender(boneToRootBuffer);
             var activeSamplerCount = 0;
 
             for (byte i = 0; i < samplers.Length; i++)
@@ -31,19 +26,13 @@ namespace DMotion
                 if (!mathex.iszero(sampler.Weight))
                 {
                     activeSamplerCount++;
-                    sampler.Clip.SamplePose(ref blender, sampler.Weight, sampler.Time);
+                    sampler.Clip.SamplePose(ref skeleton, sampler.Time, sampler.Weight);
                 }
-            }
-
-            //Skip normalizing rotations for now. Magnitudes are already ~1 
-            if (activeSamplerCount > 1)
-            {
-                blender.NormalizeRotations();
             }
 
             if (activeSamplerCount > 0)
             {
-                blender.ApplyBoneHierarchyAndFinish(hierarchyRef.blob);
+                skeleton.EndSamplingAndSync();
             }
         }
     }

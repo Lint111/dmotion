@@ -3,8 +3,11 @@ using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Profiling;
+#if LATIOS_TRANSFORMS_UNITY
 using Unity.Transforms;
-using UnityEngine;
+#else
+using Latios.Transforms;
+#endif
 
 namespace DMotion
 {
@@ -17,14 +20,24 @@ namespace DMotion
         [ReadOnly] public ComponentLookup<RootDeltaRotation> CfeDeltaRotation;
         internal ProfilerMarker Marker;
 
-        public void Execute(ref Translation translation, ref Rotation rotation, in AnimatorOwner owner)
+#if LATIOS_TRANSFORMS_UNITY
+        public void Execute(ref LocalTransform localTransform, in AnimatorOwner owner)
         {
             using var scope = Marker.Auto();
             var deltaPos = CfeDeltaPosition[owner.AnimatorEntity];
             var deltaRot = CfeDeltaRotation[owner.AnimatorEntity];
-            rotation.Value = math.mul(deltaRot.Value, rotation.Value);
-
-            translation.Value += deltaPos.Value;
+            localTransform.Rotation = math.mul(deltaRot.Value, localTransform.Rotation);
+            localTransform.Position += deltaPos.Value;
         }
+#else
+        public void Execute(TransformAspect transformAspect, in AnimatorOwner owner)
+        {
+            using var scope = Marker.Auto();
+            var deltaPos = CfeDeltaPosition[owner.AnimatorEntity];
+            var deltaRot = CfeDeltaRotation[owner.AnimatorEntity];
+            transformAspect.worldRotation = math.mul(deltaRot.Value, transformAspect.worldRotation);
+            transformAspect.worldPosition += deltaPos.Value;
+        }
+#endif
     }
 }

@@ -128,11 +128,46 @@ namespace DMotion.Authoring
             return x.Threshold.CompareTo(y.Threshold);
         }
 
-        public void Dispose()
+        public unsafe void Dispose()
         {
-            States.Dispose();
-            SingleClipStates.Dispose();
-            LinearBlendStates.Dispose();
+            // Dispose nested lists in States (must use pointers to avoid struct copies)
+            if (States.IsCreated)
+            {
+                for (int i = 0; i < States.Length; i++)
+                {
+                    ref var state = ref States.ElementAt(i);
+                    if (state.Transitions.IsCreated)
+                    {
+                        // Dispose nested lists in each transition
+                        for (int j = 0; j < state.Transitions.Length; j++)
+                        {
+                            ref var transition = ref state.Transitions.ElementAt(j);
+                            if (transition.BoolTransitions.IsCreated)
+                                transition.BoolTransitions.Dispose();
+                            if (transition.IntTransitions.IsCreated)
+                                transition.IntTransitions.Dispose();
+                        }
+                        state.Transitions.Dispose();
+                    }
+                }
+                States.Dispose();
+            }
+
+            // Dispose nested lists in LinearBlendStates
+            if (LinearBlendStates.IsCreated)
+            {
+                for (int i = 0; i < LinearBlendStates.Length; i++)
+                {
+                    ref var linearBlend = ref LinearBlendStates.ElementAt(i);
+                    if (linearBlend.ClipsWithThresholds.IsCreated)
+                        linearBlend.ClipsWithThresholds.Dispose();
+                }
+                LinearBlendStates.Dispose();
+            }
+
+            // Dispose remaining top-level list
+            if (SingleClipStates.IsCreated)
+                SingleClipStates.Dispose();
         }
     }
 }
