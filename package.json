@@ -1,17 +1,16 @@
 {
   "name": "com.gamedevpro.dmotion",
   "displayName": "DMotion",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "unity": "6000.0",
   "description": "DMotion is a high level Animation framework and State Machine for DOTS",
   "dependencies": {
     "com.latios.latiosframework": "0.14.9",
-    "com.unity.shadergraph": "10.8.1",
-    "com.unity.ui": "1.0.0-preview.18",
-    "com.unity.test-framework": "2.0.1-exp.2",
-    "com.unity.testtools.codecoverage": "1.0.1"
+    "com.unity.shadergraph": "17.0.3",
+    "com.unity.test-framework": "1.4.5",
+    "com.unity.testtools.codecoverage": "1.2.6"
   },
-  "unityRelease": "0b16",
+  "unityRelease": "39f1",
   "keywords": [
     "dmotion",
     "dots",
