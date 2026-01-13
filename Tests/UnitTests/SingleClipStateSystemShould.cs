@@ -1,37 +1,44 @@
-﻿using Latios.Kinemation;
+using Latios.Kinemation;
 using NUnit.Framework;
 using Unity.Entities;
-using UnityEngine;
 
 namespace DMotion.Tests
 {
     /// <summary>
     /// Tests for SingleClipState system behavior.
-    /// Uses a baked test prefab to get real ACL-compressed clip data for tests that need it.
+    /// DISABLED: UpdateAnimationStatesSystem accesses SkeletonClip.compressedClipDataAligned16
+    /// which requires ACL-compressed data from SmartBlobber baking. BakingUtility.BakeGameObjects
+    /// doesn't invoke ICustomBakingBootstrap, so SmartBlobber systems don't run in tests.
     /// </summary>
-    // TODO: Re-enable after fixing test baking for Kinemation 0.14
-    [Ignore("Temporarily disabled - investigating test baking crash")]
+    [Ignore("Requires SmartBlobber-baked ACL clip data - not available in test context")]
     [CreateSystemsForTest(typeof(BlendAnimationStatesSystem), typeof(UpdateAnimationStatesSystem))]
     public class SingleClipStateSystemShould : ECSTestBase
     {
-        private const string TestPrefabPath = "Packages/com.gamedevpro.dmotion/Tests/Data/Armature_StressTest_LOD2 Variant 2.prefab";
+        private const float TestClipDuration = 1.0f;
 
-        [ConvertGameObjectPrefab(nameof(bakedPrefabEntity), TestPrefabPath)]
-        private GameObject testPrefab;
+        private BlobAssetReference<SkeletonClipSetBlob> _testClipsBlob;
 
-        private Entity bakedPrefabEntity;
-
-        private BlobAssetReference<SkeletonClipSetBlob> GetRealClipsBlob()
+        [SetUp]
+        public new void Setup()
         {
-            return AnimationStateTestUtils.GetClipsBlobFromBakedEntity(manager, bakedPrefabEntity);
+            base.Setup();
+            // Create test clips blob with valid duration
+            _testClipsBlob = AnimationStateTestUtils.CreateTestClipsBlob(3, TestClipDuration);
+        }
+
+        [TearDown]
+        public new void TearDown()
+        {
+            if (_testClipsBlob.IsCreated)
+                _testClipsBlob.Dispose();
+            base.TearDown();
         }
 
         [Test]
         public void UpdateSamplers()
         {
             var entity = CreateSingleClipStateEntity();
-            var clipsBlob = GetRealClipsBlob();
-            var singleClip = AnimationStateTestUtils.CreateSingleClipStateWithRealClips(manager, entity, clipsBlob);
+            var singleClip = AnimationStateTestUtils.CreateSingleClipStateWithRealClips(manager, entity, _testClipsBlob);
             AnimationStateTestUtils.SetCurrentState(manager, entity, singleClip.AnimationStateId);
 
             var sampler = ClipSamplerTestUtils.GetFirstSamplerForAnimationState(manager, entity, singleClip.AnimationStateId);
@@ -58,36 +65,35 @@ namespace DMotion.Tests
         [Test]
         public void LoopToClipTime()
         {
-             var entity = CreateSingleClipStateEntity();
-             var clipsBlob = GetRealClipsBlob();
-             var singleClip = AnimationStateTestUtils.CreateSingleClipStateWithRealClips(manager, entity, clipsBlob,
-                 speed: 1, loop: true);
-             AnimationStateTestUtils.SetCurrentState(manager, entity, singleClip.AnimationStateId);
+            var entity = CreateSingleClipStateEntity();
+            var singleClip = AnimationStateTestUtils.CreateSingleClipStateWithRealClips(manager, entity, _testClipsBlob,
+                speed: 1, loop: true);
+            AnimationStateTestUtils.SetCurrentState(manager, entity, singleClip.AnimationStateId);
 
-             UpdateWorld();
+            UpdateWorld();
 
-             var sampler = ClipSamplerTestUtils.GetFirstSamplerForAnimationState(manager, entity, singleClip.AnimationStateId);
-             Assert.Greater(sampler.Weight, 0);
-             Assert.Greater(sampler.Time, 0);
-             Assert.AreEqual(0, sampler.PreviousTime);
+            var sampler = ClipSamplerTestUtils.GetFirstSamplerForAnimationState(manager, entity, singleClip.AnimationStateId);
+            Assert.Greater(sampler.Weight, 0);
+            Assert.Greater(sampler.Time, 0);
+            Assert.AreEqual(0, sampler.PreviousTime);
 
-             var prevTime = sampler.Time;
+            var prevTime = sampler.Time;
 
-             UpdateWorld(sampler.Clip.duration - prevTime * 0.5f);
+            // Use TestClipDuration since we know the clip duration
+            UpdateWorld(TestClipDuration - prevTime * 0.5f);
 
-             sampler = ClipSamplerTestUtils.GetFirstSamplerForAnimationState(manager, entity, singleClip.AnimationStateId);
-             //clip time should have looped
-             Assert.Less(sampler.Time, prevTime);
-             Assert.AreEqual(prevTime, sampler.PreviousTime);
+            sampler = ClipSamplerTestUtils.GetFirstSamplerForAnimationState(manager, entity, singleClip.AnimationStateId);
+            // Clip time should have looped
+            Assert.Less(sampler.Time, prevTime);
+            Assert.AreEqual(prevTime, sampler.PreviousTime);
         }
 
         [Test]
         public void CleanupStates()
         {
             var entity = CreateSingleClipStateEntity();
-            var clipsBlob = GetRealClipsBlob();
-            var s1 = AnimationStateTestUtils.CreateSingleClipStateWithRealClips(manager, entity, clipsBlob);
-            var s2 = AnimationStateTestUtils.CreateSingleClipStateWithRealClips(manager, entity, clipsBlob);
+            var s1 = AnimationStateTestUtils.CreateSingleClipStateWithRealClips(manager, entity, _testClipsBlob);
+            var s2 = AnimationStateTestUtils.CreateSingleClipStateWithRealClips(manager, entity, _testClipsBlob);
             AnimationStateTestUtils.SetCurrentState(manager, entity, s1.AnimationStateId);
 
             var singleClips = manager.GetBuffer<SingleClipState>(entity);
@@ -102,13 +108,13 @@ namespace DMotion.Tests
 
             singleClips = manager.GetBuffer<SingleClipState>(entity);
             samplers = manager.GetBuffer<ClipSampler>(entity);
-            //We should still have both clips since we're transitioning
+            // We should still have both clips since we're transitioning
             Assert.AreEqual(2, singleClips.Length);
             Assert.AreEqual(2, samplers.Length);
 
             UpdateWorld(transitionDuration);
 
-            //Should have cleanup s1 after transition
+            // Should have cleanup s1 after transition
             singleClips = manager.GetBuffer<SingleClipState>(entity);
             samplers = manager.GetBuffer<ClipSampler>(entity);
             Assert.AreEqual(1, singleClips.Length);

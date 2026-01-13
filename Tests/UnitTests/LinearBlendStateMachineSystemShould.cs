@@ -1,33 +1,40 @@
-﻿using System.Linq;
+using System.Linq;
 using DMotion.Authoring;
 using Latios.Kinemation;
 using NUnit.Framework;
 using Unity.Entities;
-using UnityEngine;
 
 namespace DMotion.Tests
 {
     /// <summary>
     /// Tests for LinearBlend state machine system behavior.
-    /// Uses a baked test prefab to get real ACL-compressed clip data.
+    /// DISABLED: UpdateAnimationStatesSystem accesses SkeletonClip.compressedClipDataAligned16
+    /// which requires ACL-compressed data from SmartBlobber baking. BakingUtility.BakeGameObjects
+    /// doesn't invoke ICustomBakingBootstrap, so SmartBlobber systems don't run in tests.
     /// </summary>
-    // TODO: Re-enable after fixing test baking for Kinemation 0.14
-    [Ignore("Temporarily disabled - investigating test baking crash")]
+    [Ignore("Requires SmartBlobber-baked ACL clip data - not available in test context")]
     [CreateSystemsForTest(typeof(BlendAnimationStatesSystem), typeof(UpdateAnimationStatesSystem))]
     public class LinearBlendStateMachineSystemShould : ECSTestBase
     {
-        private const string TestPrefabPath = "Packages/com.gamedevpro.dmotion/Tests/Data/Armature_StressTest_LOD2 Variant 2.prefab";
+        private const float TestClipDuration = 1.0f;
+        private static readonly float[] Thresholds = { 0.0f, 0.5f, 0.8f };
 
-        [ConvertGameObjectPrefab(nameof(bakedPrefabEntity), TestPrefabPath)]
-        private GameObject testPrefab;
+        private BlobAssetReference<SkeletonClipSetBlob> _testClipsBlob;
 
-        private Entity bakedPrefabEntity;
-
-        private static readonly float[] thresholds = { 0.0f, 0.5f, 0.8f };
-
-        private BlobAssetReference<SkeletonClipSetBlob> GetRealClipsBlob()
+        [SetUp]
+        public new void Setup()
         {
-            return AnimationStateTestUtils.GetClipsBlobFromBakedEntity(manager, bakedPrefabEntity);
+            base.Setup();
+            // Create test clips blob with valid duration (3 clips for linear blend)
+            _testClipsBlob = AnimationStateTestUtils.CreateTestClipsBlob(3, TestClipDuration);
+        }
+
+        [TearDown]
+        public new void TearDown()
+        {
+            if (_testClipsBlob.IsCreated)
+                _testClipsBlob.Dispose();
+            base.TearDown();
         }
 
         [Test]
@@ -45,7 +52,7 @@ namespace DMotion.Tests
 
             var samplerIndexes = Enumerable.Range(startSamplerIndex, animationState.ClipCount).ToArray();
 
-            //Assert everything is zero
+            // Assert everything is zero
             var samplers = manager.GetBuffer<ClipSampler>(entity);
             foreach (var i in samplerIndexes)
             {
@@ -66,7 +73,6 @@ namespace DMotion.Tests
             }
         }
 
-
         [Test]
         public void BlendBetweenTwoClips()
         {
@@ -74,8 +80,8 @@ namespace DMotion.Tests
             var linearBlendState = AnimationStateTestUtils.CreateLinearBlendForStateMachine(0, manager, entity);
             AnimationStateTestUtils.SetCurrentState(manager, entity, linearBlendState.AnimationStateId);
 
-            //set our blend parameter after the first clip, but closer to the first clip
-            var blendParameterValue = thresholds[0] + (thresholds[1] - thresholds[0]) * 0.2f;
+            // Set our blend parameter after the first clip, but closer to the first clip
+            var blendParameterValue = Thresholds[0] + (Thresholds[1] - Thresholds[0]) * 0.2f;
             AnimationStateTestUtils.SetBlendParameter(linearBlendState, manager, entity, blendParameterValue);
 
             UpdateWorld();
@@ -83,21 +89,21 @@ namespace DMotion.Tests
             var allSamplers =
                 ClipSamplerTestUtils.GetAllSamplersForAnimationState(manager, entity,
                     linearBlendState.AnimationStateId).ToArray();
-            
+
             Assert.Greater(allSamplers[0].Weight, 0);
             Assert.Greater(allSamplers[1].Weight, 0);
             Assert.Zero(allSamplers[2].Weight);
-            //expect first clip weight to be greater since we are closer to it
+            // Expect first clip weight to be greater since we are closer to it
             Assert.Greater(allSamplers[0].Weight, allSamplers[1].Weight);
         }
-        
+
         [Test]
         public void Keep_WeightSum_EqualOne()
         {
             var entity = CreateLinearBlendEntity();
             var linearBlendState = AnimationStateTestUtils.CreateLinearBlendForStateMachine(0, manager, entity);
             AnimationStateTestUtils.SetCurrentState(manager, entity, linearBlendState.AnimationStateId);
-            AnimationStateTestUtils.SetBlendParameter(linearBlendState, manager, entity, thresholds[0] + 0.1f);
+            AnimationStateTestUtils.SetBlendParameter(linearBlendState, manager, entity, Thresholds[0] + 0.1f);
 
             UpdateWorld();
 
@@ -149,8 +155,9 @@ namespace DMotion.Tests
                 var samplers = manager.GetBuffer<ClipSampler>(entity);
                 var sampler = samplers[i];
 
-                //We need to set Time = duration to guarantee clip will loop on next frame
-                sampler.Time = sampler.Clip.duration;
+                // We need to set Time = duration to guarantee clip will loop on next frame
+                // Use TestClipDuration since we know the clip duration
+                sampler.Time = TestClipDuration;
                 sampler.PreviousTime = sampler.Time - 0.1f;
                 samplers[i] = sampler;
 
@@ -158,10 +165,10 @@ namespace DMotion.Tests
 
                 var updatedSamplers = manager.GetBuffer<ClipSampler>(entity);
                 var updatedSampler = updatedSamplers[i];
-                //Because previous Time = duration, previous time will loop to 0
+                // Because previous Time = duration, previous time will loop to 0
                 Assert.AreEqual(0, updatedSampler.PreviousTime);
                 Assert.Greater(updatedSampler.Time, updatedSampler.PreviousTime);
-                //clip time should have looped
+                // Clip time should have looped
                 Assert.Less(updatedSampler.Time, sampler.Time);
             }
         }
@@ -172,8 +179,7 @@ namespace DMotion.Tests
             var entity = CreateLinearBlendEntity();
             var linearBlendState = AnimationStateTestUtils.CreateLinearBlendForStateMachine(0, manager, entity);
             AnimationStateTestUtils.SetCurrentState(manager, entity, linearBlendState.AnimationStateId);
-            var clipsBlob = GetRealClipsBlob();
-            var anotherState = AnimationStateTestUtils.CreateSingleClipStateWithRealClips(manager, entity, clipsBlob);
+            var anotherState = AnimationStateTestUtils.CreateSingleClipStateWithRealClips(manager, entity, _testClipsBlob);
 
             var linearBlendStates = manager.GetBuffer<LinearBlendStateMachineState>(entity);
             Assert.AreEqual(1, linearBlendStates.Length);
@@ -185,12 +191,12 @@ namespace DMotion.Tests
             UpdateWorld();
 
             linearBlendStates = manager.GetBuffer<LinearBlendStateMachineState>(entity);
-            //We should still have both clips since we're transitioning
+            // We should still have both clips since we're transitioning
             Assert.AreEqual(1, linearBlendStates.Length);
 
             UpdateWorld(transitionDuration);
 
-            //Should have cleanup the linear blend state
+            // Should have cleanup the linear blend state
             linearBlendStates = manager.GetBuffer<LinearBlendStateMachineState>(entity);
             Assert.Zero(linearBlendStates.Length);
         }
@@ -201,11 +207,11 @@ namespace DMotion.Tests
             var linearBlendState = stateMachineBuilder.AddState<LinearBlendStateAsset>();
 
             linearBlendState.BlendParameter = stateMachineBuilder.AddParameter<FloatParameterAsset>("blend");
-            linearBlendState.BlendClips = new []
+            linearBlendState.BlendClips = new[]
             {
-                new ClipWithThreshold { Clip = null, Speed = 1, Threshold = thresholds[0] },
-                new ClipWithThreshold { Clip = null, Speed = 1, Threshold = thresholds[1] },
-                new ClipWithThreshold { Clip = null, Speed = 1, Threshold = thresholds[2] }
+                new ClipWithThreshold { Clip = null, Speed = 1, Threshold = Thresholds[0] },
+                new ClipWithThreshold { Clip = null, Speed = 1, Threshold = Thresholds[1] },
+                new ClipWithThreshold { Clip = null, Speed = 1, Threshold = Thresholds[2] }
             };
 
             var stateMachineAsset = stateMachineBuilder.Build();
@@ -213,10 +219,8 @@ namespace DMotion.Tests
             var stateMachineBlob =
                 AnimationStateMachineConversionUtils.CreateStateMachineBlob(stateMachineAsset);
 
-            // Use real baked clips from test prefab instead of fake clips
-            var clipsBlob = GetRealClipsBlob();
-
-            var entity = manager.CreateStateMachineEntity(stateMachineAsset, stateMachineBlob, clipsBlob, BlobAssetReference<ClipEventsBlob>.Null);
+            var entity = manager.CreateStateMachineEntity(stateMachineAsset, stateMachineBlob, _testClipsBlob,
+                BlobAssetReference<ClipEventsBlob>.Null);
 
             Assert.IsTrue(manager.HasComponent<LinearBlendStateMachineState>(entity));
             Assert.IsTrue(manager.HasComponent<FloatParameter>(entity));

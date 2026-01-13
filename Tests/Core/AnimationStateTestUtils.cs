@@ -301,5 +301,44 @@ namespace DMotion.Tests
 
             return builder.CreateBlobAssetReference<SkeletonClipSetBlob>(Allocator.Temp);
         }
+
+        /// <summary>
+        /// Creates a SkeletonClipSetBlob with valid duration/sampleRate values using TestResources.
+        /// Unlike CreateFakeSkeletonClipSetBlob, this creates clips with proper timing metadata
+        /// that can be used for tests that access clip.duration.
+        ///
+        /// Note: The clips still don't have valid ACL animation data, so actual sampling won't work.
+        /// But timing-based operations (looping, duration checks) will work correctly.
+        /// </summary>
+        /// <param name="clipCount">Number of clips to create</param>
+        /// <param name="clipDuration">Duration for each clip (default 1.0f)</param>
+        /// <returns>Blob asset reference - caller must dispose</returns>
+        internal static BlobAssetReference<SkeletonClipSetBlob> CreateTestClipsBlob(int clipCount = 1, float clipDuration = 1.0f)
+        {
+            var resources = TestResources.Instance;
+            if (resources != null)
+            {
+                return resources.CreateTestClipsBlob(clipCount);
+            }
+
+            // Fallback: use static method that doesn't require asset instance
+            return TestResources.CreateTestClipsBlobStatic(clipCount, clipDuration);
+        }
+
+        /// <summary>
+        /// Creates a SkeletonClipSetBlob with specified durations for each clip.
+        /// </summary>
+        internal static BlobAssetReference<SkeletonClipSetBlob> CreateTestClipsBlobWithDurations(float[] durations)
+        {
+            var resources = TestResources.Instance;
+            if (resources != null)
+            {
+                return resources.CreateTestClipsBlob(durations);
+            }
+
+            // Fallback: use static method with first duration value (or 1.0f if empty)
+            var duration = durations.Length > 0 ? durations[0] : 1.0f;
+            return TestResources.CreateTestClipsBlobStatic(durations.Length, duration);
+        }
     }
 }

@@ -16,6 +16,11 @@ desktop.ini
 *.swp
 *~
 tmpclaude-*
+tmpclaude-*.meta
+nul
+nul.meta
+NUL
+NUL.meta
 
 # Unity
 [Ll]ibrary/
@@ -74,3 +79,5 @@ consolelog.txt*
 # Local Samples junction (points to Samples~)
 /Samples/
 /Samples.meta
+
+.pre-commit-approved*

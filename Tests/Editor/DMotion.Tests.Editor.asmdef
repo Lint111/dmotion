@@ -1,0 +1,21 @@
+{
+    "name": "DMotion.Tests.Editor",
+    "rootNamespace": "DMotion.Tests",
+    "references": [
+        "GUID:c39b61f68344c5e46ad36a286c992104",
+        "GUID:296ad15515401a94e93f996fe4ead36a"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

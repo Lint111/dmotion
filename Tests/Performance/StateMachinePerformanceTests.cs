@@ -10,8 +10,13 @@ using UnityEngine.TestTools;
 
 namespace DMotion.PerformanceTests
 {
-    // TODO: Re-enable after fixing test baking for Kinemation 0.14
-    [Ignore("Temporarily disabled - investigating test baking crash")]
+    // NOTE: Performance tests require real SmartBlobber-baked prefabs for meaningful benchmarks.
+    // Unlike unit tests (which use TestResources for fake timing data), performance tests need:
+    // - Real ACL-compressed animation data for accurate decompression timing
+    // - Full component setup from baked prefabs
+    // BakingUtility.BakeGameObjects doesn't invoke ICustomBakingBootstrap, so SmartBlobber
+    // systems don't run. This requires a different solution (pre-baked assets or editor-only baking).
+    [Ignore("Requires SmartBlobber baking - not supported in test context")]
     [CreateSystemsForTest(
         typeof(AnimationStateMachineSystem),
         typeof(PlayOneShotSystem),

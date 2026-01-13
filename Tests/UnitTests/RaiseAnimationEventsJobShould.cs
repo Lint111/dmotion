@@ -1,4 +1,4 @@
-﻿using DMotion.Authoring;
+using DMotion.Authoring;
 using Latios.Kinemation;
 using NUnit.Framework;
 using Unity.Collections;
@@ -11,19 +11,25 @@ namespace DMotion.Tests
     [CreateSystemsForTest(typeof(AnimationEventsSystem))]
     public class RaiseAnimationEventsJobShould : ECSTestBase
     {
-        // Prefab loading disabled until baking crash is fixed
-        // private const string TestPrefabPath = "Packages/com.gamedevpro.dmotion/Tests/Data/Armature_StressTest_LOD2 Variant 2.prefab";
-        // [ConvertGameObjectPrefab(nameof(bakedPrefabEntity), TestPrefabPath)]
-        // private GameObject testPrefab;
-        // private Entity bakedPrefabEntity;
-
+        private const float TestClipDuration = 1.0f;
         private float[] eventTimes = new[] { 0.2f, 0.5f };
 
-        private BlobAssetReference<SkeletonClipSetBlob> GetRealClipsBlob()
+        private BlobAssetReference<SkeletonClipSetBlob> _testClipsBlob;
+
+        [SetUp]
+        public new void Setup()
         {
-            // TODO: Re-enable when baking is fixed
-            // return AnimationStateTestUtils.GetClipsBlobFromBakedEntity(manager, bakedPrefabEntity);
-            throw new System.NotImplementedException("Test baking disabled");
+            base.Setup();
+            // Create test clips blob with valid duration
+            _testClipsBlob = AnimationStateTestUtils.CreateTestClipsBlob(1, TestClipDuration);
+        }
+
+        [TearDown]
+        public new void TearDown()
+        {
+            if (_testClipsBlob.IsCreated)
+                _testClipsBlob.Dispose();
+            base.TearDown();
         }
 
         [Test]
@@ -84,7 +90,7 @@ namespace DMotion.Tests
         }
 
         [Test(Description =
-            "Events should not be raised when EventTime == Previous Time since they will have already be raised in the previous frameb, when Event Time == Current Time")]
+            "Events should not be raised when EventTime == Previous Time since they will have already be raised in the previous frame, when Event Time == Current Time")]
         public void NotRaise_When_EventTime_Equals_PreviousTime()
         {
             CreateEntityWithClipPlaying(out var newEntity, out var samplerIndex, out var events);
@@ -102,25 +108,26 @@ namespace DMotion.Tests
             AssertNoRaisedEvents(newEntity);
         }
 
+        // DISABLED: This test triggers the looping code path in RaiseAnimationEventsJob which accesses
+        // sampler.Clip.duration. SkeletonClip.duration requires valid ACL compressed data from SmartBlobber.
+        [Ignore("Accesses SkeletonClip.duration which requires SmartBlobber-baked ACL data")]
         [Test(Description = "For when the clip loops. Ex: EventTime = 0.1f, Previous Time = 0.9f, Time = 0.2f")]
-        [Ignore("Temporarily disabled - investigating test baking crash")]
         public void Raise_When_EventTime_BetweenCurrentAndPreviousTime()
         {
-            // Use real baked clips for this test since it accesses clip.duration
-            CreateEntityWithClipPlayingRealClips(out var newEntity, out var samplerIndex, out var events);
+            // Use test clips blob with known duration
+            CreateEntityWithClipPlayingTestClips(out var newEntity, out var samplerIndex, out var events);
             UpdateWorld();
 
             AssertNoRaisedEvents(newEntity);
 
             var eventToRaise = events[0];
-            var sampler = manager.GetBuffer<ClipSampler>(newEntity);
-            ref var clip = ref sampler[samplerIndex].Clip;
 
-            var prevTime = clip.duration - math.EPSILON;
+            // Use TestClipDuration since we know the clip duration
+            var prevTime = TestClipDuration - math.EPSILON;
             var time = eventToRaise.ClipTime + math.EPSILON;
             Assert.Greater(prevTime, time,
-                "This test expect Previous time is greater than Clip Time (clip loops). Something is wrong with the test setup, or the event time");
-            Assert.Less(time, clip.duration,
+                "This test expects Previous time is greater than Clip Time (clip loops). Something is wrong with the test setup, or the event time");
+            Assert.Less(time, TestClipDuration,
                 "Event is too near the end of the clip. Please test an event that is close to the beginning of the clip");
             SetTimeAndPreviousTimeForSampler(newEntity, samplerIndex, prevTime, time);
 
@@ -135,7 +142,7 @@ namespace DMotion.Tests
             AnimationStateMachineConversionUtils.AddSingleClipStateComponents(manager, entity, entity,
                 true, false, RootMotionMode.Disabled);
 
-            //create fake animation clip asset
+            // Create fake animation clip asset
             var animationClipAsset = ScriptableObject.CreateInstance<AnimationClipAsset>();
             {
                 var animationEventName1 = ScriptableObject.CreateInstance<AnimationEventName>();
@@ -177,9 +184,9 @@ namespace DMotion.Tests
         }
 
         /// <summary>
-        /// Creates entity with real baked clips for tests that need to access clip.duration or sample clips.
+        /// Creates entity with test clips blob for tests that need to access clip duration.
         /// </summary>
-        private void CreateEntityWithClipPlayingRealClips(out Entity entity, out int samplerIndex,
+        private void CreateEntityWithClipPlayingTestClips(out Entity entity, out int samplerIndex,
             out AnimationClipEvent[] events)
         {
             entity = manager.CreateEntity();
@@ -214,9 +221,9 @@ namespace DMotion.Tests
             Assert.AreEqual(2, clipEventsBlob.Value.ClipEvents[0].Events.Length);
             events = clipEventsBlob.Value.ClipEvents[0].Events.ToArray();
 
-            // Use real baked clips from test prefab
-            var clipsBlob = GetRealClipsBlob();
-            var singleState = AnimationStateTestUtils.CreateSingleClipStateWithRealClips(manager, entity, clipsBlob, clipEventsBlob);
+            // Use test clips blob with known duration
+            var singleState = AnimationStateTestUtils.CreateSingleClipStateWithRealClips(manager, entity,
+                _testClipsBlob, clipEventsBlob);
             AnimationStateTestUtils.SetCurrentState(manager, entity, singleState.AnimationStateId);
 
             var samplers = manager.GetBuffer<ClipSampler>(entity);
