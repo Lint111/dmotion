@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using DMotion.Authoring;
@@ -70,6 +70,11 @@ namespace DMotion.Editor
         public override int GetHashCode()
         {
             return ClassName.GetHashCode();
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is AnimationStateStyle other && ClassName == other.ClassName;
         }
 
         public static bool operator ==(AnimationStateStyle left, AnimationStateStyle right)

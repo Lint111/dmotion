@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using DMotion.Authoring;
@@ -33,11 +33,9 @@ namespace DMotion.Editor
         }
     }
 
-    public class AnimationStateMachineEditorView : GraphView
+    [UxmlElement]
+    public partial class AnimationStateMachineEditorView : GraphView
     {
-        public new class UxmlFactory : UxmlFactory<AnimationStateMachineEditorView, UxmlTraits>
-        {
-        }
 
         private StateMachineEditorViewModel model;
 

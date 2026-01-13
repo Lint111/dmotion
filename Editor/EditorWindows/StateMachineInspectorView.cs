@@ -1,4 +1,4 @@
-﻿using UnityEditor;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
 using Object = UnityEngine.Object;
@@ -11,11 +11,9 @@ namespace DMotion.Editor
         internal void SetModel(T model);
     }
 
-    internal class StateMachineInspectorView : VisualElement
+    [UxmlElement]
+    internal partial class StateMachineInspectorView : VisualElement
     {
-        public new class UxmlFactory : UxmlFactory<StateMachineInspectorView, UxmlTraits>
-        {
-        }
 
         private UnityEditor.Editor editor;
         private Vector2 scrollPos;
