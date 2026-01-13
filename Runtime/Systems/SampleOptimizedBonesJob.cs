@@ -1,4 +1,4 @@
-﻿using Latios.Kinemation;
+using Latios.Kinemation;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
@@ -23,7 +23,7 @@ namespace DMotion
             for (byte i = 0; i < samplers.Length; i++)
             {
                 var sampler = samplers[i];
-                if (!mathex.iszero(sampler.Weight))
+                if (!mathex.iszero(sampler.Weight) && sampler.Clips.IsCreated)
                 {
                     activeSamplerCount++;
                     sampler.Clip.SamplePose(ref skeleton, sampler.Time, sampler.Weight);

@@ -20,6 +20,12 @@ namespace DMotion
                 {
                     continue;
                 }
+
+                // Skip if blobs are not valid (can happen during teardown)
+                if (!sampler.ClipEventsBlob.IsCreated || !sampler.Clips.IsCreated)
+                {
+                    continue;
+                }
                 
                 var clipIndex = sampler.ClipIndex;
                 var previousSamplerTime = sampler.PreviousTime;

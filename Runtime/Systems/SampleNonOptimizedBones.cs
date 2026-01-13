@@ -1,4 +1,4 @@
-﻿using Latios.Kinemation;
+using Latios.Kinemation;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
@@ -31,6 +31,13 @@ namespace DMotion
         )
         {
             using var scope = Marker.Auto();
+            
+            // Check if skeleton root still exists and has samplers
+            if (!BfeClipSampler.HasBuffer(skeletonRef.skeletonRoot))
+            {
+                return;
+            }
+            
             var samplers = BfeClipSampler[skeletonRef.skeletonRoot];
 
             if (samplers.Length > 0 && TryFindFirstActiveSamplerIndex(samplers, out var firstSamplerIndex))
@@ -44,7 +51,7 @@ namespace DMotion
                 for (var i = firstSamplerIndex + 1; i < samplers.Length; i++)
                 {
                     var sampler = samplers[i];
-                    if (!mathex.iszero(sampler.Weight))
+                    if (!mathex.iszero(sampler.Weight) && sampler.Clips.IsCreated)
                     {
                         ClipSamplingUtils.SampleWeightedNIndex(
                             ref bone, boneIndex.index, ref sampler.Clip,
@@ -73,7 +80,9 @@ namespace DMotion
         {
             for (byte i = 0; i < samplers.Length; i++)
             {
-                if (!mathex.iszero(samplers[i].Weight))
+                var sampler = samplers[i];
+                // Check both weight and that clips blob is valid
+                if (!mathex.iszero(sampler.Weight) && sampler.Clips.IsCreated)
                 {
                     samplerIndex = i;
                     return true;

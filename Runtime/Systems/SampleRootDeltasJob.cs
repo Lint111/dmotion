@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using Latios.Kinemation;
 using Unity.Burst;
 using Unity.Entities;
@@ -58,7 +58,8 @@ namespace DMotion
         private static bool ShouldIncludeSampler(in ClipSampler sampler)
         {
             //Since we're calculating deltas, we need to avoid the loop point (the character would teleport back to the initial root position)
-            return !mathex.iszero(sampler.Weight) && sampler.Time - sampler.PreviousTime > 0;
+            // Also check that clips blob is valid (can be invalid during teardown)
+            return !mathex.iszero(sampler.Weight) && sampler.Clips.IsCreated && sampler.Time - sampler.PreviousTime > 0;
         }
 
         private static bool TryGetFirstSamplerIndex(in DynamicBuffer<ClipSampler> samplers, out byte startIndex)

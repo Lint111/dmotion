@@ -1,7 +1,9 @@
+using System;
 using System.Collections;
 using DMotion.PerformanceTests;
 using Latios.Kinemation;
 using NUnit.Framework;
+using Unity.Burst;
 using Unity.Collections;
 using Unity.Core;
 using Unity.Entities;
@@ -92,6 +94,10 @@ namespace DMotion.Tests
 
             elapsedTime = Time.time;
 
+            // Warmup phase: trigger Burst compilation before measurements
+            // This ensures synchronous compilation happens during setup, not during test
+            yield return WarmupBurstCompilation();
+
             // Allow subclass setup
             yield return OnSetUp();
         }
@@ -160,6 +166,71 @@ namespace DMotion.Tests
         }
 
         /// <summary>
+        /// Warmup phase to trigger Burst compilation before measurements.
+        /// Uses async compilation during warmup to prevent editor freeze,
+        /// then enables sync compilation for accurate measurements.
+        /// </summary>
+        private IEnumerator WarmupBurstCompilation()
+        {
+            if (stressTestPrefabEntity == Entity.Null || SystemTypes.Length == 0)
+            {
+                yield break;
+            }
+
+            Debug.Log("[PerformanceIntegrationTestBase] Starting Burst warmup phase (async compilation)...");
+
+            // Temporarily disable synchronous compilation during warmup
+            // This prevents editor freeze while Burst compiles in background
+            var wasSyncCompilation = BurstCompiler.Options.EnableBurstCompileSynchronously;
+            BurstCompiler.Options.EnableBurstCompileSynchronously = false;
+
+            // Instantiate a small number of entities to trigger all code paths
+            const int warmupEntityCount = 10;
+            var ecb = new EntityCommandBuffer(Allocator.Temp);
+            for (int i = 0; i < warmupEntityCount; i++)
+            {
+                ecb.Instantiate(stressTestPrefabEntity);
+            }
+            ecb.Playback(manager);
+            ecb.Dispose();
+
+            // Run several update cycles to trigger Burst compilation (async)
+            // More frames to give Burst time to compile in background
+            const int warmupFrames = 30;
+            for (int i = 0; i < warmupFrames; i++)
+            {
+                UpdateWorld();
+                yield return null;
+                
+                // Log progress every 10 frames
+                if ((i + 1) % 10 == 0)
+                {
+                    Debug.Log($"[PerformanceIntegrationTestBase] Warmup frame {i + 1}/{warmupFrames}");
+                }
+            }
+
+            // Clean up warmup entities - but NOT the template entity we need for actual tests
+            var query = manager.CreateEntityQuery(
+                ComponentType.ReadOnly<DMotion.PerformanceTests.StressTestOneShotClip>(),
+                ComponentType.Exclude<Prefab>());
+            var warmupEntities = query.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < warmupEntities.Length; i++)
+            {
+                // Don't destroy our template entity - we need it for the actual test
+                if (warmupEntities[i] != stressTestPrefabEntity)
+                {
+                    manager.DestroyEntity(warmupEntities[i]);
+                }
+            }
+            warmupEntities.Dispose();
+
+            // Restore synchronous compilation for accurate measurements
+            BurstCompiler.Options.EnableBurstCompileSynchronously = wasSyncCompilation;
+
+            Debug.Log("[PerformanceIntegrationTestBase] Burst warmup complete.");
+        }
+
+        /// <summary>
         /// Override for additional setup after scene load.
         /// </summary>
         protected virtual IEnumerator OnSetUp()
@@ -173,6 +244,29 @@ namespace DMotion.Tests
             // Allow subclass teardown
             yield return OnTearDown();
 
+            // Complete all jobs before cleanup to avoid race conditions
+            if (manager.World != null && manager.World.IsCreated)
+            {
+                manager.CompleteAllTrackedJobs();
+            }
+
+            // Destroy all instantiated stress test entities (non-prefabs)
+            if (manager.World != null && manager.World.IsCreated)
+            {
+                var query = manager.CreateEntityQuery(
+                    ComponentType.ReadOnly<DMotion.PerformanceTests.StressTestOneShotClip>(),
+                    ComponentType.Exclude<Prefab>());
+                var entitiesToDestroy = query.ToEntityArray(Allocator.Temp);
+                if (entitiesToDestroy.Length > 0)
+                {
+                    manager.DestroyEntity(entitiesToDestroy);
+                }
+                entitiesToDestroy.Dispose();
+                
+                // Complete jobs again after entity destruction
+                manager.CompleteAllTrackedJobs();
+            }
+
             // Clean up tracked blobs and entities
             tracker.Cleanup(manager);
 
@@ -184,6 +278,12 @@ namespace DMotion.Tests
 
             // Restore Burst settings
             burstCache.SetCachedValues();
+
+            // Let the world stabilize for a few frames before unloading
+            for (int i = 0; i < 5; i++)
+            {
+                yield return null;
+            }
 
             // Unload test scene
             yield return PrebakedTestHelper.UnloadTestScene();
@@ -246,26 +346,11 @@ namespace DMotion.Tests
                 return;
             }
 
-            // Check if it's a prefab or a regular entity
-            bool isPrefab = manager.HasComponent<Prefab>(stressTestPrefabEntity);
-
             var ecb = new EntityCommandBuffer(Allocator.Temp);
 
-            if (isPrefab)
+            for (int i = 0; i < count; i++)
             {
-                // Instantiate directly from prefab
-                for (int i = 0; i < count; i++)
-                {
-                    var newEntity = ecb.Instantiate(stressTestPrefabEntity);
-                }
-            }
-            else
-            {
-                // Copy entity (for non-prefab templates)
-                for (int i = 0; i < count; i++)
-                {
-                    var newEntity = ecb.Instantiate(stressTestPrefabEntity);
-                }
+                ecb.Instantiate(stressTestPrefabEntity);
             }
 
             ecb.Playback(manager);
