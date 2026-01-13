@@ -43,7 +43,11 @@ namespace DMotion.PerformanceTests
         {
             //Jobs
             JobsUtility.JobCompilerEnabled = prevJobCompilerEnabled;
-            NativeLeakDetection.Mode = prevLeakDetectionMode;
+            // Validate NativeLeakDetectionMode before setting - enum range may differ between Unity versions
+            if ((int)prevLeakDetectionMode >= 0 && (int)prevLeakDetectionMode <= 2)
+            {
+                NativeLeakDetection.Mode = prevLeakDetectionMode;
+            }
             
             //engine optimziation
             CompilationPipeline.codeOptimization = prevEngineCodeOptimization;

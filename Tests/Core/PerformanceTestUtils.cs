@@ -69,7 +69,7 @@ namespace DMotion.Tests
             
             Assert.Greater(PerformanceTest.Active.SampleGroups.Count, 0, "Not Sample groups found to benchmark against");
             var sampleGroup = PerformanceTest.Active.SampleGroups[0];
-            sampleGroup.UpdateStatistics();
+            // Statistics are calculated automatically in newer Performance Testing package
             AssertTestResult(nameof(benchmark.Median), benchmark.Median, sampleGroup.Median);
             AssertTestResult(nameof(benchmark.Min), benchmark.Min, sampleGroup.Min);
             AssertTestResult(nameof(benchmark.Max), benchmark.Max, sampleGroup.Max);

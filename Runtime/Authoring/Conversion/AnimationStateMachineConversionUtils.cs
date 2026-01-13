@@ -13,7 +13,15 @@ namespace DMotion.Authoring
     {
         public static BlobAssetReference<StateMachineBlob> CreateStateMachineBlob(StateMachineAsset stateMachineAsset)
         {
-            return CreateConverter(stateMachineAsset).BuildBlob();
+            var converter = CreateConverter(stateMachineAsset);
+            try
+            {
+                return converter.BuildBlob();
+            }
+            finally
+            {
+                converter.Dispose();
+            }
         }
 
         internal static StateMachineBlobConverter CreateConverter(StateMachineAsset stateMachineAsset)

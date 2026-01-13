@@ -5,11 +5,12 @@ using Unity.Collections;
 using Unity.Core;
 using Unity.Entities;
 using UnityEngine;
-using UnityEngine.TestTools;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace DMotion.Tests
 {
-    [RequiresPlayMode(false)]
     public abstract class ECSTestBase : ECSTestsFixture
     {
         protected const float defaultDeltaTime = 1.0f / 60.0f;
@@ -40,47 +41,97 @@ namespace DMotion.Tests
                 }
             }
 
-            // //Convert entity prefabs
+            // Convert entity prefabs
             {
                 var bindingFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-                var convertPrefabField = GetType()
+                var convertPrefabFields = GetType()
                     .GetFields(bindingFlags)
                     .Where(f => f.GetCustomAttribute<ConvertGameObjectPrefab>() != null).ToArray();
-                var createdEntities = new NativeArray<Entity>(convertPrefabField.Length, Allocator.Temp);
+
+                if (convertPrefabFields.Length == 0)
+                    return;
+
+                var createdEntities = new NativeArray<Entity>(convertPrefabFields.Length, Allocator.Temp);
 
                 blobAssetStore = new BlobAssetStore(128);
                 var conversionWorld = new World("Test Conversion World");
 
-                //instantiate all entities in a conversion word
-                for (var i = 0; i < convertPrefabField.Length; i++)
+                // Load and convert all prefabs
+                for (var i = 0; i < convertPrefabFields.Length; i++)
                 {
-                    var f = convertPrefabField[i];
-                    var value = f.GetValue(this);
-                    Assert.IsNotNull(value);
+                    var f = convertPrefabFields[i];
+                    var attr = f.GetCustomAttribute<ConvertGameObjectPrefab>();
+
                     GameObject go = null;
-                    if (value is GameObject g)
+
+#if UNITY_EDITOR
+                    // If asset path is specified, load via AssetDatabase
+                    if (!string.IsNullOrEmpty(attr.AssetPath))
                     {
-                        go = g;
+                        var loadedAsset = AssetDatabase.LoadAssetAtPath<GameObject>(attr.AssetPath);
+                        if (loadedAsset == null)
+                        {
+                            Debug.LogError($"[ECSTestBase] Failed to load prefab from path: {attr.AssetPath}");
+                            Assert.Fail($"Failed to load prefab from path: {attr.AssetPath}");
+                            return;
+                        }
+                        go = loadedAsset;
                     }
-                    else if (value is MonoBehaviour mono)
+                    else
+#endif
                     {
-                        go = mono.gameObject;
+                        // Legacy behavior: use pre-assigned field value
+                        var value = f.GetValue(this);
+                        if (value == null)
+                        {
+                            Debug.LogError($"[ECSTestBase] Field {f.Name} has no AssetPath and no pre-assigned value");
+                            Assert.Fail($"Field {f.Name} has no AssetPath and no pre-assigned value");
+                            return;
+                        }
+
+                        if (value is GameObject g)
+                            go = g;
+                        else if (value is MonoBehaviour mono)
+                            go = mono.gameObject;
                     }
 
-                    Assert.IsNotNull(go);
+                    if (go == null)
+                    {
+                        Debug.LogError($"[ECSTestBase] Could not get GameObject for field {f.Name}");
+                        Assert.Fail($"Could not get GameObject for field {f.Name}");
+                        return;
+                    }
 
-                    var entity = BakingTestUtils.ConvertGameObject(conversionWorld, go, blobAssetStore);
-                    Assert.AreNotEqual(entity, Entity.Null);
+                    Debug.Log($"[ECSTestBase] Baking prefab: {go.name}");
+
+                    Entity entity;
+                    try
+                    {
+                        entity = BakingTestUtils.ConvertGameObject(conversionWorld, go, blobAssetStore);
+                    }
+                    catch (System.Exception ex)
+                    {
+                        Debug.LogError($"[ECSTestBase] Exception during baking {go.name}: {ex}");
+                        throw;
+                    }
+
+                    if (entity == Entity.Null)
+                    {
+                        Debug.LogError($"[ECSTestBase] Failed to convert prefab {go.name} to Entity");
+                        Assert.Fail($"Failed to convert prefab {go.name} to Entity");
+                        return;
+                    }
                     createdEntities[i] = entity;
                 }
 
-                //copy entities from conversionWorld to testWorld
+                // Copy entities from conversionWorld to testWorld
                 var outputEntities = new NativeArray<Entity>(createdEntities.Length, Allocator.Temp);
                 manager.CopyEntitiesFrom(conversionWorld.EntityManager, createdEntities, outputEntities);
 
-                for (var i = 0; i < convertPrefabField.Length; i++)
+                // Assign converted entities to target fields
+                for (var i = 0; i < convertPrefabFields.Length; i++)
                 {
-                    var f = convertPrefabField[i];
+                    var f = convertPrefabFields[i];
                     var entity = outputEntities[i];
                     var attr = f.GetCustomAttribute<ConvertGameObjectPrefab>();
                     var receiveField = GetType().GetField(attr.ToFieldName, bindingFlags);

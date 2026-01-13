@@ -213,6 +213,31 @@ namespace DMotion.Tests
             );
         }
 
+        /// <summary>
+        /// Creates a SingleClipState using a real baked clips blob.
+        /// Use this for tests that need to access clip data (duration, sampling).
+        /// </summary>
+        internal static SingleClipState CreateSingleClipStateWithRealClips(EntityManager manager, Entity entity,
+            BlobAssetReference<SkeletonClipSetBlob> clipsBlob,
+            BlobAssetReference<ClipEventsBlob> clipEvents = default,
+            float speed = 1.0f,
+            bool loop = false,
+            ushort clipIndex = 0)
+        {
+            var singleClips = manager.GetBuffer<SingleClipState>(entity);
+            var animationStates = manager.GetBuffer<AnimationState>(entity);
+            var samplers = manager.GetBuffer<ClipSampler>(entity);
+
+            return SingleClipStateUtils.New(
+                clipIndex, speed, loop,
+                clipsBlob,
+                clipEvents,
+                ref singleClips,
+                ref animationStates,
+                ref samplers
+            );
+        }
+
         internal static SingleClipState CreateSingleClipState(EntityManager manager, Entity entity,
             float speed = 1.0f,
             bool loop = false,
@@ -222,6 +247,39 @@ namespace DMotion.Tests
                 clipIndex);
         }
 
+        /// <summary>
+        /// Extracts the SkeletonClipSetBlob from a baked entity that has AnimationStateMachine component.
+        /// Useful for tests that need real baked clip data.
+        /// </summary>
+        internal static BlobAssetReference<SkeletonClipSetBlob> GetClipsBlobFromBakedEntity(EntityManager manager, Entity bakedEntity)
+        {
+            Assert.IsTrue(manager.HasComponent<AnimationStateMachine>(bakedEntity),
+                "Entity must have AnimationStateMachine component (from baked prefab)");
+            var stateMachine = manager.GetComponentData<AnimationStateMachine>(bakedEntity);
+            return stateMachine.ClipsBlob;
+        }
+
+        /// <summary>
+        /// Creates a fake SkeletonClipSetBlob for testing purposes.
+        ///
+        /// WARNING: These fake clips do NOT contain valid ACL compressed data!
+        /// Kinemation 0.14+ uses ACL compression which requires properly baked clip data.
+        /// Any operation that accesses clip duration or samples the clip will fail with:
+        /// "ACL alignment error (compressedClip not aligned to 16 byte boundary)"
+        ///
+        /// Use cases that work:
+        /// - Testing state machine logic that doesn't access clip data
+        /// - Testing buffer operations (add/remove samplers, states)
+        /// - Testing transition logic
+        ///
+        /// Use cases that DON'T work:
+        /// - Tests that use UpdateAnimationStatesSystem (calls LoopToClipTime)
+        /// - Tests that access sampler.Clip.duration
+        /// - Actual animation sampling/blending
+        ///
+        /// For tests requiring real clip data, use ConvertGameObjectPrefab with
+        /// properly baked test prefabs (like performance tests do).
+        /// </summary>
         internal static BlobAssetReference<SkeletonClipSetBlob> CreateFakeSkeletonClipSetBlob(int clipCount)
         {
             Assert.Greater(clipCount, 0);
@@ -231,13 +289,14 @@ namespace DMotion.Tests
             var blobClips = builder.Allocate(ref root.clips, clipCount);
             for (int i = 0; i < clipCount; i++)
             {
-                blobClips[i] = new SkeletonClip()
+                // SkeletonClip properties are read-only in newer Kinemation
+                // Use unsafe pointer cast to write directly to blob memory
+                unsafe
                 {
-                    duration = 1,
-                    sampleRate = 1,
-                    boneCount = 1,
-                    name = $"Dummy Clip {i}"
-                };
+                    var clipPtr = (SkeletonClip*)Unity.Collections.LowLevel.Unsafe.UnsafeUtility.AddressOf(ref blobClips[i]);
+                    *clipPtr = default;
+                }
+                // Note: Fake clips with default values - actual clip data requires proper Kinemation baking
             }
 
             return builder.CreateBlobAssetReference<SkeletonClipSetBlob>(Allocator.Temp);

@@ -10,7 +10,15 @@ namespace DMotion.Authoring
     {
         public static BlobAssetReference<ClipEventsBlob> CreateClipEventsBlob(AnimationClipAsset[] clips)
         {
-            return CreateConverter(clips).BuildBlob();
+            var converter = CreateConverter(clips);
+            try
+            {
+                return converter.BuildBlob();
+            }
+            finally
+            {
+                converter.Dispose();
+            }
         }
         
         internal static ClipEventsBlobConverter CreateConverter(AnimationClipAsset[] clips)

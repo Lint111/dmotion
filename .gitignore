@@ -69,3 +69,8 @@ packages/
 # Logs
 *.log
 log.txt
+consolelog.txt*
+
+# Local Samples junction (points to Samples~)
+/Samples/
+/Samples.meta
