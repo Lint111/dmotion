@@ -109,7 +109,7 @@ namespace DMotion.Tests
         }
 
         [UnityTest]
-        public IEnumerator SetTransitionRequest_WhenStartingOneShot()
+        public IEnumerator StartTransition_WhenStartingOneShot()
         {
             yield return null;
 
@@ -126,14 +126,17 @@ namespace DMotion.Tests
 
             UpdateWorld();
 
-            // Verify: Transition was requested to the one-shot state
-            var transitionRequest = manager.GetComponentData<AnimationStateTransitionRequest>(entity);
-            Assert.IsTrue(transitionRequest.IsValid, "Transition should be requested");
-            Assert.AreEqual(transitionDuration, transitionRequest.TransitionDuration, 0.001f);
-
-            // Verify: Transition targets the one-shot animation state
+            // After UpdateWorld, BlendAnimationStatesSystem has consumed the request
+            // and started an ongoing transition. Verify the transition is active.
             var oneShotState = manager.GetComponentData<OneShotState>(entity);
-            Assert.AreEqual(transitionRequest.AnimationStateId, oneShotState.AnimationStateId);
+            Assert.IsTrue(oneShotState.IsValid, "OneShotState should be valid");
+
+            // Verify: Transition is ongoing to the one-shot state
+            AnimationStateTestUtils.AssertOnGoingTransition(manager, entity, (byte)oneShotState.AnimationStateId);
+
+            // Verify: Transition duration is correct
+            var transition = manager.GetComponentData<AnimationStateTransition>(entity);
+            Assert.AreEqual(transitionDuration, transition.TransitionDuration, 0.001f);
         }
 
         [UnityTest]
