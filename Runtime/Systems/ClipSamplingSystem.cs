@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using Unity.Burst;
 using Unity.Entities;
 using Unity.Jobs;
@@ -95,33 +95,39 @@ namespace DMotion
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void OnUpdate_Safe(ref SystemState state)
         {
-            new SampleOptimizedBonesJob
+            // Use same dependency management as OnUpdate_Unsafe for consistency
+            // This ensures proper job ordering even with JobDebugger enabled
+            var sampleOptimizedHandle = new SampleOptimizedBonesJob
             {
                 Marker = Marker_SampleOptimizedBonesJob
-            }.ScheduleParallel();
+            }.ScheduleParallel(state.Dependency);
 
-            new SampleNonOptimizedBones
+            var sampleNonOptimizedHandle = new SampleNonOptimizedBones
             {
                 BfeClipSampler = SystemAPI.GetBufferLookup<ClipSampler>(true),
                 Marker = Marker_SampleNonOptimizedBonesJob
-            }.ScheduleParallel();
+            }.ScheduleParallel(state.Dependency);
 
-            new SampleRootDeltasJob
+            var sampleRootDeltasHandle = new SampleRootDeltasJob
             {
                 Marker = Marker_SampleRootDeltasJob
-            }.ScheduleParallel();
+            }.ScheduleParallel(state.Dependency);
 
-            new ApplyRootMotionToEntityJob
+            var applyRootMotionHandle = new ApplyRootMotionToEntityJob
             {
                 Marker = Marker_ApplyRootMotionToEntityJob
-            }.ScheduleParallel();
+            }.ScheduleParallel(sampleRootDeltasHandle);
 
-            new TransferRootMotionJob
+            var transferRootMotionHandle = new TransferRootMotionJob
             {
                 CfeDeltaPosition = SystemAPI.GetComponentLookup<RootDeltaTranslation>(true),
                 CfeDeltaRotation = SystemAPI.GetComponentLookup<RootDeltaRotation>(true),
                 Marker = Marker_TransferRootMotionJob
-            }.ScheduleParallel();
+            }.ScheduleParallel(sampleRootDeltasHandle);
+
+            state.Dependency = JobHandle.CombineDependencies(sampleOptimizedHandle, sampleNonOptimizedHandle,
+                transferRootMotionHandle);
+            state.Dependency = JobHandle.CombineDependencies(state.Dependency, applyRootMotionHandle);
         }
     }
 }

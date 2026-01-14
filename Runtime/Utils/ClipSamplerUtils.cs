@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using Unity.Assertions;
 using Unity.Burst;
 using Unity.Entities;
@@ -83,10 +83,9 @@ namespace DMotion
                 }
             }
 
-            // From my current understand, we can only be here if if (it's possible I'm wrong though): 
-            // 1 - reserveCount is massive (asserted above), or 2 - we managed to get a very fragmented id space
-            // We don't handle this case (it's not reasonable), so let's scream
-            Assert.IsTrue(false, "This is a bug. I don't know how we could ever be here");
+            // ID space is too fragmented to find contiguous slots.
+            // This can happen with heavy allocation/deallocation churn.
+            // Return false to indicate failure - caller should handle gracefully.
             id = 0;
             insertIndex = -1;
             return false;

@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using System;
 using UnityEditor;
 
@@ -25,19 +25,5 @@ namespace DMotion.Editor
                 return -1;
             }
         }
-        
-        // ScriptAttributeUtility.GetFieldInfoFromProperty(property, out type);
-        // if (type != (System.Type) null && type.IsEnum)
-        // {
-        //   EditorGUI.BeginChangeCheck();
-        //   int num = EditorGUI.EnumNamesCache.IsEnumTypeUsingFlagsAttribute(type) ? EditorGUI.EnumFlagsField(position, label, property.intValue, type, false, EditorStyles.popup) : EditorGUI.EnumPopupInternal(position, label, property.intValue, type, (Func<Enum, bool>) null, false, EditorStyles.popup);
-        //   if (!EditorGUI.EndChangeCheck())
-        //     return;
-        //   System.Type enumUnderlyingType = type.GetEnumUnderlyingType();
-        //   if (num < 0 && (enumUnderlyingType == typeof (uint) || enumUnderlyingType == typeof (ushort) || enumUnderlyingType == typeof (byte)))
-        //     property.longValue = (long) (uint) num;
-        //   else
-        //     property.intValue = num;
-        // }
     }
 }

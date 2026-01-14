@@ -1,17 +1,3 @@
-using System.Linq;
-using DMotion.Authoring;
-using UnityEditor;
-using UnityEngine;
-
-namespace DMotion.Editor
-{
-    // [CustomPropertyDrawer(typeof(AnimationEventName))]
-    // internal class AnimationEventNamePropertyDrawer : PropertyDrawer
-    // {
-    //     private ObjectReferencePopupSelector<AnimationEventName> eventNamesSelector = new ObjectReferencePopupSelector<AnimationEventName>();
-    //     public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
-    //     {
-    //         eventNamesSelector.OnGUI(position, property, label);
-    //     }
-    // }
-}
+// This file is intentionally empty.
+// AnimationEventNamePropertyDrawer was removed - events are now handled differently.
+// TODO: Remove this file entirely if not needed for future implementation.

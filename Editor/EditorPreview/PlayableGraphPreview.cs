@@ -119,29 +119,6 @@ namespace DMotion.Editor
             return true;
         }
 
-        // private void CreatePreviewUtility()
-        // {
-        //     previewRenderUtility?.Cleanup();
-        //     previewRenderUtility = new PreviewRenderUtility();
-        //
-        //     var light1 = previewRenderUtility.lights[0];
-        //     light1.type = LightType.Directional;
-        //     light1.color = Color.white;
-        //     light1.intensity = 1;
-        //
-        //     previewRenderUtility.camera.nearClipPlane = 0.3f;
-        //     previewRenderUtility.camera.farClipPlane = 3000f;
-        //
-        //     camPivot = skinnedMeshRenderer.transform.position;
-        //     lookAtOffset = Vector3.up * skinnedMeshRenderer.bounds.size.y / 2;
-        //     camDistance = 10;
-        //     camEuler = new Vector2(45, 30);
-        //
-        //     isMouseDrag = false;
-        //     lastMousePosition = Vector2.zero;
-        //     HandleCamera(true);
-        // }
-        
         private void CreatePreviewUtility()
         {
             previewRenderUtility?.Cleanup();
