@@ -129,7 +129,6 @@ namespace DMotion.Editor
             return view;
         }
 
-        #if UNITY_EDITOR || DEBUG
         internal void UpdateView()
         {
             var style = GetStateStyle();
@@ -140,7 +139,6 @@ namespace DMotion.Editor
                 UpdateTimelineProgressBar();
             }
         }
-        #endif
 
         internal AnimationStateStyle GetStateStyle()
         {

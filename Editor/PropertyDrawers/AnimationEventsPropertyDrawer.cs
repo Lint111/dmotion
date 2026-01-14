@@ -295,8 +295,7 @@ namespace DMotion.Editor
 
                 ClipEvents[eventMarkerDragIndex].NormalizedTime = normalizedTime;
 
-                property.serializedObject.ApplyModifiedProperties();
-                property.serializedObject.Update();
+                property.ApplyAndUpdate();
 
                 currentEvent.Use();
             }
