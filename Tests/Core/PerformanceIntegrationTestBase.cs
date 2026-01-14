@@ -174,27 +174,38 @@ namespace DMotion.Tests
             // Allow subclass teardown
             yield return OnTearDown();
 
-            // Complete all jobs before cleanup to avoid race conditions
             if (manager.World != null && manager.World.IsCreated)
             {
+                // 1. Complete all pending jobs before any cleanup
                 manager.CompleteAllTrackedJobs();
-            }
+                
+                // 2. Update world to let Kinemation's render systems process any pending
+                // render bounds updates before we destroy entities
+                UpdateWorld();
+                manager.CompleteAllTrackedJobs();
 
-            // Destroy all instantiated stress test entities (non-prefabs)
-            if (manager.World != null && manager.World.IsCreated)
-            {
+                // 3. Destroy entities using deferred EntityCommandBuffer to avoid race conditions
                 var query = manager.CreateEntityQuery(
                     ComponentType.ReadOnly<DMotion.PerformanceTests.StressTestOneShotClip>(),
                     ComponentType.Exclude<Prefab>());
                 var entitiesToDestroy = query.ToEntityArray(Allocator.Temp);
+                
                 if (entitiesToDestroy.Length > 0)
                 {
-                    manager.DestroyEntity(entitiesToDestroy);
+                    // Use ECB for controlled destruction timing
+                    var ecb = new EntityCommandBuffer(Allocator.Temp);
+                    foreach (var entity in entitiesToDestroy)
+                    {
+                        ecb.DestroyEntity(entity);
+                    }
+                    ecb.Playback(manager);
+                    ecb.Dispose();
+                    
+                    // 4. Update world to process destruction and let Kinemation clean up
+                    UpdateWorld();
+                    manager.CompleteAllTrackedJobs();
                 }
                 entitiesToDestroy.Dispose();
-                
-                // Complete jobs again after entity destruction
-                manager.CompleteAllTrackedJobs();
             }
 
             // Clean up tracked blobs and entities
@@ -209,10 +220,11 @@ namespace DMotion.Tests
             // Restore Burst settings
             burstCache.SetCachedValues();
 
-            // Let the world stabilize for a few frames before unloading
-            for (int i = 0; i < 5; i++)
+            // 5. Final frame wait for any remaining cleanup
+            yield return null;
+            if (manager.World != null && manager.World.IsCreated)
             {
-                yield return null;
+                manager.CompleteAllTrackedJobs();
             }
 
             // Unload test scene
