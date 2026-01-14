@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -9,6 +9,25 @@ namespace DMotion.Editor
 {
     public static class EditorSerializationUtils
     {
+        /// <summary>
+        /// Applies modifications and updates the serialized object in one call.
+        /// Use this instead of separate ApplyModifiedProperties() + Update() calls.
+        /// </summary>
+        public static void ApplyAndUpdate(this SerializedObject serializedObject)
+        {
+            serializedObject.ApplyModifiedProperties();
+            serializedObject.Update();
+        }
+
+        /// <summary>
+        /// Applies modifications and updates the serialized object from a property.
+        /// </summary>
+        public static void ApplyAndUpdate(this SerializedProperty property)
+        {
+            property.serializedObject.ApplyModifiedProperties();
+            property.serializedObject.Update();
+        }
+
         private const BindingFlags AllBindingFlags = (BindingFlags)(-1);
 
         public static TAttribute GetAttribute<TAttribute>(this SerializedProperty serializedProperty,
