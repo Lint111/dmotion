@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using Unity.Burst;
 using Unity.Entities;
 using Unity.Jobs;
@@ -41,19 +41,22 @@ namespace DMotion
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void OnUpdate_Safe(ref SystemState state)
         {
-            new UpdateSingleClipStatesJob
+            // Use same dependency management as OnUpdate_Unsafe for consistency
+            var singleClipHandle = new UpdateSingleClipStatesJob
             {
                 DeltaTime = SystemAPI.Time.DeltaTime,
-            }.ScheduleParallel();
+            }.ScheduleParallel(state.Dependency);
 
-            new CleanSingleClipStatesJob().ScheduleParallel();
+            singleClipHandle = new CleanSingleClipStatesJob().ScheduleParallel(singleClipHandle);
 
-            new UpdateLinearBlendStateMachineStatesJob
+            var linearBlendHandle = new UpdateLinearBlendStateMachineStatesJob
             {
                 DeltaTime = SystemAPI.Time.DeltaTime,
-            }.ScheduleParallel();
+            }.ScheduleParallel(state.Dependency);
 
-            new CleanLinearBlendStatesJob().ScheduleParallel();
+            linearBlendHandle = new CleanLinearBlendStatesJob().ScheduleParallel(linearBlendHandle);
+
+            state.Dependency = JobHandle.CombineDependencies(singleClipHandle, linearBlendHandle);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

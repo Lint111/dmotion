@@ -1,4 +1,4 @@
-﻿using Unity.Burst;
+using Unity.Burst;
 using Unity.Entities;
 using Unity.Transforms;
 using UnityEngine.Assertions;
@@ -96,7 +96,7 @@ namespace DMotion
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            new PlayOneShotJob().ScheduleParallel();
+            state.Dependency = new PlayOneShotJob().ScheduleParallel(state.Dependency);
         }
     }
 }
