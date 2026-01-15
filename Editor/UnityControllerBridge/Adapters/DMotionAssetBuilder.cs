@@ -76,6 +76,12 @@ namespace DMotion.Editor.UnityControllerBridge.Adapters
             foreach (var state in stateAssets)
             {
                 AssetDatabase.AddObjectToAsset(state, stateMachine);
+
+                // If this is a sub-state machine, add nested assets
+                if (state is SubStateMachineStateAsset subMachine && subMachine.NestedStateMachine != null)
+                {
+                    AddNestedMachineAssets(subMachine.NestedStateMachine, stateMachine);
+                }
             }
 
             AssetDatabase.SaveAssets();
@@ -83,6 +89,30 @@ namespace DMotion.Editor.UnityControllerBridge.Adapters
 
             Debug.Log($"[DMotionAssetBuilder] Created StateMachineAsset at {outputPath}");
             return stateMachine;
+        }
+
+        /// <summary>
+        /// Recursively adds nested state machine assets to the main asset.
+        /// </summary>
+        private static void AddNestedMachineAssets(StateMachineAsset nestedMachine, StateMachineAsset rootAsset)
+        {
+            // Add the nested machine itself
+            AssetDatabase.AddObjectToAsset(nestedMachine, rootAsset);
+
+            // Add all nested states
+            if (nestedMachine.States != null)
+            {
+                foreach (var nestedState in nestedMachine.States)
+                {
+                    AssetDatabase.AddObjectToAsset(nestedState, rootAsset);
+
+                    // Recursively handle deeper nesting
+                    if (nestedState is SubStateMachineStateAsset deeperSubMachine && deeperSubMachine.NestedStateMachine != null)
+                    {
+                        AddNestedMachineAssets(deeperSubMachine.NestedStateMachine, rootAsset);
+                    }
+                }
+            }
         }
 
         private static List<AnimationParameterAsset> CreateParameters(List<ConvertedParameter> parameters)
@@ -157,6 +187,21 @@ namespace DMotion.Editor.UnityControllerBridge.Adapters
                         }
                     }
                 }
+                else if (state.StateType == ConvertedStateType.SubStateMachine)
+                {
+                    // Recursively collect clips from nested machine
+                    if (state.NestedStateMachine != null && state.NestedStateMachine.Success)
+                    {
+                        var nestedClips = CreateClipAssets(state.NestedStateMachine.States);
+                        foreach (var kvp in nestedClips)
+                        {
+                            if (!lookup.ContainsKey(kvp.Key))
+                            {
+                                lookup[kvp.Key] = kvp.Value;
+                            }
+                        }
+                    }
+                }
             }
 
             return lookup;
@@ -199,6 +244,7 @@ namespace DMotion.Editor.UnityControllerBridge.Adapters
                 {
                     ConvertedStateType.SingleClip => CreateSingleClipState(state, clipLookup),
                     ConvertedStateType.LinearBlend => CreateLinearBlendState(state, clipLookup, parameters),
+                    ConvertedStateType.SubStateMachine => CreateSubStateMachineState(state, clipLookup, parameters),
                     _ => null
                 };
 
@@ -206,8 +252,13 @@ namespace DMotion.Editor.UnityControllerBridge.Adapters
                 {
                     // Set common properties
                     asset.name = state.Name;
-                    asset.Speed = state.Speed;
-                    asset.Loop = state.Loop;
+
+                    // Speed and Loop don't apply to sub-state machines
+                    if (state.StateType != ConvertedStateType.SubStateMachine)
+                    {
+                        asset.Speed = state.Speed;
+                        asset.Loop = state.Loop;
+                    }
 
                     // Create transitions
                     CreateTransitions(asset, state, parameters);
@@ -265,6 +316,53 @@ namespace DMotion.Editor.UnityControllerBridge.Adapters
             }
 
             asset.BlendClips = blendClips.ToArray();
+            return asset;
+        }
+
+        private static SubStateMachineStateAsset CreateSubStateMachineState(
+            ConvertedState state,
+            Dictionary<string, AnimationClipAsset> clipLookup,
+            List<AnimationParameterAsset> parameters)
+        {
+            if (state.NestedStateMachine == null || !state.NestedStateMachine.Success)
+            {
+                Debug.LogError($"[DMotionAssetBuilder] Sub-state machine '{state.Name}' has no valid nested machine");
+                return null;
+            }
+
+            var asset = ScriptableObject.CreateInstance<SubStateMachineStateAsset>();
+
+            // Recursively create the nested state machine asset (in-memory, not saved separately)
+            var nestedResult = state.NestedStateMachine;
+
+            // Create nested machine asset
+            var nestedMachine = ScriptableObject.CreateInstance<StateMachineAsset>();
+            nestedMachine.name = $"{state.Name}_Nested";
+
+            // Parameters are shared from the root level (already created)
+            nestedMachine.Parameters = parameters;
+
+            // Recursively create nested states
+            var nestedStates = CreateStates(nestedResult.States, clipLookup, parameters);
+            nestedMachine.States = nestedStates;
+
+            // Find entry state
+            var entryState = nestedStates.FirstOrDefault(s => s.name == state.EntryStateName);
+            if (entryState == null && nestedStates.Count > 0)
+            {
+                Debug.LogWarning($"[DMotionAssetBuilder] Sub-machine '{state.Name}': Entry state '{state.EntryStateName}' not found, using first state");
+                entryState = nestedStates[0];
+            }
+
+            // Set default state
+            nestedMachine.DefaultState = entryState;
+
+            // Assign to sub-machine asset
+            asset.NestedStateMachine = nestedMachine;
+            asset.EntryState = entryState;
+
+            Debug.Log($"[DMotionAssetBuilder] Created sub-state machine '{state.Name}' with {nestedStates.Count} nested states (native DMotion support)");
+
             return asset;
         }
 
