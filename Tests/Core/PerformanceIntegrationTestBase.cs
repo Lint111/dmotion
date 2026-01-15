@@ -75,7 +75,16 @@ namespace DMotion.Tests
             // Check if test scene exists
             if (!PrebakedTestHelper.IsTestSceneSetup())
             {
-                Assert.Ignore("Test scene not set up. Run 'DMotion/Tests/Setup Test Scene' first.");
+                // In CI/batch mode, fail loudly so broken test setup is noticed
+                if (Application.isBatchMode || IsContinuousIntegration())
+                {
+                    Assert.Fail("CRITICAL: Test scene not set up. " +
+                               "CI must run 'DMotion/Tests/Setup Test Scene' before running performance tests.");
+                }
+                else
+                {
+                    Assert.Ignore("Test scene not set up. Run 'DMotion/Tests/Setup Test Scene' first.");
+                }
                 yield break;
             }
 
@@ -315,6 +324,19 @@ namespace DMotion.Tests
         {
             using var scope = profilerMarker.Auto();
             UpdateWorld();
+        }
+
+        /// <summary>
+        /// Detects if running in a CI environment.
+        /// </summary>
+        private static bool IsContinuousIntegration()
+        {
+            return !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CI")) ||
+                   !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GITHUB_ACTIONS")) ||
+                   !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GITLAB_CI")) ||
+                   !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("JENKINS_URL")) ||
+                   !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TF_BUILD")) ||
+                   !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TEAMCITY_VERSION"));
         }
     }
 }

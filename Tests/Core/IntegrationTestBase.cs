@@ -43,7 +43,18 @@ namespace DMotion.Tests
             // Check if test scene exists
             if (!PrebakedTestHelper.IsTestSceneSetup())
             {
-                Assert.Ignore("Test scene not set up. Run 'DMotion/Tests/Setup Test Scene' first.");
+                // In CI/batch mode, fail loudly so broken test setup is noticed
+                // In interactive mode, skip with clear message for developers
+                if (Application.isBatchMode || IsContinuousIntegration())
+                {
+                    Assert.Fail("CRITICAL: Test scene not set up. " +
+                               "CI must run 'DMotion/Tests/Setup Test Scene' before running integration tests. " +
+                               "This is a test infrastructure failure.");
+                }
+                else
+                {
+                    Assert.Ignore("Test scene not set up. Run 'DMotion/Tests/Setup Test Scene' first.");
+                }
                 yield break;
             }
 
@@ -240,6 +251,20 @@ namespace DMotion.Tests
                 return 1.0f;
 
             return clipsBlob.Value.clips[clipIndex].duration;
+        }
+
+        /// <summary>
+        /// Detects if running in a CI environment.
+        /// Checks common CI environment variables.
+        /// </summary>
+        private static bool IsContinuousIntegration()
+        {
+            return !string.IsNullOrEmpty(System.Environment.GetEnvironmentVariable("CI")) ||
+                   !string.IsNullOrEmpty(System.Environment.GetEnvironmentVariable("GITHUB_ACTIONS")) ||
+                   !string.IsNullOrEmpty(System.Environment.GetEnvironmentVariable("GITLAB_CI")) ||
+                   !string.IsNullOrEmpty(System.Environment.GetEnvironmentVariable("JENKINS_URL")) ||
+                   !string.IsNullOrEmpty(System.Environment.GetEnvironmentVariable("TF_BUILD")) ||
+                   !string.IsNullOrEmpty(System.Environment.GetEnvironmentVariable("TEAMCITY_VERSION"));
         }
     }
 }
