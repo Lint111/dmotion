@@ -17,6 +17,7 @@ This document provides a comprehensive analysis of Unity AnimatorController feat
 - 🔵 **Planned**: Not implemented yet, but feasible
 
 ### Related Documents
+- **[Architecture Analysis](UnityControllerBridge_ArchitectureAnalysis.md)**: Bridge workarounds vs. DMotion core features (design philosophy)
 - **[Action Plan](UnityControllerBridge_ActionPlan.md)**: Prioritized roadmap for Phases 12-15
 - **[TODOs](UnityControllerBridge_TODOs.md)**: Unity features without action plans (tracking document)
 

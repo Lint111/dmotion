@@ -8,6 +8,8 @@
 
 This document provides a prioritized roadmap to improve Unity AnimatorController conversion fidelity.
 
+**Architecture Principle**: The bridge should be a **pure translation layer**, not a workaround generator. See [Architecture Analysis](UnityControllerBridge_ArchitectureAnalysis.md) for detailed discussion of bridge workarounds vs. DMotion core features.
+
 ---
 
 ## Current Status
@@ -122,8 +124,11 @@ public float DestinationOffset = 0f;
 
 ### 12.4: Any State Expansion ⭐⭐⭐⭐
 **Value**: High | **Complexity**: Medium | **DMotion Changes Required**: No
+**Status**: ✅ **COMPLETE** (includes self-transition support)
 
 Convert Unity's "Any State" to explicit transitions from every state.
+
+**⚠️ Architecture Note**: This is a **bridge workaround**. Ideally, DMotion should have native Any State support. See [Architecture Analysis](UnityControllerBridge_ArchitectureAnalysis.md#21-any-state-phase-124---workaround-implemented) for discussion.
 
 **What It Solves**:
 - Global interrupts (e.g., "Hit" from any state)
@@ -134,6 +139,7 @@ Convert Unity's "Any State" to explicit transitions from every state.
 - ✅ Functionally equivalent
 - ❌ Verbose (100 states × 3 Any State transitions = 300 transitions)
 - ❌ Asset size increase
+- ❌ Debugging difficulty (can't identify "Any State origin")
 
 **Implementation**:
 ```csharp
@@ -168,13 +174,22 @@ private void ExpandAnyStateTransitions(StateMachineData data,
 
 ### 12.5: Sub-State Machine Flattening ⭐⭐⭐
 **Value**: High | **Complexity**: High | **DMotion Changes Required**: No
+**Status**: 🔄 Planned
 
 Recursively flatten nested state machines with name prefixing.
+
+**⚠️ Architecture Note**: This is a **bridge workaround**. Ideally, DMotion should support hierarchical state machines natively. See [Architecture Analysis](UnityControllerBridge_ArchitectureAnalysis.md#22-sub-state-machines-phase-125---workaround-planned) for discussion.
 
 **What It Solves**:
 - Hierarchical state machines (e.g., Combat.LightAttack)
 - Commonly used for organization
 - Allows complex Unity controllers to work
+
+**Trade-offs**:
+- ✅ Functionally works
+- ❌ Loses organizational structure
+- ❌ Name collision risks with prefixing
+- ❌ Cannot preserve Entry/Exit/Up node semantics
 
 **Example**:
 ```

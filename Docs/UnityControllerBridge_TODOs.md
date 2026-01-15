@@ -4,6 +4,8 @@ This document tracks Unity AnimatorController features that are currently not su
 
 **Principle**: If a feature exists Unity-side and is currently a limitation, it should have a TODO task attached and not be accepted as an acceptable end state.
 
+**Architecture Note**: Many of these limitations exist because DMotion doesn't have equivalent features. See [Architecture Analysis](UnityControllerBridge_ArchitectureAnalysis.md) for discussion of bridge workarounds vs. DMotion core features.
+
 ---
 
 ## High Priority TODOs
