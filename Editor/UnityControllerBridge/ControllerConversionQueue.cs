@@ -189,20 +189,26 @@ namespace DMotion.Editor.UnityControllerBridge
 
             try
             {
-                // TODO: Phase 7 - Actual conversion will happen here
-                // For now, just mark as complete
-                // var stateMachine = UnityControllerConverter.ConvertController(
-                //     request.SourceController,
-                //     ControllerBridgeConfig.Instance
-                // );
+                // Get output path
+                var config = ControllerBridgeConfig.Instance;
+                config.EnsureOutputDirectory();
+                string outputPath = config.GetOutputPath(request.SourceController.name);
 
-                // Placeholder: Mark as complete (will be replaced in Phase 7)
-                request.ResultStateMachine = null; // Will be actual result
+                // Perform actual conversion
+                var stateMachine = UnityControllerConverter.ConvertController(
+                    request.SourceController,
+                    outputPath,
+                    config
+                );
+
+                request.ResultStateMachine = stateMachine;
                 request.IsComplete = true;
-                request.Success = false; // Will be true when converter is implemented
-                request.ErrorMessage = "Converter not yet implemented (Phase 7)";
+                request.Success = stateMachine != null;
 
-                Debug.LogWarning("[ControllerConversionQueue] Conversion placeholder - implement in Phase 7");
+                if (!request.Success)
+                {
+                    request.ErrorMessage = "Conversion returned null";
+                }
             }
             catch (Exception ex)
             {
@@ -217,15 +223,8 @@ namespace DMotion.Editor.UnityControllerBridge
         {
             if (_currentRequest.Success)
             {
-                // TODO: Phase 7 - Save the generated StateMachineAsset
-                // string outputPath = ControllerBridgeConfig.Instance.GetOutputPath(
-                //     _currentRequest.SourceController.name
-                // );
-                // AssetDatabase.CreateAsset(_currentRequest.ResultStateMachine, outputPath);
-                // AssetDatabase.SaveAssets();
-
-                // Update bridge
-                // _currentRequest.Bridge.SetGeneratedStateMachine(_currentRequest.ResultStateMachine);
+                // Update bridge with generated asset
+                _currentRequest.Bridge.SetGeneratedStateMachine(_currentRequest.ResultStateMachine);
                 _currentRequest.Bridge.MarkClean();
                 EditorUtility.SetDirty(_currentRequest.Bridge);
 
