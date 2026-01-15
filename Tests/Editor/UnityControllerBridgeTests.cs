@@ -301,6 +301,151 @@ namespace DMotion.Tests.Editor
             Assert.IsFalse(dirtyBridges.Contains(bridge));
         }
 
+        [Test]
+        public void Integration_ConvertRealController_StarterAssets()
+        {
+            // Load the real StarterAssetsThirdPerson controller
+            string controllerPath = "Assets/DMotion.Tests/Data/Animations/StarterAssetsThirdPerson.controller";
+            var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(controllerPath);
+
+            Assert.IsNotNull(controller, $"Could not load controller at {controllerPath}");
+
+            // Setup config
+            var config = ControllerBridgeConfig.GetOrCreateDefault();
+            config.EnsureOutputDirectory();
+
+            string outputPath = config.GetOutputPath("StarterAssetsThirdPerson_Converted");
+
+            // Perform conversion
+            var stateMachine = UnityControllerConverter.ConvertController(
+                controller,
+                outputPath,
+                config
+            );
+
+            // Validate conversion succeeded
+            Assert.IsNotNull(stateMachine, "Conversion should produce a StateMachineAsset");
+            Assert.AreEqual("StarterAssetsThirdPerson", stateMachine.name);
+
+            // Validate parameters were converted
+            Assert.IsNotNull(stateMachine.Parameters, "StateMachine should have parameters");
+            Assert.Greater(stateMachine.Parameters.Count, 0, "Should have at least one parameter");
+
+            // Validate states were converted
+            Assert.IsNotNull(stateMachine.States, "StateMachine should have states");
+            Assert.Greater(stateMachine.States.Count, 0, "Should have at least one state");
+
+            // Validate default state is set
+            Assert.IsNotNull(stateMachine.DefaultState, "StateMachine should have a default state");
+
+            // Log details for inspection
+            Debug.Log($"[Integration Test] Converted '{controller.name}' successfully:");
+            Debug.Log($"  - Parameters: {stateMachine.Parameters.Count}");
+            Debug.Log($"  - States: {stateMachine.States.Count}");
+            Debug.Log($"  - Default State: {stateMachine.DefaultState.name}");
+
+            // Log parameter names
+            Debug.Log("  - Parameter Names:");
+            foreach (var param in stateMachine.Parameters)
+            {
+                Debug.Log($"    - {param.name} ({param.GetType().Name})");
+            }
+
+            // Log state names
+            Debug.Log("  - State Names:");
+            foreach (var state in stateMachine.States)
+            {
+                var transitionCount = state.OutTransitions?.Count ?? 0;
+                Debug.Log($"    - {state.name} ({state.GetType().Name}) [{transitionCount} transitions]");
+            }
+
+            // Clean up generated asset
+            if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(outputPath) != null)
+            {
+                AssetDatabase.DeleteAsset(outputPath);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Integration_FullConversionPipeline_StarterAssets()
+        {
+            // Load the real StarterAssetsThirdPerson controller
+            string controllerPath = "Assets/DMotion.Tests/Data/Animations/StarterAssetsThirdPerson.controller";
+            var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(controllerPath);
+
+            Assert.IsNotNull(controller, $"Could not load controller at {controllerPath}");
+
+            // Get or create bridge via registry (simulates user workflow)
+            var bridge = ControllerBridgeRegistry.GetOrCreateBridge(controller);
+            Assert.IsNotNull(bridge, "Registry should create bridge for controller");
+            Assert.IsTrue(bridge.IsDirty, "New bridge should start dirty");
+
+            // Track conversion completion
+            bool conversionStarted = false;
+            bool conversionFinished = false;
+            bool conversionSuccess = false;
+            string convertedBridgeId = null;
+
+            ControllerConversionQueue.OnConversionStarted += (bridgeId) =>
+            {
+                if (bridgeId == bridge.BridgeId)
+                {
+                    conversionStarted = true;
+                    Debug.Log($"[Integration Test] Conversion started for bridge: {bridgeId}");
+                }
+            };
+
+            ControllerConversionQueue.OnConversionFinished += (bridgeId, success) =>
+            {
+                if (bridgeId == bridge.BridgeId)
+                {
+                    conversionFinished = true;
+                    conversionSuccess = success;
+                    convertedBridgeId = bridgeId;
+                    Debug.Log($"[Integration Test] Conversion finished for bridge: {bridgeId}, success: {success}");
+                }
+            };
+
+            // Enqueue the bridge for conversion
+            ControllerConversionQueue.Enqueue(bridge);
+            ControllerConversionQueue.StartProcessing();
+
+            // Wait for conversion to complete (with timeout)
+            float timeout = 10f;
+            float elapsed = 0f;
+
+            while (!conversionFinished && elapsed < timeout)
+            {
+                yield return new WaitForSecondsRealtime(0.1f);
+                elapsed += 0.1f;
+            }
+
+            // Stop queue
+            ControllerConversionQueue.StopProcessing();
+
+            // Validate conversion completed
+            Assert.IsTrue(conversionStarted, "Conversion should have started");
+            Assert.IsTrue(conversionFinished, "Conversion should have finished within timeout");
+            Assert.IsTrue(conversionSuccess, "Conversion should have succeeded");
+            Assert.AreEqual(bridge.BridgeId, convertedBridgeId, "Should convert the correct bridge");
+
+            // Validate bridge state
+            Assert.IsFalse(bridge.IsDirty, "Bridge should be clean after successful conversion");
+            Assert.IsNotNull(bridge.GeneratedStateMachine, "Bridge should have generated StateMachine");
+
+            // Validate generated StateMachine
+            var stateMachine = bridge.GeneratedStateMachine;
+            Assert.Greater(stateMachine.Parameters.Count, 0, "StateMachine should have parameters");
+            Assert.Greater(stateMachine.States.Count, 0, "StateMachine should have states");
+            Assert.IsNotNull(stateMachine.DefaultState, "StateMachine should have default state");
+
+            Debug.Log($"[Integration Test] Full pipeline test succeeded!");
+            Debug.Log($"  - Bridge ID: {bridge.BridgeId}");
+            Debug.Log($"  - Generated Asset: {AssetDatabase.GetAssetPath(stateMachine)}");
+            Debug.Log($"  - Parameters: {stateMachine.Parameters.Count}");
+            Debug.Log($"  - States: {stateMachine.States.Count}");
+        }
+
         #endregion
     }
 }
