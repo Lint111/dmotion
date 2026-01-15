@@ -37,6 +37,9 @@ namespace DMotion.Editor.UnityControllerBridge
         [Tooltip("Log detailed conversion info (for debugging)")]
         public bool VerboseLogging = false;
 
+        [Tooltip("Generate HTML and Markdown conversion reports showing feature usage and statistics")]
+        public bool GenerateConversionReport = true;
+
         [Header("Output Settings")]
         [Tooltip("Output folder for generated StateMachineAssets (relative to Assets/)")]
         public string OutputPath = "DMotion/Generated";

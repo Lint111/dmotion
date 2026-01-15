@@ -26,6 +26,333 @@ namespace DMotion.Editor.UnityControllerBridge.Core
         public ConversionLog Log => _log;
 
         /// <summary>
+        /// Generates a comprehensive conversion report with statistics, feature usage, and recommendations.
+        /// </summary>
+        public ConversionReport GenerateReport(ConversionResult result)
+        {
+            var report = new ConversionReport
+            {
+                Result = result
+            };
+
+            // Generate statistics
+            report.Statistics = GenerateStatistics(result);
+
+            // Generate feature usage info
+            report.FeatureUsage = GenerateFeatureUsage(result);
+
+            // Generate recommendations
+            report.Recommendations = GenerateRecommendations(result);
+
+            return report;
+        }
+
+        private ConversionStatistics GenerateStatistics(ConversionResult result)
+        {
+            var stats = new ConversionStatistics
+            {
+                ParametersConverted = result.Parameters.Count,
+                AnyStateTransitions = result.AnyStateTransitions.Count,
+                WarningsCount = _log.WarningCount,
+                ErrorsCount = _log.ErrorCount
+            };
+
+            // Count states recursively (including nested sub-machines)
+            CountStatesRecursively(result.States, stats);
+
+            return stats;
+        }
+
+        private void CountStatesRecursively(List<ConvertedState> states, ConversionStatistics stats)
+        {
+            foreach (var state in states)
+            {
+                stats.StatesConverted++;
+
+                // Count transitions
+                stats.TransitionsCreated += state.Transitions.Count;
+
+                // Count by type
+                switch (state.StateType)
+                {
+                    case ConvertedStateType.SingleClip:
+                        stats.AnimationClipsUsed++;
+                        break;
+
+                    case ConvertedStateType.LinearBlend:
+                        stats.BlendTreesConverted++;
+                        stats.AnimationClipsUsed += state.BlendClips.Count;
+                        break;
+
+                    case ConvertedStateType.SubStateMachine:
+                        stats.SubStateMachinesConverted++;
+                        // Recursively count nested states
+                        if (state.NestedStateMachine != null && state.NestedStateMachine.Success)
+                        {
+                            CountStatesRecursively(state.NestedStateMachine.States, stats);
+                        }
+                        break;
+                }
+            }
+        }
+
+        private FeatureUsageInfo GenerateFeatureUsage(ConversionResult result)
+        {
+            var info = new FeatureUsageInfo();
+
+            // Analyze states to detect feature usage
+            bool hasSubStateMachines = CheckHasSubStateMachines(result.States);
+            bool hasBlendTrees1D = CheckHasBlendTrees1D(result.States);
+            bool hasAnyState = result.AnyStateTransitions.Count > 0;
+            bool hasExitTime = CheckHasExitTime(result.States) || result.AnyStateTransitions.Any(t => t.HasEndTime);
+            bool hasTriggers = result.Parameters.Any(p => p.OriginalType == ParameterType.Trigger);
+            bool hasSpeedParameter = CheckHasSpeedParameter(result.States);
+            bool hasMultipleLayers = false; // Would need to track this from controller data
+
+            // Single Clip States
+            info.AddFeature(
+                "Single Clip States",
+                true,
+                "SingleClipStateAsset",
+                ConversionStatus.Supported,
+                "Full support for single animation clips"
+            );
+
+            // 1D Blend Trees
+            info.AddFeature(
+                "1D Blend Trees",
+                hasBlendTrees1D,
+                "LinearBlendStateAsset",
+                hasBlendTrees1D ? ConversionStatus.Supported : ConversionStatus.NotUsed,
+                hasBlendTrees1D ? "Converted to LinearBlendStateAsset" : ""
+            );
+
+            // Sub-State Machines
+            info.AddFeature(
+                "Sub-State Machines",
+                hasSubStateMachines,
+                "SubStateMachineStateAsset",
+                hasSubStateMachines ? ConversionStatus.Supported : ConversionStatus.NotUsed,
+                hasSubStateMachines ? "Native hierarchical support with unlimited depth" : ""
+            );
+
+            // Any State Transitions
+            info.AddFeature(
+                "Any State Transitions",
+                hasAnyState,
+                "Native Support",
+                hasAnyState ? ConversionStatus.Supported : ConversionStatus.NotUsed,
+                hasAnyState ? "Converted as global transitions" : ""
+            );
+
+            // Parameters
+            info.AddFeature(
+                "Bool Parameters",
+                result.Parameters.Any(p => p.TargetType == DMotionParameterType.Bool),
+                "BoolParameterAsset",
+                ConversionStatus.Supported,
+                "Full support"
+            );
+
+            info.AddFeature(
+                "Int Parameters",
+                result.Parameters.Any(p => p.TargetType == DMotionParameterType.Int),
+                "IntParameterAsset",
+                ConversionStatus.Supported,
+                "Full support"
+            );
+
+            info.AddFeature(
+                "Float Parameters",
+                result.Parameters.Any(p => p.TargetType == DMotionParameterType.Float),
+                "FloatParameterAsset",
+                ConversionStatus.Supported,
+                "Full support"
+            );
+
+            info.AddFeature(
+                "Trigger Parameters",
+                hasTriggers,
+                "BoolParameterAsset",
+                hasTriggers ? ConversionStatus.PartiallySupported : ConversionStatus.NotUsed,
+                hasTriggers ? "Converted to Bool - auto-reset must be implemented manually" : ""
+            );
+
+            // Exit Time
+            info.AddFeature(
+                "Exit Time Transitions",
+                hasExitTime,
+                "EndTime",
+                hasExitTime ? ConversionStatus.Supported : ConversionStatus.NotUsed,
+                hasExitTime ? "Converted to absolute EndTime" : ""
+            );
+
+            // Speed Parameter (not yet supported)
+            info.AddFeature(
+                "Speed Parameter",
+                hasSpeedParameter,
+                "Not Supported",
+                hasSpeedParameter ? ConversionStatus.NotSupported : ConversionStatus.NotUsed,
+                hasSpeedParameter ? "Speed parameters are not yet supported - speed will be constant" : ""
+            );
+
+            // 2D Blend Trees (not supported)
+            info.AddFeature(
+                "2D Blend Trees",
+                false, // Would need to track from controller data
+                "Not Supported",
+                ConversionStatus.NotSupported,
+                "2D blend trees are not yet supported"
+            );
+
+            // Direct Blend Trees (not supported)
+            info.AddFeature(
+                "Direct Blend Trees",
+                false,
+                "Not Supported",
+                ConversionStatus.NotSupported,
+                "Direct blend trees are not yet supported"
+            );
+
+            // Multiple Layers (not supported)
+            info.AddFeature(
+                "Multiple Layers",
+                hasMultipleLayers,
+                "Not Supported",
+                hasMultipleLayers ? ConversionStatus.NotSupported : ConversionStatus.NotUsed,
+                hasMultipleLayers ? "Only first layer is converted - multiple layers not supported" : ""
+            );
+
+            // Float Conditions (not supported)
+            info.AddFeature(
+                "Float Parameter Conditions",
+                false, // Would be logged as error if encountered
+                "Not Supported",
+                ConversionStatus.NotSupported,
+                "Float parameter conditions not yet supported - use Int or Bool"
+            );
+
+            return info;
+        }
+
+        private bool CheckHasSubStateMachines(List<ConvertedState> states)
+        {
+            foreach (var state in states)
+            {
+                if (state.StateType == ConvertedStateType.SubStateMachine)
+                    return true;
+
+                if (state.NestedStateMachine != null && CheckHasSubStateMachines(state.NestedStateMachine.States))
+                    return true;
+            }
+            return false;
+        }
+
+        private bool CheckHasBlendTrees1D(List<ConvertedState> states)
+        {
+            foreach (var state in states)
+            {
+                if (state.StateType == ConvertedStateType.LinearBlend)
+                    return true;
+
+                if (state.NestedStateMachine != null && CheckHasBlendTrees1D(state.NestedStateMachine.States))
+                    return true;
+            }
+            return false;
+        }
+
+        private bool CheckHasExitTime(List<ConvertedState> states)
+        {
+            foreach (var state in states)
+            {
+                if (state.Transitions.Any(t => t.HasEndTime))
+                    return true;
+
+                if (state.NestedStateMachine != null && CheckHasExitTime(state.NestedStateMachine.States))
+                    return true;
+            }
+            return false;
+        }
+
+        private bool CheckHasSpeedParameter(List<ConvertedState> states)
+        {
+            // This would require tracking from StateData.SpeedParameterActive
+            // For now, check if we logged a warning about it
+            return _log.Messages.Any(m => m.Text.Contains("speed parameter"));
+        }
+
+        private List<ConversionRecommendation> GenerateRecommendations(ConversionResult result)
+        {
+            var recommendations = new List<ConversionRecommendation>();
+
+            // Check for triggers
+            if (result.Parameters.Any(p => p.OriginalType == ParameterType.Trigger))
+            {
+                recommendations.Add(new ConversionRecommendation
+                {
+                    Title = "Trigger Parameters Converted to Bool",
+                    Description = "Trigger parameters have been converted to Bool. You'll need to manually reset them after use. Consider using a custom system to auto-reset triggers after consumption.",
+                    Priority = RecommendationPriority.Medium
+                });
+            }
+
+            // Check for warnings
+            if (_log.WarningCount > 0)
+            {
+                recommendations.Add(new ConversionRecommendation
+                {
+                    Title = $"Review {_log.WarningCount} Warning(s)",
+                    Description = "The conversion completed with warnings. Check the Unity Console for details about features that were skipped or converted with limitations.",
+                    Priority = RecommendationPriority.High
+                });
+            }
+
+            // Check for unsupported features in log
+            if (_log.Messages.Any(m => m.Text.Contains("speed parameter")))
+            {
+                recommendations.Add(new ConversionRecommendation
+                {
+                    Title = "Speed Parameters Not Supported",
+                    Description = "Some states use speed parameters which are not yet supported. Animation speed will be constant. This feature is planned for a future release.",
+                    Priority = RecommendationPriority.Medium
+                });
+            }
+
+            if (_log.Messages.Any(m => m.Text.Contains("cycle offset")))
+            {
+                recommendations.Add(new ConversionRecommendation
+                {
+                    Title = "Cycle Offset Ignored",
+                    Description = "Some states have cycle offset values which are not supported and will be ignored. Consider using normalized time adjustments in code if needed.",
+                    Priority = RecommendationPriority.Low
+                });
+            }
+
+            if (_log.Messages.Any(m => m.Text.Contains("Offset") && m.Text.Contains("transition")))
+            {
+                recommendations.Add(new ConversionRecommendation
+                {
+                    Title = "Transition Offsets Not Supported",
+                    Description = "Some transitions have offset values which are not supported. Transitions will start from the beginning of the destination animation.",
+                    Priority = RecommendationPriority.Low
+                });
+            }
+
+            // Success with no issues
+            if (result.Success && _log.WarningCount == 0 && _log.ErrorCount == 0)
+            {
+                recommendations.Add(new ConversionRecommendation
+                {
+                    Title = "Conversion Completed Successfully",
+                    Description = "All features were converted without issues. The DMotion state machine should behave identically to the Unity AnimatorController.",
+                    Priority = RecommendationPriority.Low
+                });
+            }
+
+            return recommendations;
+        }
+
+        /// <summary>
         /// Converts controller data to DMotion data structures.
         /// Returns conversion result with generated data.
         /// </summary>

@@ -76,6 +76,12 @@ namespace DMotion.Editor.UnityControllerBridge
             // Phase 5: Link Any State transitions (native DMotion support)
             LinkAnyStateTransitions(stateMachine, result);
 
+            // Phase 6: Generate conversion report (if enabled)
+            if (config.GenerateConversionReport)
+            {
+                GenerateConversionReport(engine, result, outputPath, config);
+            }
+
             // Save final asset
             EditorUtility.SetDirty(stateMachine);
             AssetDatabase.SaveAssets();
@@ -275,6 +281,28 @@ namespace DMotion.Editor.UnityControllerBridge
             }
 
             return 1f; // Default fallback
+        }
+
+        private static void GenerateConversionReport(ConversionEngine engine, ConversionResult result, string assetPath, ControllerBridgeConfig config)
+        {
+            // Generate comprehensive report
+            var report = engine.GenerateReport(result);
+
+            // Determine output directory (same as asset)
+            string directory = System.IO.Path.GetDirectoryName(assetPath);
+            string assetName = System.IO.Path.GetFileNameWithoutExtension(assetPath);
+
+            // Save HTML report
+            string htmlPath = System.IO.Path.Combine(directory, $"{assetName}_ConversionReport.html");
+            System.IO.File.WriteAllText(htmlPath, report.ExportToHtml());
+            AssetDatabase.Refresh();
+            Debug.Log($"[UnityControllerConverter] Conversion report saved: {htmlPath}");
+
+            // Save Markdown report
+            string mdPath = System.IO.Path.Combine(directory, $"{assetName}_ConversionReport.md");
+            System.IO.File.WriteAllText(mdPath, report.ExportToMarkdown());
+            AssetDatabase.Refresh();
+            Debug.Log($"[UnityControllerConverter] Markdown report saved: {mdPath}");
         }
 
         private static void LogConversionMessages(ConversionLog log, ControllerBridgeConfig config)
