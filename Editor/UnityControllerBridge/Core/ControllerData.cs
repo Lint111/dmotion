@@ -59,18 +59,41 @@ namespace DMotion.Editor.UnityControllerBridge.Core
     }
 
     /// <summary>
-    /// Represents an animation state.
+    /// Represents a sub-state machine (state containing a nested state machine).
+    /// </summary>
+    public class SubStateMachineData
+    {
+        public StateMachineData NestedStateMachine { get; set; }
+        public string EntryStateName { get; set; }
+        public List<TransitionData> ExitTransitions { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Represents an animation state (or sub-state machine).
+    /// Can be either a regular state with Motion, or a sub-state machine.
     /// </summary>
     public class StateData
     {
         public string Name { get; set; }
+
+        // For regular animation states
         public MotionData Motion { get; set; }
         public float Speed { get; set; } = 1f;
         public bool SpeedParameterActive { get; set; }
         public string SpeedParameter { get; set; }
         public float CycleOffset { get; set; }
+
+        // For sub-state machines
+        public SubStateMachineData SubStateMachine { get; set; }
+
+        // Common properties
         public List<TransitionData> Transitions { get; set; } = new();
         public UnityEngine.Vector2 GraphPosition { get; set; }
+
+        /// <summary>
+        /// True if this is a sub-state machine rather than a regular animation state.
+        /// </summary>
+        public bool IsSubStateMachine => SubStateMachine != null;
     }
 
     /// <summary>

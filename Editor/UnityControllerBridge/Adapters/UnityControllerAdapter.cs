@@ -62,7 +62,7 @@ namespace DMotion.Editor.UnityControllerBridge.Adapters
                 data.DefaultStateName = stateMachine.defaultState.name;
             }
 
-            // Read states
+            // Read regular animation states
             foreach (var childState in stateMachine.states)
             {
                 var stateData = ReadState(childState.state, childState.position);
@@ -70,6 +70,24 @@ namespace DMotion.Editor.UnityControllerBridge.Adapters
                 {
                     data.States.Add(stateData);
                 }
+            }
+
+            // NEW: Read sub-state machines (states containing nested machines)
+            if (stateMachine.stateMachines != null && stateMachine.stateMachines.Length > 0)
+            {
+                foreach (var childStateMachine in stateMachine.stateMachines)
+                {
+                    var subMachineState = ReadSubStateMachine(childStateMachine.stateMachine, childStateMachine.position);
+                    if (subMachineState != null)
+                    {
+                        data.States.Add(subMachineState);
+                    }
+                }
+
+                UnityEngine.Debug.Log(
+                    $"[Unity Controller Bridge] Converted {stateMachine.stateMachines.Length} sub-state machine(s) " +
+                    $"(native DMotion support - relationship-based hierarchy)"
+                );
             }
 
             // NEW: Read Any State transitions (pure 1:1 translation, no expansion!)
@@ -122,6 +140,66 @@ namespace DMotion.Editor.UnityControllerBridge.Adapters
             }
 
             return data;
+        }
+
+        /// <summary>
+        /// Reads a Unity sub-state machine and converts it to StateData with SubStateMachineData.
+        /// Supports unlimited depth through recursive ReadStateMachine calls.
+        /// </summary>
+        private static StateData ReadSubStateMachine(AnimatorStateMachine nestedMachine, Vector3 position)
+        {
+            if (nestedMachine == null)
+            {
+                return null;
+            }
+
+            // Recursively read the nested state machine
+            var nestedMachineData = ReadStateMachine(nestedMachine);
+
+            // Find entry state (Unity's default state)
+            string entryStateName = nestedMachineData.DefaultStateName;
+            if (string.IsNullOrEmpty(entryStateName))
+            {
+                Debug.LogWarning($"[Unity Controller Bridge] Sub-state machine '{nestedMachine.name}' has no default state. Using first state as entry.");
+                entryStateName = nestedMachineData.States.Count > 0 ? nestedMachineData.States[0].Name : null;
+            }
+
+            // Read exit transitions (transitions from Entry state to states outside the sub-machine)
+            // Unity represents these as transitions from the nested machine itself
+            var exitTransitions = new System.Collections.Generic.List<TransitionData>();
+            if (nestedMachine.entryTransitions != null && nestedMachine.entryTransitions.Length > 0)
+            {
+                foreach (var exitTransition in nestedMachine.entryTransitions)
+                {
+                    // Entry transitions in Unity are actually exit transitions when looking from parent
+                    // These go to states in the PARENT machine
+                    var transitionData = ReadTransition(exitTransition);
+                    if (transitionData != null)
+                    {
+                        exitTransitions.Add(transitionData);
+                    }
+                }
+            }
+
+            var subMachineData = new SubStateMachineData
+            {
+                NestedStateMachine = nestedMachineData,
+                EntryStateName = entryStateName,
+                ExitTransitions = exitTransitions
+            };
+
+            var stateData = new StateData
+            {
+                Name = nestedMachine.name,
+                GraphPosition = new Vector2(position.x, position.y),
+                SubStateMachine = subMachineData
+            };
+
+            // Transitions from this sub-state machine node to other states in the parent
+            // These are stored on the ChildAnimatorStateMachine's parent connection
+            // We'll handle these in the conversion phase
+
+            return stateData;
         }
 
         private static MotionData ReadMotion(Motion motion)
