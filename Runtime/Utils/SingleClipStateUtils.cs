@@ -12,11 +12,12 @@ namespace DMotion
             BlobAssetReference<ClipEventsBlob> clipEvents,
             ref DynamicBuffer<SingleClipState> singleClips,
             ref DynamicBuffer<AnimationState> animationStates,
-            ref DynamicBuffer<ClipSampler> samplers)
+            ref DynamicBuffer<ClipSampler> samplers,
+            float finalSpeed)
         {
             ref var state = ref stateMachineBlob.Value.States[stateIndex];
             var singleClipState = stateMachineBlob.Value.SingleClipStates[state.StateIndex];
-            return New(singleClipState.ClipIndex, state.Speed, state.Loop,
+            return New(singleClipState.ClipIndex, finalSpeed, state.Loop,
                 clips,
                 clipEvents,
                 ref singleClips,

@@ -62,6 +62,11 @@ namespace DMotion.Editor
         private Dictionary<TransitionPair, TransitionEdge> transitionToEdgeView =
             new Dictionary<TransitionPair, TransitionEdge>();
 
+        // NEW: Any State node and transitions
+        private AnyStateNodeView anyStateNodeView;
+        private Dictionary<AnimationStateAsset, TransitionEdge> anyStateTransitionEdges =
+            new Dictionary<AnimationStateAsset, TransitionEdge>();
+
         internal StateMachineAsset StateMachine => model.StateMachineAsset;
         internal VisualTreeAsset StateNodeXml => model.StateNodeXml;
 
@@ -85,6 +90,7 @@ namespace DMotion.Editor
                     : DropdownMenuAction.Status.Normal;
                 evt.menu.AppendAction("New State", a => CreateState(a, typeof(SingleClipStateAsset)), status);
                 evt.menu.AppendAction("New Blend Tree 1D", a => CreateState(a, typeof(LinearBlendStateAsset)), status);
+                evt.menu.AppendAction("New Sub-State Machine", a => CreateState(a, typeof(SubStateMachineStateAsset)), status);
             }
 
             evt.StopPropagation();
@@ -107,10 +113,17 @@ namespace DMotion.Editor
                     }
                     else if (el is TransitionEdge transition)
                     {
+                        // Regular state → state transition
                         if (transition.output.node is StateNodeView from &&
                             transition.input.node is StateNodeView to)
                         {
                             DeleteAllOutTransitions(from.State, to.State);
+                        }
+                        // Any State → state transition
+                        else if (transition.output.node is AnyStateNodeView &&
+                                 transition.input.node is StateNodeView toState)
+                        {
+                            DeleteAnyStateTransition(toState.State);
                         }
                     }
                 }
@@ -122,10 +135,17 @@ namespace DMotion.Editor
                 {
                     if (edge is TransitionEdge)
                     {
+                        // Regular state → state transition
                         if (edge.output.node is StateNodeView fromStateView &&
                             edge.input.node is StateNodeView toStateView)
                         {
                             CreateOutTransition(fromStateView.State, toStateView.State);
+                        }
+                        // Any State → state transition
+                        else if (edge.output.node is AnyStateNodeView &&
+                                 edge.input.node is StateNodeView toStateView)
+                        {
+                            CreateAnyStateTransition(toStateView.State);
                         }
                     }
                 }
@@ -187,10 +207,14 @@ namespace DMotion.Editor
             model = newModel;
             stateToView.Clear();
             transitionToEdgeView.Clear();
+            anyStateTransitionEdges.Clear();
 
             graphViewChanged -= OnGraphViewChanged;
             DeleteElements(graphElements.ToList());
             graphViewChanged += OnGraphViewChanged;
+
+            // Create Any State node (always present)
+            InstantiateAnyStateNode();
 
             foreach (var s in model.StateMachineAsset.States)
             {
@@ -203,6 +227,12 @@ namespace DMotion.Editor
                 {
                     InstantiateTransitionEdge(t, i);
                 }
+            }
+
+            // Create Any State transition edges
+            foreach (var anyTransition in model.StateMachineAsset.AnyStateTransitions)
+            {
+                InstantiateAnyStateTransitionEdge(anyTransition);
             }
 
             model.ParametersInspectorView.SetInspector<ParametersInspector, ParameterInspectorModel>(
@@ -290,6 +320,70 @@ namespace DMotion.Editor
             };
             model.InspectorView.SetInspector<TransitionGroupInspector, TransitionGroupInspectorModel>(
                 inspectorModel.FromState, inspectorModel);
+        }
+
+        // NEW: Any State support methods
+
+        private void InstantiateAnyStateNode()
+        {
+            anyStateNodeView = new AnyStateNodeView(model.StateMachineAsset);
+            AddElement(anyStateNodeView);
+            anyStateNodeView.AnyStateSelectedEvent += OnAnyStateSelected;
+        }
+
+        private void InstantiateAnyStateTransitionEdge(StateOutTransition anyTransition)
+        {
+            var toStateView = GetViewForState(anyTransition.ToState);
+            if (toStateView == null || anyStateNodeView == null)
+                return;
+
+            var edge = anyStateNodeView.output.ConnectTo<TransitionEdge>(toStateView.input);
+            edge.Model = new TransitionEdgeModel()
+            {
+                TransitionCount = 1,
+                StateMachineAsset = model.StateMachineAsset,
+                SelectedEntity = model.SelectedEntity
+            };
+            AddElement(edge);
+            anyStateTransitionEdges[anyTransition.ToState] = edge;
+
+            edge.TransitionSelectedEvent += OnAnyStateTransitionSelected;
+        }
+
+        private void CreateAnyStateTransition(AnimationStateAsset toState)
+        {
+            var transition = new StateOutTransition(toState);
+            model.StateMachineAsset.AnyStateTransitions.Add(transition);
+            InstantiateAnyStateTransitionEdge(transition);
+        }
+
+        private void DeleteAnyStateTransition(AnimationStateAsset toState)
+        {
+            model.StateMachineAsset.AnyStateTransitions.RemoveAll(t => t.ToState == toState);
+            anyStateTransitionEdges.Remove(toState);
+        }
+
+        private void OnAnyStateSelected(AnyStateNodeView obj)
+        {
+            // Show list of all Any State transitions in inspector
+            model.InspectorView.SetInspector<ParametersInspector, ParameterInspectorModel>(
+                model.StateMachineAsset, new ParameterInspectorModel()
+                {
+                    StateMachine = model.StateMachineAsset
+                });
+        }
+
+        private void OnAnyStateTransitionSelected(TransitionEdge obj)
+        {
+            if (obj.input.node is StateNodeView toStateView)
+            {
+                var inspectorModel = new AnyStateInspectorModel()
+                {
+                    ToState = toStateView.State
+                };
+                model.InspectorView.SetInspector<AnyStateTransitionsInspector, AnyStateInspectorModel>(
+                    model.StateMachineAsset, inspectorModel);
+            }
         }
     }
 }

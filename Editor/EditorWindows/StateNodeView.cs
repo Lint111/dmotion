@@ -24,6 +24,13 @@ namespace DMotion.Editor
         }
     }
 
+    internal class SubStateMachineStateNodeView : StateNodeView<SubStateMachineStateAsset>
+    {
+        public SubStateMachineStateNodeView(VisualTreeAsset asset) : base(asset)
+        {
+        }
+    }
+
     internal class StateNodeView<T> : StateNodeView
         where T : AnimationStateAsset
     {
@@ -109,6 +116,7 @@ namespace DMotion.Editor
             {
                 SingleClipStateAsset _ => new SingleClipStateNodeView(model.ParentView.StateNodeXml),
                 LinearBlendStateAsset _ => new LinearBlendStateNodeView(model.ParentView.StateNodeXml),
+                SubStateMachineStateAsset _ => new SubStateMachineStateNodeView(model.ParentView.StateNodeXml),
                 _ => throw new NotImplementedException()
             };
 

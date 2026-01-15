@@ -17,6 +17,8 @@ namespace DMotion.Authoring
     {
         public GameObject Owner;
         public Animator Animator;
+
+        [Tooltip("Reference to a DMotion StateMachineAsset")]
         public StateMachineAsset StateMachineAsset;
 
         public RootMotionMode RootMotionMode;
@@ -47,16 +49,18 @@ namespace DMotion.Authoring
 
         public bool Bake(AnimationStateMachineAuthoring authoring, IBaker baker)
         {
-            ValidateStateMachine(authoring);
+            var stateMachine = authoring.StateMachineAsset;
+            ValidateStateMachine(authoring, stateMachine);
+
             Owner = baker.GetEntity(authoring.Owner, TransformUsageFlags.Dynamic);
             RootMotionMode = authoring.RootMotionMode;
-            EnableEvents = authoring.EnableEvents && authoring.StateMachineAsset.Clips.Any(c => c.Events.Length > 0);
-            clipsBlobHandle = baker.RequestCreateBlobAsset(authoring.Animator, authoring.StateMachineAsset.Clips);
-            stateMachineBlobHandle = baker.RequestCreateBlobAsset(authoring.StateMachineAsset);
-            clipEventsBlobHandle = baker.RequestCreateBlobAsset(authoring.StateMachineAsset.Clips);
+            EnableEvents = authoring.EnableEvents && stateMachine.Clips.Any(c => c.Events.Length > 0);
+            clipsBlobHandle = baker.RequestCreateBlobAsset(authoring.Animator, stateMachine.Clips);
+            stateMachineBlobHandle = baker.RequestCreateBlobAsset(stateMachine);
+            clipEventsBlobHandle = baker.RequestCreateBlobAsset(stateMachine.Clips);
             AnimationStateMachineConversionUtils.AddStateMachineParameters(baker,
                 baker.GetEntity(TransformUsageFlags.Dynamic),
-                authoring.StateMachineAsset);
+                stateMachine);
             return true;
         }
 
@@ -91,18 +95,22 @@ namespace DMotion.Authoring
                 RootMotionMode);
         }
 
-        private void ValidateStateMachine(AnimationStateMachineAuthoring authoring)
+        private void ValidateStateMachine(AnimationStateMachineAuthoring authoring, StateMachineAsset stateMachine)
         {
-            if (authoring.StateMachineAsset != null)
+            if (stateMachine != null)
             {
-                foreach (var s in authoring.StateMachineAsset.States)
+                foreach (var s in stateMachine.States)
                 {
                     foreach (var c in s.Clips)
                     {
                         Assert.IsTrue(c != null && c.Clip != null,
-                            $"State ({s.name}) in State Machine {authoring.StateMachineAsset.name} has invalid clips");
+                            $"State ({s.name}) in State Machine {stateMachine.name} has invalid clips");
                     }
                 }
+            }
+            else
+            {
+                Assert.IsTrue(false, $"AnimationStateMachineAuthoring on {authoring.gameObject.name}: StateMachineAsset is null");
             }
         }
     }

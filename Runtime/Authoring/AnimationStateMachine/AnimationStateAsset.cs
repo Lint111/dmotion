@@ -10,6 +10,9 @@ namespace DMotion.Authoring
         public bool Loop = true;
         public float Speed = 1;
 
+        [Tooltip("Optional parameter to multiply speed at runtime. If null, uses constant Speed value.")]
+        public FloatParameterAsset SpeedParameter;
+
         public List<StateOutTransition> OutTransitions = new(); 
 
         public abstract StateType Type { get; }

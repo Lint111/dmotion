@@ -51,4 +51,35 @@ namespace DMotion
             };
         }
     }
+
+    /// <summary>
+    /// Global transition that can be taken from any state in the state machine.
+    /// Evaluated before regular state transitions, matching Unity's Any State behavior.
+    /// </summary>
+    internal struct AnyStateTransition
+    {
+        /// <summary>Destination state index</summary>
+        internal short ToStateIndex;
+
+        /// <summary>Blend duration in seconds</summary>
+        internal float TransitionDuration;
+
+        /// <summary>
+        /// End time in seconds (converted from Unity's normalized exit time).
+        /// Only checked if HasEndTime is true.
+        /// </summary>
+        internal float TransitionEndTime;
+
+        /// <summary>Bool transition conditions (all must be true)</summary>
+        internal BlobArray<BoolTransition> BoolTransitions;
+
+        /// <summary>Int transition conditions (all must be true)</summary>
+        internal BlobArray<IntTransition> IntTransitions;
+
+        /// <summary>Whether this transition requires reaching an end time</summary>
+        internal bool HasEndTime => TransitionEndTime > 0;
+
+        /// <summary>Whether this transition has any conditions to evaluate</summary>
+        internal bool HasAnyConditions => BoolTransitions.Length > 0 || IntTransitions.Length > 0;
+    }
 }
