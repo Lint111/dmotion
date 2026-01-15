@@ -116,6 +116,9 @@ namespace DMotion.Editor.UnityControllerBridge.Core
         public bool Loop { get; set; } = true;
         public Vector2 GraphPosition { get; set; }
 
+        // Speed parameter (optional runtime multiplier)
+        public string SpeedParameterName { get; set; }
+
         // Single clip data
         public string ClipName { get; set; }
         public AnimationClip Clip { get; set; }

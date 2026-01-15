@@ -16,7 +16,8 @@ namespace DMotion
             BlobAssetReference<ClipEventsBlob> clipEvents,
             ref DynamicBuffer<LinearBlendStateMachineState> linearBlendStates,
             ref DynamicBuffer<AnimationState> animationStates,
-            ref DynamicBuffer<ClipSampler> samplers)
+            ref DynamicBuffer<ClipSampler> samplers,
+            float finalSpeed)
         {
             var linearBlendState = new LinearBlendStateMachineState
             {
@@ -46,7 +47,7 @@ namespace DMotion
             }
 
             var animationStateIndex = AnimationState.New(ref animationStates, ref samplers, newSamplers,
-                linearBlendState.StateBlob.Speed,
+                finalSpeed,
                 linearBlendState.StateBlob.Loop);
 
             linearBlendState.AnimationStateId = animationStates[animationStateIndex].Id;

@@ -51,7 +51,8 @@ namespace DMotion
                         ref singleClipStates,
                         ref linearBlendStates,
                         ref animationStates,
-                        ref clipSamplers);
+                        ref clipSamplers,
+                        floatParameters);
 
                     animationStateTransitionRequest = new AnimationStateTransitionRequest
                     {
@@ -140,7 +141,8 @@ namespace DMotion
                             ref singleClipStates,
                             ref linearBlendStates,
                             ref animationStates,
-                            ref clipSamplers);
+                            ref clipSamplers,
+                            floatParameters);
 
                         animationStateTransitionRequest = new AnimationStateTransitionRequest
                         {
@@ -162,7 +164,8 @@ namespace DMotion
                             ref singleClipStates,
                             ref linearBlendStates,
                             ref animationStates,
-                            ref clipSamplers);
+                            ref clipSamplers,
+                            floatParameters);
 
                         animationStateTransitionRequest = new AnimationStateTransitionRequest
                         {
@@ -278,13 +281,17 @@ namespace DMotion
             ref DynamicBuffer<SingleClipState> singleClipStates,
             ref DynamicBuffer<LinearBlendStateMachineState> linearBlendStates,
             ref DynamicBuffer<AnimationState> animationStates,
-            ref DynamicBuffer<ClipSampler> samplers)
+            ref DynamicBuffer<ClipSampler> samplers,
+            in DynamicBuffer<FloatParameter> floatParameters)
         {
             ref var state = ref stateMachineBlob.Value.States[stateIndex];
             var stateRef = new StateMachineStateRef
             {
                 StateIndex = (ushort)stateIndex
             };
+
+            // Calculate final speed (base speed * speed parameter if present)
+            float finalSpeed = GetFinalSpeed(ref state, floatParameters);
 
             byte animationStateId;
             switch (state.Type)
@@ -296,7 +303,8 @@ namespace DMotion
                         clipsBlob,
                         clipEventsBlob,
                         ref singleClipStates,
-                        ref animationStates, ref samplers);
+                        ref animationStates, ref samplers,
+                        finalSpeed);
                     animationStateId = singleClipState.AnimationStateId;
                     break;
                 case StateType.LinearBlend:
@@ -306,7 +314,8 @@ namespace DMotion
                         clipsBlob,
                         clipEventsBlob,
                         ref linearBlendStates,
-                        ref animationStates, ref samplers);
+                        ref animationStates, ref samplers,
+                        finalSpeed);
 
                     animationStateId = linearClipState.AnimationStateId;
                     break;
@@ -320,6 +329,30 @@ namespace DMotion
 
             stateRef.AnimationStateId = (sbyte)animationStateId;
             return stateRef;
+        }
+
+        /// <summary>
+        /// Calculates final animation speed by multiplying base speed with optional speed parameter.
+        /// </summary>
+        [BurstCompile]
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private float GetFinalSpeed(ref AnimationStateBlob state, in DynamicBuffer<FloatParameter> floatParameters)
+        {
+            // If no speed parameter is set, use base speed
+            if (state.SpeedParameterIndex == ushort.MaxValue)
+            {
+                return state.Speed;
+            }
+
+            // Get speed multiplier from parameter
+            if (state.SpeedParameterIndex < floatParameters.Length)
+            {
+                float speedMultiplier = floatParameters[(int)state.SpeedParameterIndex].Value;
+                return state.Speed * speedMultiplier;
+            }
+
+            // Fallback if parameter index is invalid
+            return state.Speed;
         }
 
         /// <summary>

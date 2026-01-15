@@ -258,6 +258,22 @@ namespace DMotion.Editor.UnityControllerBridge.Adapters
                     {
                         asset.Speed = state.Speed;
                         asset.Loop = state.Loop;
+
+                        // Link speed parameter if present
+                        if (!string.IsNullOrEmpty(state.SpeedParameterName))
+                        {
+                            var speedParam = parameters.OfType<FloatParameterAsset>()
+                                .FirstOrDefault(p => p.name == state.SpeedParameterName);
+
+                            if (speedParam != null)
+                            {
+                                asset.SpeedParameter = speedParam;
+                            }
+                            else
+                            {
+                                Debug.LogWarning($"[DMotionAssetBuilder] Speed parameter '{state.SpeedParameterName}' for state '{state.Name}' not found");
+                            }
+                        }
                     }
 
                     // Create transitions

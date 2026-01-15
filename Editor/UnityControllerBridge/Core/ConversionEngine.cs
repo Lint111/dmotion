@@ -187,13 +187,13 @@ namespace DMotion.Editor.UnityControllerBridge.Core
                 hasExitTime ? "Converted to absolute EndTime" : ""
             );
 
-            // Speed Parameter (not yet supported)
+            // Speed Parameter
             info.AddFeature(
                 "Speed Parameter",
                 hasSpeedParameter,
-                "Not Supported",
-                hasSpeedParameter ? ConversionStatus.NotSupported : ConversionStatus.NotUsed,
-                hasSpeedParameter ? "Speed parameters are not yet supported - speed will be constant" : ""
+                "FloatParameterAsset",
+                hasSpeedParameter ? ConversionStatus.Supported : ConversionStatus.NotUsed,
+                hasSpeedParameter ? "Base speed multiplied by float parameter at runtime" : ""
             );
 
             // 2D Blend Trees (not supported)
@@ -308,16 +308,6 @@ namespace DMotion.Editor.UnityControllerBridge.Core
             }
 
             // Check for unsupported features in log
-            if (_log.Messages.Any(m => m.Text.Contains("speed parameter")))
-            {
-                recommendations.Add(new ConversionRecommendation
-                {
-                    Title = "Speed Parameters Not Supported",
-                    Description = "Some states use speed parameters which are not yet supported. Animation speed will be constant. This feature is planned for a future release.",
-                    Priority = RecommendationPriority.Medium
-                });
-            }
-
             if (_log.Messages.Any(m => m.Text.Contains("cycle offset")))
             {
                 recommendations.Add(new ConversionRecommendation
@@ -500,7 +490,8 @@ namespace DMotion.Editor.UnityControllerBridge.Core
             // Handle speed parameter
             if (state.SpeedParameterActive && !string.IsNullOrEmpty(state.SpeedParameter))
             {
-                _log.AddWarning($"State '{state.Name}' uses speed parameter '{state.SpeedParameter}' - not directly supported, speed will be constant");
+                converted.SpeedParameterName = state.SpeedParameter;
+                _log.AddInfo($"State '{state.Name}': Speed parameter '{state.SpeedParameter}' will multiply base speed at runtime");
             }
 
             // Handle cycle offset
