@@ -241,8 +241,27 @@ namespace DMotion.Authoring
                 Type = state.Type,
                 StateIndex = (ushort)stateIndex,
                 Loop = state.Loop,
-                Speed = state.Speed
+                Speed = state.Speed,
+                SpeedParameterIndex = ushort.MaxValue // Default: no speed parameter
             };
+
+            // Resolve speed parameter index if present
+            if (state.SpeedParameter != null)
+            {
+                var speedParamIndex = stateMachineAsset.Parameters
+                    .OfType<FloatParameterAsset>()
+                    .ToList()
+                    .FindIndex(p => p == state.SpeedParameter);
+
+                if (speedParamIndex >= 0)
+                {
+                    stateConversionData.SpeedParameterIndex = (ushort)speedParamIndex;
+                }
+                else
+                {
+                    Debug.LogWarning($"({stateMachineAsset.name}) Couldn't find speed parameter {state.SpeedParameter?.name} for state {state.name}");
+                }
+            }
 
             //Create Transition Groups
             var transitionCount = state.OutTransitions.Count;

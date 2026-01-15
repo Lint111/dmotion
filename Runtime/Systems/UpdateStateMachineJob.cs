@@ -23,7 +23,8 @@ namespace DMotion
             in AnimationCurrentState animationCurrentState,
             in AnimationStateTransition animationStateTransition,
             in DynamicBuffer<BoolParameter> boolParameters,
-            in DynamicBuffer<IntParameter> intParameters
+            in DynamicBuffer<IntParameter> intParameters,
+            in DynamicBuffer<FloatParameter> floatParameters
         )
         {
             using var scope = Marker.Auto();

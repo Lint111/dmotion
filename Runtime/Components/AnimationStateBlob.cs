@@ -18,6 +18,7 @@ namespace DMotion
         internal ushort StateIndex; // Index into SingleClipStates, LinearBlendStates, or SubStateMachines
         internal bool Loop;
         internal float Speed;
+        internal ushort SpeedParameterIndex; // Parameter index for speed multiplier (ushort.MaxValue = no parameter)
         internal BlobArray<StateOutTransitionGroup> Transitions;
     }
     

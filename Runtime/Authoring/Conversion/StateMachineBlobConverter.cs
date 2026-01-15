@@ -13,6 +13,7 @@ namespace DMotion.Authoring
         internal ushort StateIndex;
         internal bool Loop;
         internal float Speed;
+        internal ushort SpeedParameterIndex; // ushort.MaxValue = no parameter
         internal UnsafeList<StateOutTransitionConversionData> Transitions;
     }
 
@@ -77,6 +78,7 @@ namespace DMotion.Authoring
                         StateIndex = stateConversionData.StateIndex,
                         Loop = stateConversionData.Loop,
                         Speed = stateConversionData.Speed,
+                        SpeedParameterIndex = stateConversionData.SpeedParameterIndex,
                     };
                     
                     //transitions
