@@ -35,12 +35,13 @@ namespace DMotion
 
         /// <summary>
         /// Schedules all clip sampling jobs with proper dependency management.
-        /// Jobs run in parallel where possible, with root motion jobs depending on delta sampling.
+        /// Sampling jobs run in parallel (read-only on ClipSampler), then root motion jobs
+        /// run after ALL sampling completes (due to LocalTransform write conflicts).
         /// </summary>
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            // Sample bones - these jobs can run in parallel from initial dependency
+            // Phase 1: Sample bones - these jobs can run in parallel (all read ClipSampler)
             var sampleOptimizedHandle = new SampleOptimizedBonesJob
             {
                 Marker = Marker_SampleOptimizedBonesJob
@@ -57,23 +58,27 @@ namespace DMotion
                 Marker = Marker_SampleRootDeltasJob
             }.ScheduleParallel(state.Dependency);
 
-            // Root motion jobs depend on delta sampling
+            // Combine ALL sampling handles - root motion jobs must wait for all sampling
+            // because SampleNonOptimizedBones and ApplyRootMotionToEntityJob both write LocalTransform
+            var allSamplingComplete = JobHandle.CombineDependencies(
+                sampleOptimizedHandle, sampleNonOptimizedHandle, sampleRootDeltasHandle);
+
+            // Phase 2: Root motion jobs - must wait for ALL sampling to complete
             var applyRootMotionHandle = new ApplyRootMotionToEntityJob
             {
                 Marker = Marker_ApplyRootMotionToEntityJob
-            }.ScheduleParallel(sampleRootDeltasHandle);
+            }.ScheduleParallel(allSamplingComplete);
 
             var transferRootMotionHandle = new TransferRootMotionJob
             {
                 CfeDeltaPosition = SystemAPI.GetComponentLookup<RootDeltaTranslation>(true),
                 CfeDeltaRotation = SystemAPI.GetComponentLookup<RootDeltaRotation>(true),
                 Marker = Marker_TransferRootMotionJob
-            }.ScheduleParallel(sampleRootDeltasHandle);
+            }.ScheduleParallel(allSamplingComplete);
 
-            // Combine all job handles for proper dependency tracking
-            state.Dependency = JobHandle.CombineDependencies(sampleOptimizedHandle, sampleNonOptimizedHandle,
-                transferRootMotionHandle);
-            state.Dependency = JobHandle.CombineDependencies(state.Dependency, applyRootMotionHandle);
+            // Final dependency includes all jobs
+            state.Dependency = JobHandle.CombineDependencies(
+                allSamplingComplete, applyRootMotionHandle, transferRootMotionHandle);
         }
     }
 }
