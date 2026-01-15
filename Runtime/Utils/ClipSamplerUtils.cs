@@ -115,18 +115,35 @@ namespace DMotion
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static int IdToIndex<T>(this DynamicBuffer<T> samplers, byte id) where T : unmanaged, IElementWithId
         {
+            var length = samplers.Length;
+            if (length == 0) return -1;
+
             // Fast path: check if id matches index (common case when IDs are sequential)
-            if (id < samplers.Length && samplers[id].Id == id)
+            if (id < length && samplers[id].Id == id)
             {
                 return id;
             }
 
-            // Fallback: linear search for fragmented ID space
-            for (var i = 0; i < samplers.Length; i++)
+            // Binary search for fragmented ID space (buffer is sorted by ID)
+            int left = 0;
+            int right = length - 1;
+
+            while (left <= right)
             {
-                if (samplers[i].Id == id)
+                int mid = left + (right - left) / 2;
+                byte midId = samplers[mid].Id;
+
+                if (midId == id)
                 {
-                    return i;
+                    return mid;
+                }
+                if (midId < id)
+                {
+                    left = mid + 1;
+                }
+                else
+                {
+                    right = mid - 1;
                 }
             }
 
