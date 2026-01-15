@@ -333,6 +333,8 @@ After conversion, you can inspect the generated `StateMachineAsset`:
 
 **Reason**: DMotion doesn't have sub-state machines or exit nodes. This feature requires Sub-State Machine Flattening (Phase 12.5).
 
+**TODO**: Tracked in [UnityControllerBridge_TODOs.md](UnityControllerBridge_TODOs.md#todo-exit-state--exit-transitions). Exit transitions will be resolved during sub-state machine flattening implementation.
+
 ---
 
 ### 3. Memory Overhead

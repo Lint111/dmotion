@@ -34,6 +34,11 @@ This document provides a prioritized roadmap to improve Unity AnimatorController
 **Dependencies**: None for items 12.4-12.5, DMotion for 12.1-12.3
 **Impact**: High value, improves workflow significantly
 
+**Status**:
+- ✅ 12.4: Any State Expansion - **COMPLETE** (includes self-transition support)
+- ⏸️ 12.1-12.3: Awaiting DMotion runtime changes
+- 🔄 12.5: Sub-State Machine Flattening - Planned
+
 ### 12.1: Speed Parameter Support ⭐⭐⭐
 **Value**: High | **Complexity**: Medium | **DMotion Changes Required**: Yes
 

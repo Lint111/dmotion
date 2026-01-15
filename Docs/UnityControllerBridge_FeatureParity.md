@@ -16,6 +16,10 @@ This document provides a comprehensive analysis of Unity AnimatorController feat
 - ❌ **Not Supported**: Not implemented (blocked by Unity or DMotion limitations)
 - 🔵 **Planned**: Not implemented yet, but feasible
 
+### Related Documents
+- **[Action Plan](UnityControllerBridge_ActionPlan.md)**: Prioritized roadmap for Phases 12-15
+- **[TODOs](UnityControllerBridge_TODOs.md)**: Unity features without action plans (tracking document)
+
 ---
 
 ## 1. Core Features
@@ -120,7 +124,7 @@ Unity's StateMachineBehaviour scripts run on state enter/exit/update. This is a 
 | └─ Int Less | ✅ | ✅ | ✅ | `IntConditionComparison.Less` |
 | └─ Float Greater/Less | ✅ | ❌ | ❌ | DMotion doesn't have float conditions |
 | **Interruption** | ✅ | ❌ | ❌ | Advanced transition control |
-| Can Transition To Self | ✅ | ❌ | ❌ | Not tested |
+| Can Transition To Self | ✅ | ✅ | ✅ | Works correctly, verified in Phase 12.4 |
 | Ordered Interruption | ✅ | ❌ | ❌ | Priority-based transition selection |
 
 ### Transition Offset (🔵 Planned)
@@ -254,7 +258,7 @@ Unity allows hierarchical state machines (e.g., a "Combat" sub-machine containin
 
 | Feature | Unity | DMotion | Bridge | Implementation Notes |
 |---------|-------|---------|--------|---------------------|
-| **Any State** | ✅ | ❌ | ❌ | Global transitions |
+| **Any State** | ✅ | ❌ | ✅ | Global transitions (Phase 12.4 complete) |
 | **Entry State** | ✅ | ✅ | 🟡 | Default state only |
 | **Exit State** | ✅ | ❌ | ❌ | Leave state machine |
 | Up State (sub-machine) | ✅ | ❌ | ❌ | Exit to parent |
