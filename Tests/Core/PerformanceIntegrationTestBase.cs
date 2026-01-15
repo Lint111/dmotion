@@ -1,8 +1,10 @@
 using System;
 using System.Collections;
+using System.Diagnostics;
 using DMotion.PerformanceTests;
 using Latios.Kinemation;
 using NUnit.Framework;
+using Unity.Burst;
 using Unity.Collections;
 using Unity.Core;
 using Unity.Entities;
@@ -10,19 +12,21 @@ using Unity.PerformanceTesting;
 using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.TestTools;
+using Debug = UnityEngine.Debug;
 
 namespace DMotion.Tests
 {
     /// <summary>
     /// Base class for performance integration tests that need real SmartBlobber-baked ACL clip data.
     ///
-    /// Uses the same pre-baked test scene as IntegrationTestBase but adds performance measurement
-    /// capabilities and entity instantiation for stress testing.
+    /// DESIGN PRINCIPLE: Never call world.Update() during setup/teardown.
+    /// - Setup only loads scene and finds prefab (no system execution)
+    /// - Burst compilation happens lazily during actual test execution
+    /// - Teardown only destroys entities (no system execution)
     ///
     /// Prerequisites:
     /// 1. Run "DMotion/Tests/Setup Test Scene" in editor
-    /// 2. Open TestAnimationScene.unity to trigger baking
-    /// 3. Ensure stress test prefabs (with PerformanceTestsAuthoring) are included
+    /// 2. Wait for subscene baking to complete
     /// </summary>
     public abstract class PerformanceIntegrationTestBase
     {
@@ -34,7 +38,10 @@ namespace DMotion.Tests
         private float elapsedTime;
         private NativeArray<SystemHandle> allSystems;
         private readonly BlobAndEntityTracker tracker = new BlobAndEntityTracker("PerformanceIntegrationTestBase");
-        private BurstAndJobConfigsCache burstCache;
+
+        // Cached Burst settings to restore after test
+        private bool cachedBurstSynchronous;
+        private bool cachedBurstSafetyChecks;
 
         /// <summary>
         /// Override to specify which systems to create for testing.
@@ -54,19 +61,36 @@ namespace DMotion.Tests
         [UnitySetUp]
         public IEnumerator SetUp()
         {
-            // Cache and set max performance Burst parameters
-            burstCache.Cache();
-            PerformanceTestUtils.SetMaxPerformanceBurstParameters();
+            var setupStopwatch = Stopwatch.StartNew();
+
+            var memAtStart = GC.GetTotalMemory(false) / (1024 * 1024);
+            Debug.Log($"[PerformanceIntegrationTestBase] SetUp starting. Managed memory: {memAtStart}MB");
+
+            // CRITICAL: Disable synchronous Burst compilation to prevent freezes
+            // Burst will compile asynchronously in the background
+            cachedBurstSynchronous = BurstCompiler.Options.EnableBurstCompileSynchronously;
+            cachedBurstSafetyChecks = BurstCompiler.Options.EnableBurstSafetyChecks;
+            BurstCompiler.Options.EnableBurstCompileSynchronously = false;
 
             // Check if test scene exists
             if (!PrebakedTestHelper.IsTestSceneSetup())
             {
-                Assert.Ignore("Test scene not set up. Run 'DMotion/Tests/Setup Test Scene' first.");
+                // In CI/batch mode, fail loudly so broken test setup is noticed
+                if (Application.isBatchMode || IsContinuousIntegration())
+                {
+                    Assert.Fail("CRITICAL: Test scene not set up. " +
+                               "CI must run 'DMotion/Tests/Setup Test Scene' before running performance tests.");
+                }
+                else
+                {
+                    Assert.Ignore("Test scene not set up. Run 'DMotion/Tests/Setup Test Scene' first.");
+                }
                 yield break;
             }
 
             // Load the pre-baked test scene
             yield return PrebakedTestHelper.LoadTestScene();
+            Debug.Log($"[PerformanceIntegrationTestBase] Scene loaded in {setupStopwatch.Elapsed.TotalSeconds:F1}s");
 
             // Get the default world with baked entities
             world = World.DefaultGameObjectInjectionWorld;
@@ -78,10 +102,10 @@ namespace DMotion.Tests
 
             manager = world.EntityManager;
 
-            // Find the stress test prefab entity (has StressTestOneShotClip component)
-            yield return FindStressTestPrefab();
+            // Find the stress test prefab - synchronous, no world.Update()
+            FindStressTestPrefabSync();
 
-            // Create and track the requested systems
+            // Create the requested systems (but don't run them yet)
             if (SystemTypes.Length > 0)
             {
                 allSystems = new NativeArray<SystemHandle>(SystemTypes.Length, Allocator.Persistent);
@@ -93,68 +117,47 @@ namespace DMotion.Tests
 
             elapsedTime = Time.time;
 
+            Debug.Log($"[PerformanceIntegrationTestBase] Setup completed in {setupStopwatch.Elapsed.TotalSeconds:F1}s");
+
             // Allow subclass setup
             yield return OnSetUp();
         }
 
         /// <summary>
-        /// Finds the stress test prefab entity from the baked scene.
+        /// Finds the stress test prefab entity synchronously without any world.Update() calls.
         /// </summary>
-        private IEnumerator FindStressTestPrefab()
+        private void FindStressTestPrefabSync()
         {
-            var query = manager.CreateEntityQuery(
-                typeof(DMotion.PerformanceTests.StressTestOneShotClip),
+            // Look for prefab with StressTestOneShotClip
+            var prefabQuery = manager.CreateEntityQuery(
+                typeof(StressTestOneShotClip),
                 typeof(Prefab));
 
-            int attempts = 0;
-            const int maxAttempts = 60; // ~1 second at 60fps
-
-            while (attempts < maxAttempts)
+            using (var entities = prefabQuery.ToEntityArray(Allocator.TempJob))
             {
-                var entities = query.ToEntityArray(Allocator.Temp);
                 if (entities.Length > 0)
                 {
                     stressTestPrefabEntity = entities[0];
-                    Debug.Log($"[PerformanceIntegrationTestBase] Found stress test prefab entity: {stressTestPrefabEntity}");
-
-                    // Also get the clips blob from the entity
-                    if (manager.HasComponent<DMotion.PerformanceTests.StressTestOneShotClip>(stressTestPrefabEntity))
-                    {
-                        var stressTest = manager.GetComponentData<DMotion.PerformanceTests.StressTestOneShotClip>(stressTestPrefabEntity);
-                        clipsBlob = stressTest.Clips;
-                        Debug.Log($"[PerformanceIntegrationTestBase] Got clips blob with {clipsBlob.Value.clips.Length} clips");
-                    }
-
-                    entities.Dispose();
-                    yield break;
-                }
-                entities.Dispose();
-
-                attempts++;
-                yield return null;
-            }
-
-            // If no prefab entity found, try to find non-prefab stress test entity
-            query = manager.CreateEntityQuery(typeof(DMotion.PerformanceTests.StressTestOneShotClip));
-            var nonPrefabEntities = query.ToEntityArray(Allocator.Temp);
-            if (nonPrefabEntities.Length > 0)
-            {
-                // Use first entity as template - we'll need to copy it
-                var templateEntity = nonPrefabEntities[0];
-                Debug.Log($"[PerformanceIntegrationTestBase] Found stress test entity (non-prefab): {templateEntity}");
-
-                if (manager.HasComponent<DMotion.PerformanceTests.StressTestOneShotClip>(templateEntity))
-                {
-                    var stressTest = manager.GetComponentData<DMotion.PerformanceTests.StressTestOneShotClip>(templateEntity);
+                    var stressTest = manager.GetComponentData<StressTestOneShotClip>(stressTestPrefabEntity);
                     clipsBlob = stressTest.Clips;
-                    stressTestPrefabEntity = templateEntity;
-                    Debug.Log($"[PerformanceIntegrationTestBase] Using non-prefab entity as template");
+                    Debug.Log($"[PerformanceIntegrationTestBase] Found stress test prefab: {stressTestPrefabEntity}, clips: {clipsBlob.Value.clips.Length}");
+                    return;
                 }
-
-                nonPrefabEntities.Dispose();
-                yield break;
             }
-            nonPrefabEntities.Dispose();
+
+            // Fallback: look for non-prefab entity
+            var nonPrefabQuery = manager.CreateEntityQuery(typeof(StressTestOneShotClip));
+            using (var entities = nonPrefabQuery.ToEntityArray(Allocator.TempJob))
+            {
+                if (entities.Length > 0)
+                {
+                    stressTestPrefabEntity = entities[0];
+                    var stressTest = manager.GetComponentData<StressTestOneShotClip>(stressTestPrefabEntity);
+                    clipsBlob = stressTest.Clips;
+                    Debug.Log($"[PerformanceIntegrationTestBase] Found stress test entity (non-prefab): {stressTestPrefabEntity}");
+                    return;
+                }
+            }
 
             Debug.LogWarning("[PerformanceIntegrationTestBase] No stress test prefab found. " +
                            "Ensure prefab with PerformanceTestsAuthoring is in the test scene.");
@@ -171,34 +174,17 @@ namespace DMotion.Tests
         [UnityTearDown]
         public IEnumerator TearDown()
         {
-            // Allow subclass teardown
+            Debug.Log("[PerformanceIntegrationTestBase] TearDown starting...");
+
+            // Allow subclass teardown first
             yield return OnTearDown();
 
-            // Complete all jobs before cleanup to avoid race conditions
-            if (manager.World != null && manager.World.IsCreated)
+            // Complete jobs but DON'T destroy entities yet - they need to exist during scene unload
+            // Otherwise Kinemation jobs scheduled during unload yields will crash
+            if (world != null && world.IsCreated)
             {
                 manager.CompleteAllTrackedJobs();
             }
-
-            // Destroy all instantiated stress test entities (non-prefabs)
-            if (manager.World != null && manager.World.IsCreated)
-            {
-                var query = manager.CreateEntityQuery(
-                    ComponentType.ReadOnly<DMotion.PerformanceTests.StressTestOneShotClip>(),
-                    ComponentType.Exclude<Prefab>());
-                var entitiesToDestroy = query.ToEntityArray(Allocator.Temp);
-                if (entitiesToDestroy.Length > 0)
-                {
-                    manager.DestroyEntity(entitiesToDestroy);
-                }
-                entitiesToDestroy.Dispose();
-                
-                // Complete jobs again after entity destruction
-                manager.CompleteAllTrackedJobs();
-            }
-
-            // Clean up tracked blobs and entities
-            tracker.Cleanup(manager);
 
             // Dispose systems array
             if (allSystems.IsCreated)
@@ -207,16 +193,47 @@ namespace DMotion.Tests
             }
 
             // Restore Burst settings
-            burstCache.SetCachedValues();
+            BurstCompiler.Options.EnableBurstCompileSynchronously = cachedBurstSynchronous;
+            BurstCompiler.Options.EnableBurstSafetyChecks = cachedBurstSafetyChecks;
 
-            // Let the world stabilize for a few frames before unloading
-            for (int i = 0; i < 5; i++)
+            // Clear references
+            clipsBlob = default;
+            stressTestPrefabEntity = Entity.Null;
+
+            // Unload test scene FIRST (while entities still exist)
+            // This allows Kinemation to process entities during unload yields
+            yield return PrebakedTestHelper.UnloadTestScene();
+
+            // NOW destroy remaining entities - after all yields are done
+            // No more frame updates will happen after this point
+            if (world != null && world.IsCreated)
             {
-                yield return null;
+                manager.CompleteAllTrackedJobs();
+                DestroyTestEntities();
+                tracker.Cleanup(manager);
             }
 
-            // Unload test scene
-            yield return PrebakedTestHelper.UnloadTestScene();
+            Debug.Log("[PerformanceIntegrationTestBase] TearDown complete");
+        }
+
+        /// <summary>
+        /// Destroys test entities synchronously. May cause Kinemation race condition
+        /// errors during scene unload, which are expected and suppressed.
+        /// </summary>
+        private void DestroyTestEntities()
+        {
+            if (world == null || !world.IsCreated)
+                return;
+
+            var query = manager.CreateEntityQuery(typeof(AnimationStateMachine));
+            var count = query.CalculateEntityCount();
+
+            if (count > 0)
+            {
+                Debug.Log($"[PerformanceIntegrationTestBase] Destroying {count} test entities...");
+                manager.DestroyEntity(query);
+                manager.CompleteAllTrackedJobs();
+            }
         }
 
         /// <summary>
@@ -245,24 +262,25 @@ namespace DMotion.Tests
 
         /// <summary>
         /// Updates the world by the specified delta time.
+        /// This is the ONLY place where systems should run.
         /// </summary>
         protected void UpdateWorld(float deltaTime = 1.0f / 60.0f)
         {
-            if (world != null && world.IsCreated)
+            if (world == null || !world.IsCreated)
+                return;
+
+            elapsedTime += deltaTime;
+            world.SetTime(new TimeData(elapsedTime, deltaTime));
+
+            if (allSystems.IsCreated)
             {
-                elapsedTime += deltaTime;
-                world.SetTime(new TimeData(elapsedTime, deltaTime));
-
-                if (allSystems.IsCreated)
+                foreach (var s in allSystems)
                 {
-                    foreach (var s in allSystems)
-                    {
-                        s.Update(world.Unmanaged);
-                    }
+                    s.Update(world.Unmanaged);
                 }
-
-                manager.CompleteAllTrackedJobs();
             }
+
+            manager.CompleteAllTrackedJobs();
         }
 
         /// <summary>
@@ -276,24 +294,23 @@ namespace DMotion.Tests
                 return;
             }
 
-            var ecb = new EntityCommandBuffer(Allocator.Temp);
+            Debug.Log($"[PerformanceIntegrationTestBase] Instantiating {count} entities...");
 
-            for (int i = 0; i < count; i++)
+            using (var ecb = new EntityCommandBuffer(Allocator.TempJob))
             {
-                ecb.Instantiate(stressTestPrefabEntity);
+                for (int i = 0; i < count; i++)
+                {
+                    ecb.Instantiate(stressTestPrefabEntity);
+                }
+                ecb.Playback(manager);
             }
-
-            ecb.Playback(manager);
-            ecb.Dispose();
-
-            // Run one update to initialize the entities
-            UpdateWorld();
 
             Debug.Log($"[PerformanceIntegrationTestBase] Instantiated {count} entities");
         }
 
         /// <summary>
         /// Creates a default performance measurement with profiler marker.
+        /// Burst compilation will happen lazily during warmup iterations.
         /// </summary>
         protected Unity.PerformanceTesting.Measurements.MethodMeasurement DefaultPerformanceMeasure(ProfilerMarker profilerMarker)
         {
@@ -307,6 +324,19 @@ namespace DMotion.Tests
         {
             using var scope = profilerMarker.Auto();
             UpdateWorld();
+        }
+
+        /// <summary>
+        /// Detects if running in a CI environment.
+        /// </summary>
+        private static bool IsContinuousIntegration()
+        {
+            return !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CI")) ||
+                   !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GITHUB_ACTIONS")) ||
+                   !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GITLAB_CI")) ||
+                   !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("JENKINS_URL")) ||
+                   !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TF_BUILD")) ||
+                   !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TEAMCITY_VERSION"));
         }
     }
 }

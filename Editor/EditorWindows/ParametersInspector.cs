@@ -1,4 +1,4 @@
-﻿using DMotion.Authoring;
+using DMotion.Authoring;
 using UnityEditor;
 using UnityEngine;
 
@@ -62,8 +62,7 @@ namespace DMotion.Editor
             where T : AnimationParameterAsset
         {
             model.StateMachine.CreateParameter<T>();
-            serializedObject.ApplyModifiedProperties();
-            serializedObject.Update();
+            serializedObject.ApplyAndUpdate();
         }
     }
 }

@@ -9,14 +9,31 @@ using UnityEngine.UIElements;
 
 namespace DMotion.Editor
 {
-    internal struct TransitionPair
+    internal struct TransitionPair : IEquatable<TransitionPair>
     {
         internal AnimationStateAsset FromState;
         internal AnimationStateAsset ToState;
 
         public override int GetHashCode()
         {
-            return FromState.GetHashCode() * ToState.GetHashCode();
+            unchecked
+            {
+                // Use proper hash combining to avoid collisions
+                int hash = 17;
+                hash = hash * 31 + (FromState != null ? FromState.GetHashCode() : 0);
+                hash = hash * 31 + (ToState != null ? ToState.GetHashCode() : 0);
+                return hash;
+            }
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is TransitionPair other && Equals(other);
+        }
+
+        public bool Equals(TransitionPair other)
+        {
+            return FromState == other.FromState && ToState == other.ToState;
         }
 
         internal TransitionPair(AnimationStateAsset from, AnimationStateAsset to)
@@ -198,6 +215,14 @@ namespace DMotion.Editor
         internal StateNodeView GetViewForState(AnimationStateAsset state)
         {
             return state == null ? null : stateToView.TryGetValue(state, out var view) ? view : null;
+        }
+
+        /// <summary>
+        /// Creates a visual transition edge for a state. Called by StateNodeView when creating transitions.
+        /// </summary>
+        internal void CreateTransitionEdgeForState(AnimationStateAsset state, int outTransitionIndex)
+        {
+            InstantiateTransitionEdge(state, outTransitionIndex);
         }
 
         private void InstantiateTransitionEdge(AnimationStateAsset state, int outTransitionIndex)

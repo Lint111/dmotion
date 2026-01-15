@@ -21,9 +21,7 @@ namespace DMotion
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            new RaiseAnimationEventsJob()
-            {
-            }.ScheduleParallel();
+            state.Dependency = new RaiseAnimationEventsJob().ScheduleParallel(state.Dependency);
         }
     }
 }

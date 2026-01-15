@@ -34,8 +34,6 @@ namespace DMotion
             ref DynamicBuffer<AnimationState> animationStates,
             ref DynamicBuffer<ClipSampler> samplers)
         {
-            var singleClipState = new SingleClipState();
-
             var newSampler = new ClipSampler
             {
                 ClipIndex = clipIndex,
@@ -47,7 +45,16 @@ namespace DMotion
             };
 
             var animationStateIndex = AnimationState.New(ref animationStates, ref samplers, newSampler, speed, loop);
-            singleClipState.AnimationStateId = animationStates[animationStateIndex].Id;
+            if (animationStateIndex < 0)
+            {
+                // Failed to allocate - return invalid state (caller should check IsValid)
+                return default;
+            }
+
+            var singleClipState = new SingleClipState
+            {
+                AnimationStateId = animationStates[animationStateIndex].Id
+            };
             singleClips.Add(singleClipState);
             return singleClipState;
         }

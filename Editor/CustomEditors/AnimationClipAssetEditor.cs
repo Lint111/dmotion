@@ -7,6 +7,11 @@ namespace DMotion.Editor
     [CustomEditor(typeof(AnimationClipAsset))]
     internal class AnimationClipAssetEditor : UnityEditor.Editor
     {
+        /// <summary>
+        /// Right padding for the events drawer to prevent UI overlap with inspector edge.
+        /// </summary>
+        private const float EventsDrawerRightPadding = 60f;
+
         private SingleClipPreview preview;
         private AnimationClipAsset ClipTarget => (AnimationClipAsset)target;
         
@@ -43,13 +48,11 @@ namespace DMotion.Editor
 
                 if (c.changed)
                 {
-                    serializedObject.ApplyModifiedProperties();
-                    serializedObject.Update();
+                    serializedObject.ApplyAndUpdate();
                 }
                 
                 var drawerRect = EditorGUILayout.GetControlRect();
-                //TODO: This magic number is a right padding. Not why this is needed or of a better alternative
-                drawerRect.xMax -= 60;
+                drawerRect.xMax -= EventsDrawerRightPadding;
                 eventsPropertyDrawer.OnInspectorGUI(drawerRect);
             }
         }

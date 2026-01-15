@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using Unity.Assertions;
 using Unity.Burst;
 using Unity.Entities;
@@ -83,10 +83,9 @@ namespace DMotion
                 }
             }
 
-            // From my current understand, we can only be here if if (it's possible I'm wrong though): 
-            // 1 - reserveCount is massive (asserted above), or 2 - we managed to get a very fragmented id space
-            // We don't handle this case (it's not reasonable), so let's scream
-            Assert.IsTrue(false, "This is a bug. I don't know how we could ever be here");
+            // ID space is too fragmented to find contiguous slots.
+            // This can happen with heavy allocation/deallocation churn.
+            // Return false to indicate failure - caller should handle gracefully.
             id = 0;
             insertIndex = -1;
             return false;
@@ -116,11 +115,35 @@ namespace DMotion
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static int IdToIndex<T>(this DynamicBuffer<T> samplers, byte id) where T : unmanaged, IElementWithId
         {
-            for (var i = 0; i < samplers.Length; i++)
+            var length = samplers.Length;
+            if (length == 0) return -1;
+
+            // Fast path: check if id matches index (common case when IDs are sequential)
+            if (id < length && samplers[id].Id == id)
             {
-                if (samplers[i].Id == id)
+                return id;
+            }
+
+            // Binary search for fragmented ID space (buffer is sorted by ID)
+            int left = 0;
+            int right = length - 1;
+
+            while (left <= right)
+            {
+                int mid = left + (right - left) / 2;
+                byte midId = samplers[mid].Id;
+
+                if (midId == id)
                 {
-                    return i;
+                    return mid;
+                }
+                if (midId < id)
+                {
+                    left = mid + 1;
+                }
+                else
+                {
+                    right = mid - 1;
                 }
             }
 

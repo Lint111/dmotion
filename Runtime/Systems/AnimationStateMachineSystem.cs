@@ -1,4 +1,4 @@
-﻿using Unity.Burst;
+using Unity.Burst;
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Profiling;
@@ -26,10 +26,10 @@ namespace DMotion
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            new UpdateStateMachineJob
+            state.Dependency = new UpdateStateMachineJob
             {
                 Marker = Marker_UpdateStateMachineJob
-            }.ScheduleParallel();
+            }.ScheduleParallel(state.Dependency);
         }
     }
 }

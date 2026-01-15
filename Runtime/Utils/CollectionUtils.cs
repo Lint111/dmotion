@@ -1,4 +1,4 @@
-﻿using Unity.Collections;
+using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 
@@ -10,6 +10,12 @@ namespace DMotion
         {
             unsafe
             {
+                // Return empty array if list is empty or invalid
+                if (list.Ptr == null || list.Length <= 0)
+                {
+                    return new NativeArray<T>(0, Allocator.None);
+                }
+                
                 var array = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<T>(list.Ptr,
                     list.Length, Allocator.None);
 

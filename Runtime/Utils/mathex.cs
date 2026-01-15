@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using Unity.Burst;
 using Unity.Mathematics;
 
@@ -17,13 +17,13 @@ namespace DMotion
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool approximately(in float a, in float b, float epsilon = math.EPSILON)
         {
-            return a - b < epsilon;
+            return math.abs(a - b) < epsilon;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool iszero(in float a, float epsilon = math.EPSILON)
         {
-            return a < epsilon;
+            return math.abs(a) < epsilon;
         }
     }
 }

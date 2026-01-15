@@ -150,8 +150,7 @@ namespace DMotion.Editor
                 if (c.changed)
                 {
                     ClearSelection();
-                    property.serializedObject.ApplyModifiedProperties();
-                    property.serializedObject.Update();
+                    property.ApplyAndUpdate();
                     if (cachedEvents.Count == ClipEvents.Length)
                     {
                         for (var i = 0; i < ClipEvents.Length; i++)
@@ -201,8 +200,7 @@ namespace DMotion.Editor
             }).ToArray();
             ClearSelection();
             eventMarkerDragIndex = ClipEvents.Length - 1;
-            property.serializedObject.ApplyModifiedProperties();
-            property.serializedObject.Update();
+            property.ApplyAndUpdate();
         }
 
         private void RemoveEvent(int index)
@@ -215,8 +213,7 @@ namespace DMotion.Editor
             }
 
             ClearSelection();
-            property.serializedObject.ApplyModifiedProperties();
-            property.serializedObject.Update();
+            property.ApplyAndUpdate();
         }
 
         private void ClearSelection()
@@ -298,8 +295,7 @@ namespace DMotion.Editor
 
                 ClipEvents[eventMarkerDragIndex].NormalizedTime = normalizedTime;
 
-                property.serializedObject.ApplyModifiedProperties();
-                property.serializedObject.Update();
+                property.ApplyAndUpdate();
 
                 currentEvent.Use();
             }

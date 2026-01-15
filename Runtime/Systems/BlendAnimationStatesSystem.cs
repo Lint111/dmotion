@@ -1,4 +1,4 @@
-﻿using Unity.Burst;
+using Unity.Burst;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Transforms;
@@ -97,18 +97,38 @@ namespace DMotion
                             }
                         }
 
-                        Assert.IsFalse(mathex.iszero(sumWeights),
-                            "Remaining weights are zero. Did AnimationStates not get cleaned up?");
-
-                        var targetWeight = 1 - toAnimationState.Weight;
-                        var inverseSumWeights = targetWeight / sumWeights;
-                        for (var i = 0; i < animationStates.Length; i++)
+                        // Handle edge case where remaining weights are zero
+                        // This can happen if states weren't properly cleaned up
+                        if (mathex.iszero(sumWeights))
                         {
-                            if (i != toAnimationStateIndex)
+                            // Fallback: distribute remaining weight equally among other states
+                            var otherStateCount = animationStates.Length - 1;
+                            if (otherStateCount > 0)
                             {
-                                var animationState = animationStates[i];
-                                animationState.Weight *= inverseSumWeights;
-                                animationStates[i] = animationState;
+                                var equalWeight = (1 - toAnimationState.Weight) / otherStateCount;
+                                for (var i = 0; i < animationStates.Length; i++)
+                                {
+                                    if (i != toAnimationStateIndex)
+                                    {
+                                        var animationState = animationStates[i];
+                                        animationState.Weight = equalWeight;
+                                        animationStates[i] = animationState;
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            var targetWeight = 1 - toAnimationState.Weight;
+                            var inverseSumWeights = targetWeight / sumWeights;
+                            for (var i = 0; i < animationStates.Length; i++)
+                            {
+                                if (i != toAnimationStateIndex)
+                                {
+                                    var animationState = animationStates[i];
+                                    animationState.Weight *= inverseSumWeights;
+                                    animationStates[i] = animationState;
+                                }
                             }
                         }
                     }
@@ -119,8 +139,6 @@ namespace DMotion
         [BurstCompile]
         internal partial struct CleanAnimationStatesJob : IJobEntity
         {
-            internal float DeltaTime;
-
             internal void Execute(
                 in AnimationStateTransition transition,
                 in AnimationPreserveState animationPreserveState,
@@ -159,11 +177,13 @@ namespace DMotion
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            new BlendAnimationStatesJob
+            // Blend job must complete before cleanup job runs
+            var blendHandle = new BlendAnimationStatesJob
             {
                 DeltaTime = SystemAPI.Time.DeltaTime
-            }.ScheduleParallel();
-            new CleanAnimationStatesJob().ScheduleParallel();
+            }.ScheduleParallel(state.Dependency);
+            
+            state.Dependency = new CleanAnimationStatesJob().ScheduleParallel(blendHandle);
         }
     }
 }

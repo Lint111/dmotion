@@ -71,8 +71,17 @@ namespace DMotion.PerformanceTests
         }
 
         [UnityTest, Performance]
+        [Explicit("100k entities requires significant memory and may crash. Run manually.")]
         public IEnumerator AverageUpdateTime_100000()
         {
+            // Check available memory before attempting 100k entities
+            var availableMemoryMB = SystemInfo.systemMemorySize;
+            if (availableMemoryMB < 8000) // Require at least 8GB system RAM
+            {
+                Assert.Ignore($"Skipping 100k test: System has {availableMemoryMB}MB RAM, need 8GB+");
+                yield break;
+            }
+            
             yield return RunPerformanceTest(100_000);
         }
 
@@ -86,7 +95,15 @@ namespace DMotion.PerformanceTests
                 yield break;
             }
 
+            // Log memory before instantiation
+            var memBefore = GC.GetTotalMemory(false) / (1024 * 1024);
+            Debug.Log($"[StateMachinePerformanceTests] Starting {count} entity test. Managed memory: {memBefore}MB");
+
             InstantiateEntities(count);
+
+            // Log memory after instantiation
+            var memAfter = GC.GetTotalMemory(false) / (1024 * 1024);
+            Debug.Log($"[StateMachinePerformanceTests] Instantiated {count} entities. Managed memory: {memAfter}MB (+{memAfter - memBefore}MB)");
 
             // Run the performance measurement
             DefaultPerformanceMeasure(Marker).Run();

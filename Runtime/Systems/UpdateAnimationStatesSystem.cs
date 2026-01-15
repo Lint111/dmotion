@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using Unity.Burst;
 using Unity.Entities;
 using Unity.Jobs;
@@ -38,42 +38,54 @@ namespace DMotion
 #endif
         }
 
+        /// <summary>
+        /// Schedules jobs sequentially because both SingleClip and LinearBlend jobs
+        /// write to ClipSampler buffer. Even though they query different entity archetypes,
+        /// Unity's safety system requires proper dependency chaining for shared buffer types.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void OnUpdate_Safe(ref SystemState state)
         {
-            new UpdateSingleClipStatesJob
+            // SingleClip jobs first
+            var handle = new UpdateSingleClipStatesJob
             {
                 DeltaTime = SystemAPI.Time.DeltaTime,
-            }.ScheduleParallel();
+            }.ScheduleParallel(state.Dependency);
 
-            new CleanSingleClipStatesJob().ScheduleParallel();
+            handle = new CleanSingleClipStatesJob().ScheduleParallel(handle);
 
-            new UpdateLinearBlendStateMachineStatesJob
+            // LinearBlend jobs must chain after SingleClip (both write ClipSampler)
+            handle = new UpdateLinearBlendStateMachineStatesJob
             {
                 DeltaTime = SystemAPI.Time.DeltaTime,
-            }.ScheduleParallel();
+            }.ScheduleParallel(handle);
 
-            new CleanLinearBlendStatesJob().ScheduleParallel();
+            state.Dependency = new CleanLinearBlendStatesJob().ScheduleParallel(handle);
         }
 
+        /// <summary>
+        /// Schedules jobs sequentially because both SingleClip and LinearBlend jobs
+        /// write to ClipSampler buffer. Even though they query different entity archetypes,
+        /// Unity's safety system requires proper dependency chaining for shared buffer types.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void OnUpdate_Unsafe(ref SystemState state)
         {
-            var singleClipHandle = new UpdateSingleClipStatesJob
+            // SingleClip jobs first
+            var handle = new UpdateSingleClipStatesJob
             {
                 DeltaTime = SystemAPI.Time.DeltaTime,
             }.ScheduleParallel(state.Dependency);
 
-            singleClipHandle = new CleanSingleClipStatesJob().ScheduleParallel(singleClipHandle);
+            handle = new CleanSingleClipStatesJob().ScheduleParallel(handle);
 
-            var linearBlendHandle = new UpdateLinearBlendStateMachineStatesJob
+            // LinearBlend jobs must chain after SingleClip (both write ClipSampler)
+            handle = new UpdateLinearBlendStateMachineStatesJob
             {
                 DeltaTime = SystemAPI.Time.DeltaTime,
-            }.ScheduleParallel(state.Dependency);
+            }.ScheduleParallel(handle);
 
-            linearBlendHandle = new CleanLinearBlendStatesJob().ScheduleParallel(linearBlendHandle);
-
-            state.Dependency = JobHandle.CombineDependencies(singleClipHandle, linearBlendHandle);
+            state.Dependency = new CleanLinearBlendStatesJob().ScheduleParallel(handle);
         }
     }
 }

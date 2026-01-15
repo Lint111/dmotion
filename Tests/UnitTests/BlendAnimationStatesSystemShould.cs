@@ -1,4 +1,4 @@
-﻿using System.Linq;
+using System.Linq;
 using NUnit.Framework;
 using Unity.Collections;
 using UnityEngine.TestTools;
@@ -248,6 +248,62 @@ namespace DMotion.Tests
             animationStates = manager.GetBuffer<AnimationState>(entity);
             var sumWeights = animationStates.AsNativeArray().Sum(p => p.Weight);
             Assert.AreEqual(1, sumWeights);
+        }
+
+        [Test]
+        public void HandleZeroWeights_WithFallback()
+        {
+            // Test that the system handles zero-weight states gracefully
+            // instead of crashing with an assertion
+            var entity = AnimationStateTestUtils.CreateAnimationStateEntity(manager);
+            var state1 = AnimationStateTestUtils.NewAnimationStateFromEntity(manager, entity, default(ClipSampler));
+            var state2 = AnimationStateTestUtils.NewAnimationStateFromEntity(manager, entity, default(ClipSampler));
+
+            // Set up a transition so both states are active
+            AnimationStateTestUtils.SetCurrentState(manager, entity, state1.Id);
+            AnimationStateTestUtils.RequestTransitionTo(manager, entity, state2.Id, 0.5f);
+
+            // Force all weights to zero (simulating edge case)
+            var animationStates = manager.GetBuffer<AnimationState>(entity);
+            for (var i = 0; i < animationStates.Length; i++)
+            {
+                var p = animationStates[i];
+                p.Weight = 0f;
+                animationStates[i] = p;
+            }
+
+            // Should not crash - system should handle zero weights gracefully
+            Assert.DoesNotThrow(() => UpdateWorld());
+
+            // After update, weights should be distributed (fallback behavior)
+            animationStates = manager.GetBuffer<AnimationState>(entity);
+            if (animationStates.Length > 0)
+            {
+                var sumWeights = animationStates.AsNativeArray().Sum(p => p.Weight);
+                // Either all states were cleaned up, or weights were distributed
+                Assert.IsTrue(animationStates.Length == 0 || sumWeights > 0,
+                    "Weights should be distributed among remaining states or states should be cleaned up");
+            }
+        }
+
+        [Test]
+        public void NotCrash_WhenAllStatesHaveZeroWeight()
+        {
+            // Regression test for C2: Weight normalization assertion crash
+            var entity = AnimationStateTestUtils.CreateAnimationStateEntity(manager);
+            AnimationStateTestUtils.NewAnimationStateFromEntity(manager, entity, default(ClipSampler));
+            AnimationStateTestUtils.NewAnimationStateFromEntity(manager, entity, default(ClipSampler));
+
+            // All states have zero weight by default
+            var animationStates = manager.GetBuffer<AnimationState>(entity);
+            for (var i = 0; i < animationStates.Length; i++)
+            {
+                Assert.AreEqual(0f, animationStates[i].Weight, "States should start with zero weight");
+            }
+
+            // Should not throw - this previously crashed with assertion
+            Assert.DoesNotThrow(() => UpdateWorld(),
+                "System should handle all-zero weights without crashing");
         }
     }
 }

@@ -43,7 +43,18 @@ namespace DMotion.Tests
             // Check if test scene exists
             if (!PrebakedTestHelper.IsTestSceneSetup())
             {
-                Assert.Ignore("Test scene not set up. Run 'DMotion/Tests/Setup Test Scene' first.");
+                // In CI/batch mode, fail loudly so broken test setup is noticed
+                // In interactive mode, skip with clear message for developers
+                if (Application.isBatchMode || IsContinuousIntegration())
+                {
+                    Assert.Fail("CRITICAL: Test scene not set up. " +
+                               "CI must run 'DMotion/Tests/Setup Test Scene' before running integration tests. " +
+                               "This is a test infrastructure failure.");
+                }
+                else
+                {
+                    Assert.Ignore("Test scene not set up. Run 'DMotion/Tests/Setup Test Scene' first.");
+                }
                 yield break;
             }
 
@@ -114,17 +125,64 @@ namespace DMotion.Tests
             // Allow subclass teardown
             yield return OnTearDown();
 
-            // Clean up tracked blobs and entities
-            tracker.Cleanup(manager);
-
-            // Dispose systems array
+            // Dispose systems array first
             if (allSystems.IsCreated)
             {
                 allSystems.Dispose();
             }
 
-            // Unload test scene
+            // Clear references to baked data
+            clipsBlob = default;
+            bakedEntity = Entity.Null;
+
+            if (world != null && world.IsCreated)
+            {
+                // Complete all tracked jobs before modifying buffers
+                manager.CompleteAllTrackedJobs();
+
+                // Clear animation buffers to remove blob refs that would become invalid during unload.
+                // This prevents animation systems from crashing when they run during unload yields.
+                // We do NOT destroy entities manually - the subscene unload handles entity destruction
+                // in a coordinated way with blob data, avoiding Kinemation job race conditions.
+                ClearAnimationBuffers();
+
+                // Clean up tracked test resources
+                tracker.Cleanup(manager);
+            }
+
+            // Unload scene - this destroys subscene entities along with their blob data
             yield return PrebakedTestHelper.UnloadTestScene();
+        }
+
+        /// <summary>
+        /// Clears animation buffers to remove blob references.
+        /// This prevents animation systems from accessing invalid blobs during teardown.
+        /// </summary>
+        private void ClearAnimationBuffers()
+        {
+            if (world == null || !world.IsCreated)
+                return;
+
+            var query = manager.CreateEntityQuery(typeof(ClipSampler));
+            var entities = query.ToEntityArray(Allocator.TempJob);
+
+            foreach (var entity in entities)
+            {
+                if (manager.Exists(entity))
+                {
+                    if (manager.HasBuffer<ClipSampler>(entity))
+                        manager.GetBuffer<ClipSampler>(entity).Clear();
+                    if (manager.HasBuffer<AnimationState>(entity))
+                        manager.GetBuffer<AnimationState>(entity).Clear();
+                    if (manager.HasBuffer<LinearBlendStateMachineState>(entity))
+                        manager.GetBuffer<LinearBlendStateMachineState>(entity).Clear();
+                    if (manager.HasBuffer<SingleClipState>(entity))
+                        manager.GetBuffer<SingleClipState>(entity).Clear();
+                }
+            }
+
+            entities.Dispose();
+            manager.CompleteAllTrackedJobs();
         }
 
         /// <summary>
@@ -193,6 +251,20 @@ namespace DMotion.Tests
                 return 1.0f;
 
             return clipsBlob.Value.clips[clipIndex].duration;
+        }
+
+        /// <summary>
+        /// Detects if running in a CI environment.
+        /// Checks common CI environment variables.
+        /// </summary>
+        private static bool IsContinuousIntegration()
+        {
+            return !string.IsNullOrEmpty(System.Environment.GetEnvironmentVariable("CI")) ||
+                   !string.IsNullOrEmpty(System.Environment.GetEnvironmentVariable("GITHUB_ACTIONS")) ||
+                   !string.IsNullOrEmpty(System.Environment.GetEnvironmentVariable("GITLAB_CI")) ||
+                   !string.IsNullOrEmpty(System.Environment.GetEnvironmentVariable("JENKINS_URL")) ||
+                   !string.IsNullOrEmpty(System.Environment.GetEnvironmentVariable("TF_BUILD")) ||
+                   !string.IsNullOrEmpty(System.Environment.GetEnvironmentVariable("TEAMCITY_VERSION"));
         }
     }
 }

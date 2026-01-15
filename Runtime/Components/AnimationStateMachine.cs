@@ -17,11 +17,22 @@ namespace DMotion
         internal static StateMachineStateRef Null => new() { AnimationStateId = -1 };
     }
 
+    /// <summary>
+    /// Main animation state machine component containing blob references and current state.
+    ///
+    /// Blob Lifecycle: These BlobAssetReferences are created during SmartBlobber baking
+    /// (see ClipEventsBlobConverter and StateMachineBlobConverter). Their lifecycle is
+    /// managed by Unity's baking system - they are automatically disposed when the
+    /// subscene is unloaded. No manual disposal is required or recommended.
+    /// </summary>
     [BurstCompile]
     internal struct AnimationStateMachine : IComponentData
     {
+        /// <summary>Baked skeleton clip set from Latios Kinemation. Lifecycle managed by baking system.</summary>
         internal BlobAssetReference<SkeletonClipSetBlob> ClipsBlob;
+        /// <summary>Baked clip events. Lifecycle managed by baking system.</summary>
         internal BlobAssetReference<ClipEventsBlob> ClipEventsBlob;
+        /// <summary>Baked state machine definition. Lifecycle managed by baking system.</summary>
         internal BlobAssetReference<StateMachineBlob> StateMachineBlob;
         internal StateMachineStateRef CurrentState;
         

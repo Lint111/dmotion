@@ -71,14 +71,22 @@ namespace DMotion.Tests
             blobDisposers.Clear();
 
             // Clean up tracked entities
-            if (manager.HasValue)
+            if (trackedEntities.Count > 0)
             {
-                var mgr = manager.Value;
-                foreach (var entity in trackedEntities)
+                if (!manager.HasValue)
                 {
-                    if (mgr.Exists(entity))
+                    Debug.LogError($"[{ownerName}] Cannot cleanup {trackedEntities.Count} tracked entities: " +
+                                   "EntityManager not provided. This will cause entity leaks.");
+                }
+                else
+                {
+                    var mgr = manager.Value;
+                    foreach (var entity in trackedEntities)
                     {
-                        mgr.DestroyEntity(entity);
+                        if (mgr.Exists(entity))
+                        {
+                            mgr.DestroyEntity(entity);
+                        }
                     }
                 }
             }

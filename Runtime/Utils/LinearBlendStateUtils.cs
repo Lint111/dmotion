@@ -49,6 +49,12 @@ namespace DMotion
                 linearBlendState.StateBlob.Speed,
                 linearBlendState.StateBlob.Loop);
 
+            if (animationStateIndex < 0)
+            {
+                // Failed to allocate - return invalid state (caller should check validity)
+                return default;
+            }
+
             linearBlendState.AnimationStateId = animationStates[animationStateIndex].Id;
             linearBlendStates.Add(linearBlendState);
 

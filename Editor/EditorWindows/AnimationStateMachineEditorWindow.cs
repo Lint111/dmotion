@@ -93,7 +93,6 @@ namespace DMotion.Editor
             return false;
         }
 
-#if UNITY_EDITOR || DEBUG
         private void Update()
         {
             if (Application.isPlaying && stateMachineEditorView != null)
@@ -101,7 +100,6 @@ namespace DMotion.Editor
                 stateMachineEditorView.UpdateView();
             }
         }
-#endif
 
         private void OnSelectionChange()
         {

@@ -288,5 +288,181 @@ namespace DMotion.Tests
                 Assert.AreEqual(insertIndex, 3);
             }
         }
+
+        #region Error Path Tests (M10)
+
+        [Test]
+        public void IdToIndex_ReturnsNegativeOne_WhenBufferEmpty()
+        {
+            var samplers = CreateSamplerBuffer();
+            var index = samplers.IdToIndex(0);
+            Assert.AreEqual(-1, index, "IdToIndex should return -1 for empty buffer");
+        }
+
+        [Test]
+        public void IdToIndex_ReturnsNegativeOne_WhenIdNotFound()
+        {
+            var samplers = CreateSamplerBuffer();
+            samplers.AddWithId(default); // ID 0
+            samplers.AddWithId(default); // ID 1
+            samplers.AddWithId(default); // ID 2
+
+            // Search for non-existent IDs
+            Assert.AreEqual(-1, samplers.IdToIndex(99), "Should return -1 for non-existent ID");
+            Assert.AreEqual(-1, samplers.IdToIndex(50), "Should return -1 for non-existent ID in middle");
+        }
+
+        [Test]
+        public void IdToIndex_FindsId_WithBinarySearch_WhenFastPathFails()
+        {
+            var samplers = CreateSamplerBuffer();
+
+            // Create a fragmented ID space where IDs don't match indices
+            samplers.AddWithId(default); // ID 0 at index 0
+            var s0 = samplers[0];
+            s0.Id = 5;
+            samplers[0] = s0;
+
+            samplers.AddWithId(default); // ID 6 at index 1
+            var s1 = samplers[1];
+            s1.Id = 10;
+            samplers[1] = s1;
+
+            samplers.AddWithId(default); // ID 11 at index 2
+            var s2 = samplers[2];
+            s2.Id = 20;
+            samplers[2] = s2;
+
+            // Fast path fails (id != index), binary search kicks in
+            Assert.AreEqual(0, samplers.IdToIndex(5), "Should find ID 5 at index 0 via binary search");
+            Assert.AreEqual(1, samplers.IdToIndex(10), "Should find ID 10 at index 1 via binary search");
+            Assert.AreEqual(2, samplers.IdToIndex(20), "Should find ID 20 at index 2 via binary search");
+            Assert.AreEqual(-1, samplers.IdToIndex(15), "Should return -1 for gap in ID space");
+        }
+
+        [Test]
+        public void RemoveWithId_ReturnsFalse_WhenBufferEmpty()
+        {
+            var samplers = CreateSamplerBuffer();
+            var removed = samplers.RemoveWithId(0);
+            Assert.IsFalse(removed, "RemoveWithId should return false for empty buffer");
+        }
+
+        [Test]
+        public void RemoveWithId_ReturnsFalse_WhenIdNotFound()
+        {
+            var samplers = CreateSamplerBuffer();
+            samplers.AddWithId(default); // ID 0
+            samplers.AddWithId(default); // ID 1
+
+            var removed = samplers.RemoveWithId(99);
+            Assert.IsFalse(removed, "RemoveWithId should return false for non-existent ID");
+            Assert.AreEqual(2, samplers.Length, "Buffer length should be unchanged");
+        }
+
+        [Test]
+        public void RemoveRangeWithId_ReturnsFalse_WhenIdNotFound()
+        {
+            var samplers = CreateSamplerBuffer();
+            samplers.AddWithId(default); // ID 0
+
+            var removed = samplers.RemoveRangeWithId(50, 3);
+            Assert.IsFalse(removed, "RemoveRangeWithId should return false for non-existent ID");
+            Assert.AreEqual(1, samplers.Length, "Buffer length should be unchanged");
+        }
+
+        [Test]
+        public void TryGetWithId_ReturnsFalse_WhenBufferEmpty()
+        {
+            var samplers = CreateSamplerBuffer();
+            var found = samplers.TryGetWithId(0, out var element);
+            Assert.IsFalse(found, "TryGetWithId should return false for empty buffer");
+            Assert.AreEqual(default(ClipSampler), element, "Element should be default when not found");
+        }
+
+        [Test]
+        public void TryGetWithId_ReturnsFalse_WhenIdNotFound()
+        {
+            var samplers = CreateSamplerBuffer();
+            samplers.AddWithId(default); // ID 0
+
+            var found = samplers.TryGetWithId(99, out var element);
+            Assert.IsFalse(found, "TryGetWithId should return false for non-existent ID");
+            Assert.AreEqual(default(ClipSampler), element, "Element should be default when not found");
+        }
+
+        [Test]
+        public void TryGetWithId_ReturnsTrue_WhenIdExists()
+        {
+            var samplers = CreateSamplerBuffer();
+            var sampler = new ClipSampler { Weight = 0.75f };
+            samplers.AddWithId(sampler);
+
+            var found = samplers.TryGetWithId(0, out var element);
+            Assert.IsTrue(found, "TryGetWithId should return true for existing ID");
+            Assert.AreEqual(0.75f, element.Weight, "Element should have correct data");
+        }
+
+        [Test]
+        public void ExistsWithId_ReturnsFalse_WhenBufferEmpty()
+        {
+            var samplers = CreateSamplerBuffer();
+            Assert.IsFalse(samplers.ExistsWithId(0), "ExistsWithId should return false for empty buffer");
+        }
+
+        [Test]
+        public void ExistsWithId_ReturnsFalse_WhenIdNotFound()
+        {
+            var samplers = CreateSamplerBuffer();
+            samplers.AddWithId(default);
+            Assert.IsFalse(samplers.ExistsWithId(99), "ExistsWithId should return false for non-existent ID");
+        }
+
+        [Test]
+        public void ExistsWithId_ReturnsTrue_WhenIdExists()
+        {
+            var samplers = CreateSamplerBuffer();
+            samplers.AddWithId(default);
+            Assert.IsTrue(samplers.ExistsWithId(0), "ExistsWithId should return true for existing ID");
+        }
+
+        [Test]
+        public void GetWithId_ThrowsAssertion_WhenIdNotFound()
+        {
+            var samplers = CreateSamplerBuffer();
+            samplers.AddWithId(default);
+
+            Assert.Throws<AssertionException>(() =>
+            {
+                samplers.GetWithId(99);
+            }, "GetWithId should throw AssertionException for non-existent ID");
+        }
+
+        [Test]
+        public void TryFindIdAndInsertIndex_ReturnsFalse_WhenIdSpaceFragmented()
+        {
+            var samplers = CreateSamplerBuffer();
+
+            // MaxSamplersCount is 127. To create unfillable fragmentation:
+            // - Place elements with gaps of exactly 1 (so no room for 2+ contiguous)
+            // - Last element near MaxSamplersCount (so can't append at end)
+            // IDs: 0, 2, 4, ... up to 124, then 126 (last valid is 126 since MaxSamplersCount-1=126)
+            for (byte i = 0; i < 64; i++)
+            {
+                samplers.AddWithId(default);
+                var s = samplers[i];
+                s.Id = (byte)(i * 2); // IDs: 0, 2, 4, 6, ... 126
+                samplers[i] = s;
+            }
+
+            // Verify last ID is at boundary - asking for 2 contiguous won't fit at end
+            // Last ID = 126, MaxSamplersCount = 127, so 126 + 2 = 128 > 127 (can't append)
+            // All gaps between elements are 1, so can't fit 2 contiguous anywhere
+            var success = samplers.TryFindIdAndInsertIndex(2, out var id, out var insertIndex);
+            Assert.IsFalse(success, "Should return false when ID space is too fragmented for 2 contiguous IDs");
+            Assert.AreEqual(-1, insertIndex, "Insert index should be -1 on failure");
+        }
+
+        #endregion
     }
 }

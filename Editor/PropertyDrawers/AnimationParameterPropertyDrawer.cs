@@ -1,12 +1,19 @@
-﻿using System;
+using System;
 using System.Linq;
 using DMotion.Authoring;
+using Unity.Entities;
 using Unity.Entities.Editor;
 using UnityEditor;
 using UnityEngine;
 
 namespace DMotion.Editor
 {
+    /// <summary>
+    /// Delegate for drawing a parameter field and returning the modified value.
+    /// </summary>
+    internal delegate TBuffer ParameterDrawer<TBuffer>(Rect position, GUIContent label, TBuffer param)
+        where TBuffer : unmanaged;
+
     [CustomPropertyDrawer(typeof(AnimationParameterAsset))]
     internal class AnimationParameterPropertyDrawer : PropertyDrawer
     {
@@ -40,57 +47,73 @@ namespace DMotion.Editor
         private static void DrawParameterPlaymode(Rect position, AnimationParameterAsset parameterAsset,
             StateMachineAsset stateMachineAsset)
         {
-            if (EntitySelectionProxyUtils.TryExtractEntitySelectionProxy(out var selectedEntity))
+            if (!EntitySelectionProxyUtils.TryExtractEntitySelectionProxy(out var selectedEntity))
+                return;
+
+            var label = new GUIContent(parameterAsset.name);
+            switch (parameterAsset)
             {
-                var label = new GUIContent(parameterAsset.name);
-                switch (parameterAsset)
-                {
-                    case BoolParameterAsset:
-                    {
-                        var parameterIndex = stateMachineAsset.Parameters.OfType<BoolParameterAsset>()
-                            .FindIndex(p => parameterAsset == p);
-                        var boolParameters = selectedEntity.GetBuffer<BoolParameter>();
-                        var boolParameter = boolParameters[parameterIndex];
-                        boolParameter.Value = EditorGUI.Toggle(position, label, boolParameter.Value);
-                        boolParameters[parameterIndex] = boolParameter;
-                        break;
-                    }
-                    case IntParameterAsset:
-                    {
-                        var parameterIndex = stateMachineAsset.Parameters.OfType<IntParameterAsset>()
-                            .FindIndex(p => parameterAsset == p);
-                        var intParameters = selectedEntity.GetBuffer<IntParameter>();
-                        var intParameter = intParameters[parameterIndex];
-
-                        if (parameterAsset is EnumParameterAsset enumParameterAsset)
+                case BoolParameterAsset boolAsset:
+                    DrawParameter<BoolParameterAsset, BoolParameter>(
+                        position, label, boolAsset, stateMachineAsset, selectedEntity,
+                        (rect, lbl, param) =>
                         {
-                            intParameter.Value = EditorGUIUtils.GenericEnumPopup(position,
-                                enumParameterAsset.EnumType.Type,
-                                intParameter.Value);
-                        }
-                        else
+                            param.Value = EditorGUI.Toggle(rect, lbl, param.Value);
+                            return param;
+                        });
+                    break;
+                case EnumParameterAsset enumAsset:
+                    // EnumParameterAsset is stored as IntParameter
+                    DrawParameter<IntParameterAsset, IntParameter>(
+                        position, label, enumAsset, stateMachineAsset, selectedEntity,
+                        (rect, lbl, param) =>
                         {
-                            intParameter.Value = EditorGUI.IntField(position, label, intParameter.Value);
-                        }
-
-                        intParameters[parameterIndex] = intParameter;
-                        break;
-                    }
-                    case FloatParameterAsset:
-                    {
-                        var parameterIndex = stateMachineAsset.Parameters.OfType<FloatParameterAsset>()
-                            .FindIndex(p => parameterAsset == p);
-                        var floatParameters = selectedEntity.GetBuffer<FloatParameter>();
-                        var floatParameter = floatParameters[parameterIndex];
-                        floatParameter.Value = EditorGUI.FloatField(position, label, floatParameter.Value);
-                        floatParameters[parameterIndex] = floatParameter;
-                        break;
-                    }
-                    default:
-                        throw new NotImplementedException(
-                            $"No handling for type {parameterAsset.GetType().Name}");
-                }
+                            param.Value = EditorGUIUtils.GenericEnumPopup(rect, enumAsset.EnumType.Type, param.Value);
+                            return param;
+                        });
+                    break;
+                case IntParameterAsset intAsset:
+                    DrawParameter<IntParameterAsset, IntParameter>(
+                        position, label, intAsset, stateMachineAsset, selectedEntity,
+                        (rect, lbl, param) =>
+                        {
+                            param.Value = EditorGUI.IntField(rect, lbl, param.Value);
+                            return param;
+                        });
+                    break;
+                case FloatParameterAsset floatAsset:
+                    DrawParameter<FloatParameterAsset, FloatParameter>(
+                        position, label, floatAsset, stateMachineAsset, selectedEntity,
+                        (rect, lbl, param) =>
+                        {
+                            param.Value = EditorGUI.FloatField(rect, lbl, param.Value);
+                            return param;
+                        });
+                    break;
+                default:
+                    throw new NotImplementedException(
+                        $"No handling for type {parameterAsset.GetType().Name}");
             }
+        }
+
+        /// <summary>
+        /// Generic helper to draw a parameter in playmode.
+        /// Eliminates duplicate lookup/get/set pattern across parameter types.
+        /// </summary>
+        private static void DrawParameter<TAsset, TBuffer>(
+            Rect position,
+            GUIContent label,
+            AnimationParameterAsset asset,
+            StateMachineAsset stateMachine,
+            EntitySelectionProxyWrapper entity,
+            ParameterDrawer<TBuffer> drawField)
+            where TAsset : AnimationParameterAsset
+            where TBuffer : unmanaged, IBufferElementData
+        {
+            var index = stateMachine.Parameters.OfType<TAsset>().FindIndex(p => p == asset);
+            var buffer = entity.GetBuffer<TBuffer>();
+            var param = buffer[index];
+            buffer[index] = drawField(position, label, param);
         }
 
         private bool IsAnimatorEntitySelected(StateMachineAsset myStateMachineAsset)
@@ -152,8 +175,7 @@ namespace DMotion.Editor
                     if (GUI.Button(rects[2], "-"))
                     {
                         stateMachine.DeleteParameter(parameterAsset);
-                        property.serializedObject.ApplyModifiedProperties();
-                        property.serializedObject.Update();
+                        property.ApplyAndUpdate();
                     }
                 }
             }
