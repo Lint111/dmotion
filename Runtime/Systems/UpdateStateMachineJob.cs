@@ -19,6 +19,7 @@ namespace DMotion
             ref DynamicBuffer<LinearBlendStateMachineState> linearBlendStates,
             ref DynamicBuffer<ClipSampler> clipSamplers,
             ref DynamicBuffer<AnimationState> animationStates,
+            ref DynamicBuffer<StateMachineContext> stackContext,
             in AnimationCurrentState animationCurrentState,
             in AnimationStateTransition animationStateTransition,
             in DynamicBuffer<BoolParameter> boolParameters,
@@ -26,17 +27,21 @@ namespace DMotion
         )
         {
             using var scope = Marker.Auto();
-            ref var stateMachineBlob = ref stateMachine.StateMachineBlob.Value;
+            ref var rootBlob = ref stateMachine.StateMachineBlob.Value;
 
             if (!ShouldStateMachineBeActive(animationCurrentState, animationStateTransition, stateMachine.CurrentState))
             {
                 return;
             }
 
+            // Get the current blob based on hierarchy depth
+            ref var stateMachineBlob = ref GetCurrentBlob(ref rootBlob, stackContext);
+
             //Initialize if necessary
             {
                 if (!stateMachine.CurrentState.IsValid)
                 {
+                    // Initialize at root level
                     stateMachine.CurrentState = CreateState(
                         stateMachineBlob.DefaultStateIndex,
                         stateMachine.StateMachineBlob,
@@ -52,6 +57,13 @@ namespace DMotion
                         AnimationStateId = stateMachine.CurrentState.AnimationStateId,
                         TransitionDuration = 0
                     };
+
+                    // Update the stack context with the initial state
+                    if (stackContext.Length > 0)
+                    {
+                        ref var currentContext = ref stackContext.GetCurrent();
+                        currentContext.CurrentStateIndex = stateMachineBlob.DefaultStateIndex;
+                    }
                 }
             }
 
@@ -103,26 +115,141 @@ namespace DMotion
                         transitionDuration = transition.TransitionDuration;
                     }
 
-#if UNITY_EDITOR || DEBUG
-                    stateMachine.PreviousState = stateMachine.CurrentState;
-#endif
-                    stateMachine.CurrentState = CreateState(
-                        toStateIndex,
-                        stateMachine.StateMachineBlob,
-                        stateMachine.ClipsBlob,
-                        stateMachine.ClipEventsBlob,
-                        ref singleClipStates,
-                        ref linearBlendStates,
-                        ref animationStates,
-                        ref clipSamplers);
+                    // Check if destination is a SubStateMachine
+                    ref var destinationState = ref stateMachineBlob.States[toStateIndex];
 
-                    animationStateTransitionRequest = new AnimationStateTransitionRequest
+                    if (destinationState.Type == StateType.SubStateMachine)
                     {
-                        AnimationStateId = stateMachine.CurrentState.AnimationStateId,
-                        TransitionDuration = transitionDuration,
-                    };
+                        // Enter the sub-state machine
+                        var subMachineIndex = destinationState.StateIndex;
+                        EnterSubStateMachine(ref stackContext, (short)subMachineIndex, ref stateMachineBlob);
+
+                        // Get the nested blob and create state for its entry state
+                        ref var nestedBlob = ref stateMachineBlob.SubStateMachines[subMachineIndex].NestedStateMachine;
+                        var entryStateIndex = stateMachineBlob.SubStateMachines[subMachineIndex].EntryStateIndex;
+
+#if UNITY_EDITOR || DEBUG
+                        stateMachine.PreviousState = stateMachine.CurrentState;
+#endif
+                        stateMachine.CurrentState = CreateState(
+                            entryStateIndex,
+                            stateMachine.StateMachineBlob,
+                            stateMachine.ClipsBlob,
+                            stateMachine.ClipEventsBlob,
+                            ref singleClipStates,
+                            ref linearBlendStates,
+                            ref animationStates,
+                            ref clipSamplers);
+
+                        animationStateTransitionRequest = new AnimationStateTransitionRequest
+                        {
+                            AnimationStateId = stateMachine.CurrentState.AnimationStateId,
+                            TransitionDuration = transitionDuration,
+                        };
+                    }
+                    else
+                    {
+                        // Regular state transition (Single or LinearBlend)
+#if UNITY_EDITOR || DEBUG
+                        stateMachine.PreviousState = stateMachine.CurrentState;
+#endif
+                        stateMachine.CurrentState = CreateState(
+                            toStateIndex,
+                            stateMachine.StateMachineBlob,
+                            stateMachine.ClipsBlob,
+                            stateMachine.ClipEventsBlob,
+                            ref singleClipStates,
+                            ref linearBlendStates,
+                            ref animationStates,
+                            ref clipSamplers);
+
+                        animationStateTransitionRequest = new AnimationStateTransitionRequest
+                        {
+                            AnimationStateId = stateMachine.CurrentState.AnimationStateId,
+                            TransitionDuration = transitionDuration,
+                        };
+
+                        // Update the stack context with the new state
+                        if (stackContext.Length > 0)
+                        {
+                            ref var currentContext = ref stackContext.GetCurrent();
+                            currentContext.CurrentStateIndex = toStateIndex;
+                        }
+                    }
                 }
             }
+        }
+
+        /// <summary>
+        /// Traverse the hierarchy to get the StateMachineBlob at the current depth.
+        /// Philosophy: Follow the relationship chain - each context points to its parent sub-machine.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private ref StateMachineBlob GetCurrentBlob(
+            ref StateMachineBlob rootBlob,
+            in DynamicBuffer<StateMachineContext> stackContext)
+        {
+            if (stackContext.Length == 0)
+            {
+                return ref rootBlob;
+            }
+
+            ref var currentBlob = ref rootBlob;
+
+            // Traverse down the hierarchy following the context chain
+            for (int i = 1; i < stackContext.Length; i++)
+            {
+                var context = stackContext[i];
+                var subMachineIndex = context.ParentSubMachineIndex;
+
+                if (subMachineIndex >= 0)
+                {
+                    ref var subMachine = ref currentBlob.SubStateMachines[subMachineIndex];
+                    currentBlob = ref subMachine.NestedStateMachine;
+                }
+            }
+
+            return ref currentBlob;
+        }
+
+        /// <summary>
+        /// Enter a sub-state machine by pushing a new context onto the stack.
+        /// </summary>
+        private void EnterSubStateMachine(
+            ref DynamicBuffer<StateMachineContext> stackContext,
+            short subMachineIndex,
+            ref StateMachineBlob parentBlob)
+        {
+            ref var subMachine = ref parentBlob.SubStateMachines[subMachineIndex];
+
+            var newContext = new StateMachineContext
+            {
+                CurrentStateIndex = subMachine.EntryStateIndex,
+                ParentSubMachineIndex = subMachineIndex,
+                Level = (byte)(stackContext.Length)
+            };
+
+            stackContext.Push(newContext);
+        }
+
+        /// <summary>
+        /// Exit the current sub-state machine by popping the context.
+        /// Returns true if exit transitions should be evaluated.
+        /// </summary>
+        private bool ExitSubStateMachine(
+            ref DynamicBuffer<StateMachineContext> stackContext,
+            out short exitedSubMachineIndex)
+        {
+            if (stackContext.Length <= 1)
+            {
+                // Can't exit from root level
+                exitedSubMachineIndex = -1;
+                return false;
+            }
+
+            var exitedContext = stackContext.Pop();
+            exitedSubMachineIndex = exitedContext.ParentSubMachineIndex;
+            return true;
         }
 
         public static bool ShouldStateMachineBeActive(in AnimationCurrentState animationCurrentState,
@@ -182,6 +309,10 @@ namespace DMotion
 
                     animationStateId = linearClipState.AnimationStateId;
                     break;
+                case StateType.SubStateMachine:
+                    throw new InvalidOperationException(
+                        "SubStateMachine states should be entered via EnterSubStateMachine, not created directly. " +
+                        "This indicates a bug in transition handling.");
                 default:
                     throw new ArgumentOutOfRangeException();
             }
