@@ -68,8 +68,11 @@ namespace DMotion.Editor.UnityControllerBridge.Core
                 // Phase 5: Convert transitions (needs states to be created first)
                 ConvertTransitions(stateMachine.States, result.States, result.Parameters);
 
+                // Phase 6: Convert Any State transitions (native DMotion support)
+                result.AnyStateTransitions = ConvertAnyStateTransitions(stateMachine.AnyStateTransitions, result.Parameters);
+
                 result.Success = true;
-                _log.AddInfo($"Conversion successful: {result.States.Count} states, {result.Parameters.Count} parameters");
+                _log.AddInfo($"Conversion successful: {result.States.Count} states, {result.Parameters.Count} parameters, {result.AnyStateTransitions.Count} Any State transitions");
             }
             catch (Exception ex)
             {
@@ -291,6 +294,44 @@ namespace DMotion.Editor.UnityControllerBridge.Core
             }
         }
 
+        private List<ConvertedTransition> ConvertAnyStateTransitions(List<TransitionData> anyStateTransitions, List<ConvertedParameter> parameters)
+        {
+            var converted = new List<ConvertedTransition>();
+
+            foreach (var transition in anyStateTransitions)
+            {
+                // For Any State transitions, we don't have a source state
+                var convertedTransition = new ConvertedTransition
+                {
+                    DestinationStateName = transition.DestinationStateName,
+                    Duration = transition.Duration
+                };
+
+                // Handle exit time (for Any State, this is less common)
+                if (transition.HasExitTime)
+                {
+                    convertedTransition.HasEndTime = true;
+                    convertedTransition.NormalizedExitTime = transition.ExitTime;
+                    _log.AddInfo($"Any State transition to '{transition.DestinationStateName}': Exit time {transition.ExitTime:F2}");
+                }
+
+                // Convert conditions
+                foreach (var condition in transition.Conditions)
+                {
+                    var convertedCondition = ConvertCondition(condition, parameters);
+                    if (convertedCondition != null)
+                    {
+                        convertedTransition.Conditions.Add(convertedCondition);
+                    }
+                }
+
+                converted.Add(convertedTransition);
+                _log.AddInfo($"Converted Any State transition to '{transition.DestinationStateName}' with {convertedTransition.Conditions.Count} conditions");
+            }
+
+            return converted;
+        }
+
         private ConvertedTransition ConvertTransition(TransitionData transition, StateData sourceState, List<ConvertedParameter> parameters)
         {
             var converted = new ConvertedTransition
@@ -326,6 +367,12 @@ namespace DMotion.Editor.UnityControllerBridge.Core
             }
 
             return converted;
+        }
+
+        // Overload for Any State transitions (no source state)
+        private ConvertedCondition ConvertCondition(ConditionData condition, List<ConvertedParameter> parameters)
+        {
+            return ConvertCondition(condition, parameters, "Any State", "");
         }
 
         private ConvertedCondition ConvertCondition(ConditionData condition, List<ConvertedParameter> parameters, string fromState, string toState)

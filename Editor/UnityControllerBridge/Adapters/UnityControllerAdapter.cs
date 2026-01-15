@@ -72,70 +72,25 @@ namespace DMotion.Editor.UnityControllerBridge.Adapters
                 }
             }
 
-            // Expand Any State transitions
-            ExpandAnyStateTransitions(data, stateMachine);
+            // NEW: Read Any State transitions (pure 1:1 translation, no expansion!)
+            if (stateMachine.anyStateTransitions != null && stateMachine.anyStateTransitions.Length > 0)
+            {
+                foreach (var anyTransition in stateMachine.anyStateTransitions)
+                {
+                    var transitionData = ReadTransition(anyTransition);
+                    if (transitionData != null)
+                    {
+                        data.AnyStateTransitions.Add(transitionData);
+                    }
+                }
+
+                UnityEngine.Debug.Log(
+                    $"[Unity Controller Bridge] Converted {data.AnyStateTransitions.Count} Any State transition(s) " +
+                    $"(native DMotion support - no expansion needed)"
+                );
+            }
 
             return data;
-        }
-
-        /// <summary>
-        /// Expands "Any State" transitions to explicit transitions from every state.
-        /// This converts Unity's special Any State node to explicit transitions that DMotion can understand.
-        /// </summary>
-        private static void ExpandAnyStateTransitions(StateMachineData data, AnimatorStateMachine stateMachine)
-        {
-            // Read Any State transitions
-            if (stateMachine.anyStateTransitions == null || stateMachine.anyStateTransitions.Length == 0)
-            {
-                return; // No Any State transitions
-            }
-
-            var anyStateTransitions = new List<TransitionData>();
-
-            foreach (var anyTransition in stateMachine.anyStateTransitions)
-            {
-                var transitionData = ReadTransition(anyTransition);
-                if (transitionData != null)
-                {
-                    anyStateTransitions.Add(transitionData);
-                }
-            }
-
-            if (anyStateTransitions.Count == 0)
-            {
-                return; // No valid Any State transitions
-            }
-
-            // Expand: add copy of each Any State transition to every state
-            // Note: This includes self-transitions (state → itself), which Unity supports
-            // and are useful for animation restarts, reloads, and retriggerable abilities
-            int totalExpanded = 0;
-            foreach (var state in data.States)
-            {
-                foreach (var anyTransition in anyStateTransitions)
-                {
-                    // Create a copy of the transition
-                    var expandedTransition = new TransitionData
-                    {
-                        DestinationStateName = anyTransition.DestinationStateName,
-                        Duration = anyTransition.Duration,
-                        Offset = anyTransition.Offset,
-                        HasExitTime = anyTransition.HasExitTime,
-                        ExitTime = anyTransition.ExitTime,
-                        HasFixedDuration = anyTransition.HasFixedDuration,
-                        Conditions = new List<ConditionData>(anyTransition.Conditions)
-                    };
-
-                    state.Transitions.Add(expandedTransition);
-                    totalExpanded++;
-                }
-            }
-
-            // Log expansion (will be picked up by conversion engine)
-            UnityEngine.Debug.Log(
-                $"[Unity Controller Bridge] Expanded {anyStateTransitions.Count} Any State transition(s) " +
-                $"to {totalExpanded} explicit transitions across {data.States.Count} states"
-            );
         }
 
         private static StateData ReadState(AnimatorState state, Vector3 position)

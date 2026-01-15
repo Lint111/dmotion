@@ -50,6 +50,12 @@ namespace DMotion.Editor.UnityControllerBridge.Core
     {
         public List<StateData> States { get; set; } = new();
         public string DefaultStateName { get; set; }
+
+        /// <summary>
+        /// Global transitions that can be taken from any state.
+        /// Native DMotion support - no expansion needed.
+        /// </summary>
+        public List<TransitionData> AnyStateTransitions { get; set; } = new();
     }
 
     /// <summary>

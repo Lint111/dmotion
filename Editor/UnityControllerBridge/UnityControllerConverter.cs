@@ -73,6 +73,9 @@ namespace DMotion.Editor.UnityControllerBridge
             // Phase 4: Link transitions (second pass needed after all states exist)
             LinkTransitions(stateMachine, result);
 
+            // Phase 5: Link Any State transitions (native DMotion support)
+            LinkAnyStateTransitions(stateMachine, result);
+
             // Save final asset
             EditorUtility.SetDirty(stateMachine);
             AssetDatabase.SaveAssets();
@@ -101,6 +104,67 @@ namespace DMotion.Editor.UnityControllerBridge
                     }
                 }
             }
+        }
+
+        private static void LinkAnyStateTransitions(StateMachineAsset stateMachine, ConversionResult result)
+        {
+            if (result.AnyStateTransitions.Count == 0)
+            {
+                Debug.Log("[UnityControllerConverter] No Any State transitions to link");
+                return;
+            }
+
+            // Build state lookup
+            var stateByName = stateMachine.States.ToDictionary(s => s.name, s => s);
+
+            // Create Any State transitions
+            foreach (var anyTransition in result.AnyStateTransitions)
+            {
+                var transitionGroup = CreateAnyStateTransition(anyTransition, stateByName, stateMachine.Parameters);
+                if (transitionGroup != null)
+                {
+                    stateMachine.AnyStateTransitions.Add(transitionGroup);
+                }
+            }
+
+            Debug.Log($"[UnityControllerConverter] Linked {stateMachine.AnyStateTransitions.Count} Any State transition(s) (native DMotion support)");
+        }
+
+        private static StateOutTransition CreateAnyStateTransition(
+            ConvertedTransition transition,
+            System.Collections.Generic.Dictionary<string, AnimationStateAsset> stateByName,
+            System.Collections.Generic.List<AnimationParameterAsset> parameters)
+        {
+            // Find destination state
+            if (!stateByName.TryGetValue(transition.DestinationStateName, out var toState))
+            {
+                Debug.LogWarning($"[UnityControllerConverter] Any State transition destination '{transition.DestinationStateName}' not found");
+                return null;
+            }
+
+            var outTransition = new StateOutTransition(toState, transition.Duration);
+
+            // Handle exit time (less common for Any State, but supported)
+            if (transition.HasEndTime)
+            {
+                outTransition.HasEndTime = true;
+                // For Any State, we can't convert normalized time because we don't know which state we're coming from
+                // Store as-is and let the runtime handle it (or use a reasonable default)
+                outTransition.EndTime = transition.NormalizedExitTime;
+                Debug.LogWarning($"[UnityControllerConverter] Any State transition to '{transition.DestinationStateName}' has exit time - stored as absolute value {transition.NormalizedExitTime:F2}s (may need manual adjustment)");
+            }
+
+            // Create conditions
+            foreach (var condition in transition.Conditions)
+            {
+                var transitionCondition = CreateCondition(condition, parameters);
+                if (transitionCondition != null)
+                {
+                    outTransition.Conditions.Add(transitionCondition);
+                }
+            }
+
+            return outTransition;
         }
 
         private static StateOutTransition CreateTransition(
