@@ -36,8 +36,7 @@ namespace DMotion.Editor
                     {
                         editor.OnInspectorGUI();
                         scrollPos = scope.scrollPosition;
-                        editor.serializedObject.ApplyModifiedProperties();
-                        editor.serializedObject.Update();
+                        editor.serializedObject.ApplyAndUpdate();
                     }
                 }
             });
