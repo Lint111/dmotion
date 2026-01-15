@@ -326,29 +326,7 @@ After conversion, you can inspect the generated `StateMachineAsset`:
 
 ## Limitations
 
-### 1. Self-Transitions Excluded
-
-**Unity Behavior**: Any State can transition to itself (creates a loop)
-**Bridge Behavior**: Self-transitions are excluded to prevent infinite loops
-
-**Example**:
-```
-Any State → Idle
-
-Unity:
-  Idle can transition to Idle (self-transition)
-
-DMotion:
-  Idle does NOT get transition to itself
-```
-
-**Why**: Self-transitions in Any State are usually unintended and can cause animation loops.
-
-**Workaround**: If you need a state to transition to itself, add an explicit transition.
-
----
-
-### 2. Exit Transitions Not Supported
+### 1. Exit Transitions Not Supported
 
 **Unity Feature**: Any State can transition to Exit (leave state machine)
 **Bridge Behavior**: Exit transitions are ignored
@@ -378,8 +356,7 @@ As discussed in Performance Considerations, Any State expansion creates N copies
 
 1. **Rare Transitions**: If only 2-3 states need the transition, use explicit transitions
 2. **Complex Logic**: Multiple conditions that vary per state
-3. **Self-Transitions**: Use explicit transitions for these
-4. **Performance-Critical Code**: If you have 100+ states and are worried about memory
+3. **Performance-Critical Code**: If you have 100+ states and are worried about memory
 
 ---
 
@@ -392,7 +369,7 @@ As discussed in Performance Considerations, Any State expansion creates N copies
 | Memory usage | Minimal | N × transition size |
 | Runtime performance | Unity's overhead | DOTS performance |
 | Behavior | Identical | Identical |
-| Self-transitions | ✅ Supported | ❌ Excluded |
+| Self-transitions | ✅ Supported | ✅ Supported |
 | Exit transitions | ✅ Supported | ❌ Not supported |
 
 ---
@@ -455,7 +432,7 @@ After conversion, Walk state has:
 - ✅ Any State transitions work automatically in the bridge
 - ✅ Expansion is transparent (no code changes needed)
 - ✅ Behavior is identical to Unity
-- ⚠️ Self-transitions are excluded (by design)
+- ✅ Self-transitions are supported (useful for animation restarts)
 - ⚠️ Memory overhead: N transitions per Any State
 - ✅ Use for global interrupts (hit, death, dodge)
 - ❌ Avoid for rare or state-specific transitions

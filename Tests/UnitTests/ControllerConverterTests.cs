@@ -481,7 +481,14 @@ namespace DMotion.Tests.UnitTests
                 }
             };
 
-            // Add to Walk and Run (but not Idle, to avoid self-transition)
+            // Add to ALL states (including Idle for self-transition)
+            idle.Transitions.Add(new TransitionData
+            {
+                DestinationStateName = anyStateTransition.DestinationStateName,
+                Duration = anyStateTransition.Duration,
+                Conditions = new System.Collections.Generic.List<ConditionData>(anyStateTransition.Conditions)
+            });
+
             walk.Transitions.Add(new TransitionData
             {
                 DestinationStateName = anyStateTransition.DestinationStateName,
@@ -516,9 +523,10 @@ namespace DMotion.Tests.UnitTests
             Assert.AreEqual(1, runState.Transitions.Count);
             Assert.AreEqual("Idle", runState.Transitions[0].DestinationStateName);
 
-            // Verify Idle doesn't have self-transition
+            // Verify Idle HAS self-transition (Unity supports this)
             var idleState = result.States.First(s => s.Name == "Idle");
-            Assert.AreEqual(0, idleState.Transitions.Count);
+            Assert.AreEqual(1, idleState.Transitions.Count);
+            Assert.AreEqual("Idle", idleState.Transitions[0].DestinationStateName);
         }
 
         [Test]
@@ -624,6 +632,52 @@ namespace DMotion.Tests.UnitTests
         }
 
         [Test]
+        public void AnyStateExpansion_SelfTransitions_WorkCorrectly()
+        {
+            var controller = CreateMockController();
+
+            var reload = CreateMockState("Reload");
+            var idle = CreateMockState("Idle");
+
+            // Simulate Any State → Reload (useful for interrupt-and-restart reloads)
+            // This includes Reload → Reload self-transition
+            reload.Transitions.Add(new TransitionData
+            {
+                DestinationStateName = "Reload",  // Self-transition
+                Duration = 0.0f,
+                Conditions = new System.Collections.Generic.List<ConditionData>
+                {
+                    new ConditionData { ParameterName = "StartReload", Mode = ConditionMode.If }
+                }
+            });
+
+            idle.Transitions.Add(new TransitionData
+            {
+                DestinationStateName = "Reload",
+                Duration = 0.1f,
+                Conditions = new System.Collections.Generic.List<ConditionData>
+                {
+                    new ConditionData { ParameterName = "StartReload", Mode = ConditionMode.If }
+                }
+            });
+
+            controller.Parameters.Add(new ParameterData { Name = "StartReload", Type = ParameterType.Bool });
+            controller.Layers[0].StateMachine.States.Add(reload);
+            controller.Layers[0].StateMachine.States.Add(idle);
+            controller.Layers[0].StateMachine.DefaultStateName = "Idle";
+
+            var result = _engine.Convert(controller);
+
+            Assert.IsTrue(result.Success);
+
+            // Verify Reload HAS self-transition (Unity supports this for animation restarts)
+            var reloadState = result.States.First(s => s.Name == "Reload");
+            Assert.AreEqual(1, reloadState.Transitions.Count, "Reload should have self-transition");
+            Assert.AreEqual("Reload", reloadState.Transitions[0].DestinationStateName,
+                "Self-transition should loop back to same state");
+        }
+
+        [Test]
         public void AnyStateExpansion_WithManyStates_PerformanceTest()
         {
             var controller = CreateMockController();
@@ -633,19 +687,16 @@ namespace DMotion.Tests.UnitTests
             {
                 var state = CreateMockState($"State{i}");
 
-                // Simulate one Any State transition expanded to this state (if not targeting itself)
-                if (i != 0) // State0 is the target, don't create self-transition
+                // Simulate one Any State transition expanded to ALL states (including State0)
+                state.Transitions.Add(new TransitionData
                 {
-                    state.Transitions.Add(new TransitionData
+                    DestinationStateName = "State0",
+                    Duration = 0.2f,
+                    Conditions = new System.Collections.Generic.List<ConditionData>
                     {
-                        DestinationStateName = "State0",
-                        Duration = 0.2f,
-                        Conditions = new System.Collections.Generic.List<ConditionData>
-                        {
-                            new ConditionData { ParameterName = "Reset", Mode = ConditionMode.If }
-                        }
-                    });
-                }
+                        new ConditionData { ParameterName = "Reset", Mode = ConditionMode.If }
+                    }
+                });
 
                 controller.Layers[0].StateMachine.States.Add(state);
             }
@@ -659,17 +710,18 @@ namespace DMotion.Tests.UnitTests
             Assert.IsTrue(result.Success);
             Assert.AreEqual(50, result.States.Count);
 
-            // Verify all states except State0 have the transition
-            for (int i = 1; i < 50; i++)
+            // Verify ALL states (including State0) have the transition
+            for (int i = 0; i < 50; i++)
             {
                 var state = result.States.First(s => s.Name == $"State{i}");
                 Assert.AreEqual(1, state.Transitions.Count, $"State{i} should have 1 transition");
                 Assert.AreEqual("State0", state.Transitions[0].DestinationStateName);
             }
 
-            // State0 should have no transitions (no self-transition)
+            // State0 NOW has self-transition (correct Unity behavior)
             var state0 = result.States.First(s => s.Name == "State0");
-            Assert.AreEqual(0, state0.Transitions.Count, "State0 should not have self-transition");
+            Assert.AreEqual(1, state0.Transitions.Count, "State0 should have self-transition");
+            Assert.AreEqual("State0", state0.Transitions[0].DestinationStateName);
         }
 
         #endregion

@@ -107,6 +107,8 @@ namespace DMotion.Editor.UnityControllerBridge.Adapters
             }
 
             // Expand: add copy of each Any State transition to every state
+            // Note: This includes self-transitions (state → itself), which Unity supports
+            // and are useful for animation restarts, reloads, and retriggerable abilities
             int totalExpanded = 0;
             foreach (var state in data.States)
             {
@@ -123,12 +125,6 @@ namespace DMotion.Editor.UnityControllerBridge.Adapters
                         HasFixedDuration = anyTransition.HasFixedDuration,
                         Conditions = new List<ConditionData>(anyTransition.Conditions)
                     };
-
-                    // Don't create self-transition if destination is same as source
-                    if (expandedTransition.DestinationStateName == state.Name)
-                    {
-                        continue;
-                    }
 
                     state.Transitions.Add(expandedTransition);
                     totalExpanded++;
