@@ -44,6 +44,7 @@ namespace DMotion.Authoring
         {
             var singleClipStates = stateMachineAsset.States.OfType<SingleClipStateAsset>().ToArray();
             var linearBlendStates = stateMachineAsset.States.OfType<LinearBlendStateAsset>().ToArray();
+            var subStateMachineStates = stateMachineAsset.States.OfType<SubStateMachineStateAsset>().ToArray();
 
             converter.States =
                 new UnsafeList<AnimationStateConversionData>(stateMachineAsset.States.Count, allocator);
@@ -54,6 +55,10 @@ namespace DMotion.Authoring
 
             converter.LinearBlendStates =
                 new UnsafeList<LinearBlendStateConversionData>(linearBlendStates.Length,
+                    allocator);
+
+            converter.SubStateMachines =
+                new UnsafeList<SubStateMachineConversionData>(subStateMachineStates.Length,
                     allocator);
 
             ushort clipIndex = 0;
@@ -106,6 +111,45 @@ namespace DMotion.Authoring
                         });
                         clipIndex++;
                         break;
+                    case SubStateMachineStateAsset subStateMachineAsset:
+                        stateImplIndex = converter.SubStateMachines.Length;
+
+                        // Validate sub-state machine
+                        Assert.IsTrue(subStateMachineAsset.IsValid(),
+                            $"({stateMachineAsset.name}) SubStateMachine state '{stateAsset.name}' has invalid configuration");
+
+                        // Recursively create converter for nested machine
+                        var nestedConverter = CreateConverter(subStateMachineAsset.NestedStateMachine);
+
+                        // Find entry state index in nested machine
+                        var entryStateIndex = subStateMachineAsset.NestedStateMachine.States
+                            .ToList()
+                            .IndexOf(subStateMachineAsset.EntryState);
+                        Assert.IsTrue(entryStateIndex >= 0,
+                            $"({stateMachineAsset.name}) SubStateMachine '{stateAsset.name}': Entry state not found in nested machine");
+
+                        // Build exit transitions
+                        var exitTransitions = new UnsafeList<StateOutTransitionConversionData>(
+                            subStateMachineAsset.ExitTransitions.Count, allocator);
+                        exitTransitions.Resize(subStateMachineAsset.ExitTransitions.Count);
+
+                        for (var exitIndex = 0; exitIndex < exitTransitions.Length; exitIndex++)
+                        {
+                            var exitTransitionAsset = subStateMachineAsset.ExitTransitions[exitIndex];
+                            exitTransitions[exitIndex] = BuildTransitionConversionData(
+                                stateMachineAsset, exitTransitionAsset, allocator);
+                        }
+
+                        var subMachineData = new SubStateMachineConversionData
+                        {
+                            NestedConverter = nestedConverter,
+                            EntryStateIndex = (short)entryStateIndex,
+                            ExitTransitions = exitTransitions,
+                            Name = new FixedString64Bytes(stateAsset.name)
+                        };
+
+                        converter.SubStateMachines.Add(subMachineData);
+                        break;
                     default:
                         throw new ArgumentOutOfRangeException(nameof(stateAsset));
                 }
@@ -114,6 +158,79 @@ namespace DMotion.Authoring
                 converter.States[i] =
                     BuildStateConversionData(stateMachineAsset, stateAsset, stateImplIndex, allocator);
             }
+        }
+
+        private static StateOutTransitionConversionData BuildTransitionConversionData(
+            StateMachineAsset stateMachineAsset,
+            StateOutTransition outTransitionAsset,
+            Allocator allocator)
+        {
+            var toStateIndex =
+                (short)stateMachineAsset.States.ToList().FindIndex(s => s == outTransitionAsset.ToState);
+            Assert.IsTrue(toStateIndex >= 0,
+                $"State {outTransitionAsset.ToState.name} not present on State Machine {stateMachineAsset.name}");
+
+            var outTransition = new StateOutTransitionConversionData()
+            {
+                ToStateIndex = toStateIndex,
+                TransitionEndTime = outTransitionAsset.HasEndTime ? Mathf.Max(0, outTransitionAsset.EndTime) : -1f,
+                TransitionDuration = outTransitionAsset.TransitionDuration,
+            };
+
+            //Create bool transitions
+            {
+                var boolTransitions = outTransitionAsset.BoolTransitions.ToArray();
+                outTransition.BoolTransitions =
+                    new UnsafeList<BoolTransition>(boolTransitions.Length, allocator);
+                outTransition.BoolTransitions.Resize(boolTransitions.Length);
+                for (var boolTransitionIndex = 0;
+                     boolTransitionIndex < outTransition.BoolTransitions.Length;
+                     boolTransitionIndex++)
+                {
+                    var boolTransitionAsset = boolTransitions[boolTransitionIndex];
+                    var parameterIndex = stateMachineAsset.Parameters
+                        .OfType<BoolParameterAsset>()
+                        .ToList()
+                        .FindIndex(p => p == boolTransitionAsset.BoolParameter);
+
+                    Assert.IsTrue(parameterIndex >= 0,
+                        $"({stateMachineAsset.name}) Couldn't find parameter {boolTransitionAsset.BoolParameter.name}, for transition");
+                    outTransition.BoolTransitions[boolTransitionIndex] = new BoolTransition
+                    {
+                        ComparisonValue = boolTransitionAsset.ComparisonValue == BoolConditionComparison.True,
+                        ParameterIndex = parameterIndex
+                    };
+                }
+            }
+
+            //Create int transitions
+            {
+                var intTransitions = outTransitionAsset.IntTransitions.ToArray();
+                var intParameters = stateMachineAsset.Parameters
+                    .OfType<IntParameterAsset>()
+                    .ToList();
+                outTransition.IntTransitions =
+                    new UnsafeList<IntTransition>(intTransitions.Length, allocator);
+                outTransition.IntTransitions.Resize(intTransitions.Length);
+                for (var intTransitionIndex = 0;
+                     intTransitionIndex < outTransition.IntTransitions.Length;
+                     intTransitionIndex++)
+                {
+                    var intTransitionAsset = intTransitions[intTransitionIndex];
+                    var parameterIndex = intParameters.FindIndex(p => p == intTransitionAsset.IntParameter);
+
+                    Assert.IsTrue(parameterIndex >= 0,
+                        $"({stateMachineAsset.name}) Couldn't find parameter {intTransitionAsset.IntParameter.name}, for transition");
+                    outTransition.IntTransitions[intTransitionIndex] = new IntTransition
+                    {
+                        ParameterIndex = parameterIndex,
+                        ComparisonValue = intTransitionAsset.ComparisonValue,
+                        ComparisonMode = intTransitionAsset.ComparisonMode
+                    };
+                }
+            }
+
+            return outTransition;
         }
 
         private static AnimationStateConversionData BuildStateConversionData(StateMachineAsset stateMachineAsset,
@@ -135,73 +252,8 @@ namespace DMotion.Authoring
 
             for (var transitionIndex = 0; transitionIndex < stateConversionData.Transitions.Length; transitionIndex++)
             {
-                var outTransitionAsset = state.OutTransitions[transitionIndex];
-
-                var toStateIndex =
-                    (short)stateMachineAsset.States.ToList().FindIndex(s => s == outTransitionAsset.ToState);
-                Assert.IsTrue(toStateIndex >= 0,
-                    $"State {outTransitionAsset.ToState.name} not present on State Machine {stateMachineAsset.name}");
-                var outTransition = new StateOutTransitionConversionData()
-                {
-                    ToStateIndex = toStateIndex,
-                    TransitionEndTime = outTransitionAsset.HasEndTime ? Mathf.Max(0, outTransitionAsset.EndTime) : -1f,
-                    TransitionDuration = outTransitionAsset.TransitionDuration,
-                };
-
-                //Create bool transitions
-                {
-                    var boolTransitions = outTransitionAsset.BoolTransitions.ToArray();
-                    outTransition.BoolTransitions =
-                        new UnsafeList<BoolTransition>(boolTransitions.Length, allocator);
-                    outTransition.BoolTransitions.Resize(boolTransitions.Length);
-                    for (var boolTransitionIndex = 0;
-                         boolTransitionIndex < outTransition.BoolTransitions.Length;
-                         boolTransitionIndex++)
-                    {
-                        var boolTransitionAsset = boolTransitions[boolTransitionIndex];
-                        var parameterIndex = stateMachineAsset.Parameters
-                            .OfType<BoolParameterAsset>()
-                            .ToList()
-                            .FindIndex(p => p == boolTransitionAsset.BoolParameter);
-
-                        Assert.IsTrue(parameterIndex >= 0,
-                            $"({stateMachineAsset.name}) Couldn't find parameter {boolTransitionAsset.BoolParameter.name}, for transition");
-                        outTransition.BoolTransitions[boolTransitionIndex] = new BoolTransition
-                        {
-                            ComparisonValue = boolTransitionAsset.ComparisonValue == BoolConditionComparison.True,
-                            ParameterIndex = parameterIndex
-                        };
-                    }
-                }
-
-                //Create int transitions
-                {
-                    var intTransitions = outTransitionAsset.IntTransitions.ToArray();
-                    var intParameters = stateMachineAsset.Parameters
-                        .OfType<IntParameterAsset>()
-                        .ToList();
-                    outTransition.IntTransitions =
-                        new UnsafeList<IntTransition>(intTransitions.Length, allocator);
-                    outTransition.IntTransitions.Resize(intTransitions.Length);
-                    for (var intTransitionIndex = 0;
-                         intTransitionIndex < outTransition.IntTransitions.Length;
-                         intTransitionIndex++)
-                    {
-                        var intTransitionAsset = intTransitions[intTransitionIndex];
-                        var parameterIndex = intParameters.FindIndex(p => p == intTransitionAsset.IntParameter);
-
-                        Assert.IsTrue(parameterIndex >= 0,
-                            $"({stateMachineAsset.name}) Couldn't find parameter {intTransitionAsset.IntParameter.name}, for transition");
-                        outTransition.IntTransitions[intTransitionIndex] = new IntTransition
-                        {
-                            ParameterIndex = parameterIndex,
-                            ComparisonValue = intTransitionAsset.ComparisonValue,
-                            ComparisonMode = intTransitionAsset.ComparisonMode
-                        };
-                    }
-                }
-
-                stateConversionData.Transitions[transitionIndex] = outTransition;
+                stateConversionData.Transitions[transitionIndex] =
+                    BuildTransitionConversionData(stateMachineAsset, state.OutTransitions[transitionIndex], allocator);
             }
 
             return stateConversionData;

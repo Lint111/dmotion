@@ -28,7 +28,15 @@ namespace DMotion.Authoring
         internal UnsafeList<ClipIndexWithThreshold> ClipsWithThresholds;
         internal ushort BlendParameterIndex;
     }
-    
+
+    internal struct SubStateMachineConversionData
+    {
+        internal StateMachineBlobConverter NestedConverter;
+        internal short EntryStateIndex;
+        internal UnsafeList<StateOutTransitionConversionData> ExitTransitions;
+        internal FixedString64Bytes Name;
+    }
+
     internal struct StateOutTransitionConversionData
     {
         internal short ToStateIndex;
@@ -45,6 +53,7 @@ namespace DMotion.Authoring
         internal UnsafeList<AnimationStateConversionData> States;
         internal UnsafeList<SingleClipStateBlob> SingleClipStates;
         internal UnsafeList<LinearBlendStateConversionData> LinearBlendStates;
+        internal UnsafeList<SubStateMachineConversionData> SubStateMachines;
 
         // NEW: Any State transitions (global transitions from any state)
         internal UnsafeList<StateOutTransitionConversionData> AnyStateTransitions;
@@ -123,6 +132,48 @@ namespace DMotion.Authoring
                 }
             }
 
+            // NEW: Sub-State Machines (recursive blob building)
+            {
+                var subStateMachines = builder.Allocate(ref root.SubStateMachines, SubStateMachines.Length);
+                for (ushort i = 0; i < subStateMachines.Length; i++)
+                {
+                    var subMachineConversionData = SubStateMachines[i];
+
+                    // Recursively build the nested state machine blob
+                    var nestedBlob = subMachineConversionData.NestedConverter.BuildBlob();
+
+                    // Copy the nested blob into the parent builder
+                    // This embeds the full nested structure into the parent
+                    builder.SetBlobAssetReference(ref subStateMachines[i].NestedStateMachine, nestedBlob);
+
+                    subStateMachines[i].EntryStateIndex = subMachineConversionData.EntryStateIndex;
+                    subStateMachines[i].Name = subMachineConversionData.Name;
+
+                    // Build exit transitions for this sub-machine
+                    var exitTransitions = builder.Allocate(ref subStateMachines[i].ExitTransitions, subMachineConversionData.ExitTransitions.Length);
+                    for (ushort j = 0; j < exitTransitions.Length; j++)
+                    {
+                        var exitTransitionData = subMachineConversionData.ExitTransitions[j];
+                        exitTransitions[j] = new StateOutTransitionGroup()
+                        {
+                            ToStateIndex = exitTransitionData.ToStateIndex,
+                            TransitionEndTime = exitTransitionData.TransitionEndTime,
+                            TransitionDuration = exitTransitionData.TransitionDuration
+                        };
+
+                        builder.ConstructFromNativeArray(
+                            ref exitTransitions[j].BoolTransitions,
+                            exitTransitionData.BoolTransitions.Ptr,
+                            exitTransitionData.BoolTransitions.Length);
+
+                        builder.ConstructFromNativeArray(
+                            ref exitTransitions[j].IntTransitions,
+                            exitTransitionData.IntTransitions.Ptr,
+                            exitTransitionData.IntTransitions.Length);
+                    }
+                }
+            }
+
             // NEW: Any State transitions
             {
                 var anyStateTransitions = builder.Allocate(ref root.AnyStateTransitions, AnyStateTransitions.Length);
@@ -191,6 +242,33 @@ namespace DMotion.Authoring
                         linearBlend.ClipsWithThresholds.Dispose();
                 }
                 LinearBlendStates.Dispose();
+            }
+
+            // NEW: Dispose SubStateMachines (recursive disposal)
+            if (SubStateMachines.IsCreated)
+            {
+                for (int i = 0; i < SubStateMachines.Length; i++)
+                {
+                    ref var subMachine = ref SubStateMachines.ElementAt(i);
+
+                    // Recursively dispose the nested converter
+                    subMachine.NestedConverter.Dispose();
+
+                    // Dispose exit transitions
+                    if (subMachine.ExitTransitions.IsCreated)
+                    {
+                        for (int j = 0; j < subMachine.ExitTransitions.Length; j++)
+                        {
+                            ref var exitTransition = ref subMachine.ExitTransitions.ElementAt(j);
+                            if (exitTransition.BoolTransitions.IsCreated)
+                                exitTransition.BoolTransitions.Dispose();
+                            if (exitTransition.IntTransitions.IsCreated)
+                                exitTransition.IntTransitions.Dispose();
+                        }
+                        subMachine.ExitTransitions.Dispose();
+                    }
+                }
+                SubStateMachines.Dispose();
             }
 
             // NEW: Dispose Any State transitions
