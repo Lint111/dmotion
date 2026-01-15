@@ -351,6 +351,227 @@ namespace DMotion.Tests.Editor
             return controller;
         }
 
+        private AnimatorController CreateControllerWithAnyState()
+        {
+            string path = Path.Combine(TestAssetsFolder, "ControllerWithAnyState.controller");
+            var controller = AnimatorController.CreateAnimatorControllerAtPath(path);
+
+            // Add parameters
+            controller.AddParameter("Speed", AnimatorControllerParameterType.Float);
+            controller.AddParameter("Hit", AnimatorControllerParameterType.Trigger);
+
+            var rootStateMachine = controller.layers[0].stateMachine;
+
+            // Create states
+            var idleState = rootStateMachine.AddState("Idle");
+            var walkState = rootStateMachine.AddState("Walk");
+            var runState = rootStateMachine.AddState("Run");
+            var hitState = rootStateMachine.AddState("Hit");
+
+            rootStateMachine.defaultState = idleState;
+
+            // Normal transitions
+            var idleToWalk = idleState.AddTransition(walkState);
+            idleToWalk.AddCondition(AnimatorConditionMode.Greater, 0.1f, "Speed");
+
+            var walkToRun = walkState.AddTransition(runState);
+            walkToRun.AddCondition(AnimatorConditionMode.Greater, 0.5f, "Speed");
+
+            // Any State transition → Hit (global interrupt)
+            var anyStateToHit = rootStateMachine.AddAnyStateTransition(hitState);
+            anyStateToHit.AddCondition(AnimatorConditionMode.If, 0, "Hit");
+            anyStateToHit.duration = 0.1f;
+
+            // Return from Hit
+            var hitToIdle = hitState.AddTransition(idleState);
+            hitToIdle.hasExitTime = true;
+            hitToIdle.exitTime = 0.8f;
+            hitToIdle.duration = 0.2f;
+
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+
+            return controller;
+        }
+
+        private AnimatorController CreateControllerWithMultipleAnyStates()
+        {
+            string path = Path.Combine(TestAssetsFolder, "ControllerWithMultipleAnyStates.controller");
+            var controller = AnimatorController.CreateAnimatorControllerAtPath(path);
+
+            // Add parameters
+            controller.AddParameter("Hit", AnimatorControllerParameterType.Trigger);
+            controller.AddParameter("Death", AnimatorControllerParameterType.Trigger);
+
+            var rootStateMachine = controller.layers[0].stateMachine;
+
+            // Create states
+            var idleState = rootStateMachine.AddState("Idle");
+            var walkState = rootStateMachine.AddState("Walk");
+            var combatState = rootStateMachine.AddState("Combat");
+            var hitState = rootStateMachine.AddState("Hit");
+            var deathState = rootStateMachine.AddState("Death");
+
+            rootStateMachine.defaultState = idleState;
+
+            // Any State transition 1: → Hit
+            var anyToHit = rootStateMachine.AddAnyStateTransition(hitState);
+            anyToHit.AddCondition(AnimatorConditionMode.If, 0, "Hit");
+            anyToHit.duration = 0.1f;
+
+            // Any State transition 2: → Death
+            var anyToDeath = rootStateMachine.AddAnyStateTransition(deathState);
+            anyToDeath.AddCondition(AnimatorConditionMode.If, 0, "Death");
+            anyToDeath.duration = 0.05f;
+
+            // Return transitions
+            var hitToIdle = hitState.AddTransition(idleState);
+            hitToIdle.hasExitTime = true;
+            hitToIdle.exitTime = 0.9f;
+
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+
+            return controller;
+        }
+
+        #endregion
+
+        #region Any State Expansion Tests
+
+        [UnityTest]
+        public IEnumerator AnyState_WithAnyStateTransitions_ConvertsSuccessfully()
+        {
+            // Create controller with Any State transitions
+            var controller = CreateControllerWithAnyState();
+
+            // Create bridge and convert
+            var bridge = ControllerBridgeRegistry.GetOrCreateBridge(controller);
+
+            bool conversionComplete = false;
+            bool conversionSuccess = false;
+
+            ControllerConversionQueue.OnConversionFinished += (id, success) =>
+            {
+                if (id == bridge.BridgeId)
+                {
+                    conversionComplete = true;
+                    conversionSuccess = success;
+                }
+            };
+
+            ControllerConversionQueue.Enqueue(bridge);
+            ControllerConversionQueue.StartProcessing();
+
+            yield return new WaitUntil(() => conversionComplete);
+
+            Assert.IsTrue(conversionSuccess, "Conversion should succeed with Any State transitions");
+            Assert.IsNotNull(bridge.GeneratedStateMachine);
+
+            var stateMachine = bridge.GeneratedStateMachine;
+
+            // Verify all states exist
+            Assert.Greater(stateMachine.States.Count, 0, "Should have converted states");
+
+            // Verify transitions were expanded
+            // Each state (except Hit state itself) should have transition to Hit
+            foreach (var state in stateMachine.States)
+            {
+                if (state.name != "Hit")
+                {
+                    bool hasHitTransition = state.OutTransitions.Any(t =>
+                        t.TargetState != null && t.TargetState.name == "Hit");
+
+                    Assert.IsTrue(hasHitTransition,
+                        $"State '{state.name}' should have Any State transition to Hit");
+                }
+            }
+
+            Debug.Log($"[Integration Test] Any State conversion successful:");
+            Debug.Log($"  - States: {stateMachine.States.Count}");
+            Debug.Log($"  - Total transitions: {stateMachine.States.Sum(s => s.OutTransitions.Count)}");
+        }
+
+        [UnityTest]
+        public IEnumerator AnyState_MultipleAnyStateTransitions_AllExpanded()
+        {
+            // Create controller with multiple Any State transitions
+            var controller = CreateControllerWithMultipleAnyStates();
+
+            var bridge = ControllerBridgeRegistry.GetOrCreateBridge(controller);
+
+            bool complete = false;
+            bool success = false;
+
+            ControllerConversionQueue.OnConversionFinished += (id, s) =>
+            {
+                if (id == bridge.BridgeId) { complete = true; success = s; }
+            };
+
+            ControllerConversionQueue.Enqueue(bridge);
+            ControllerConversionQueue.StartProcessing();
+
+            yield return new WaitUntil(() => complete);
+
+            Assert.IsTrue(success);
+            Assert.IsNotNull(bridge.GeneratedStateMachine);
+
+            var stateMachine = bridge.GeneratedStateMachine;
+
+            // Verify each state has transitions to both Hit and Death
+            foreach (var state in stateMachine.States)
+            {
+                if (state.name == "Hit" || state.name == "Death")
+                    continue; // Skip destination states
+
+                int anyStateTransitionCount = 0;
+
+                if (state.OutTransitions.Any(t => t.TargetState?.name == "Hit"))
+                    anyStateTransitionCount++;
+
+                if (state.OutTransitions.Any(t => t.TargetState?.name == "Death"))
+                    anyStateTransitionCount++;
+
+                Assert.AreEqual(2, anyStateTransitionCount,
+                    $"State '{state.name}' should have 2 Any State transitions (Hit + Death)");
+            }
+
+            Debug.Log($"[Integration Test] Multiple Any State transitions expanded successfully");
+        }
+
+        [Test]
+        public void AnyState_NoAnyStateTransitions_ConversionUnaffected()
+        {
+            // Create controller without Any State transitions
+            var controller = CreateRealisticTestController(); // No Any State
+
+            var bridge = ControllerBridgeRegistry.GetOrCreateBridge(controller);
+
+            // Convert synchronously for this test
+            var config = ControllerBridgeConfig.GetOrCreateDefault();
+            config.EnsureOutputDirectory();
+            string outputPath = config.GetOutputPath(controller.name + "_NoAnyState");
+
+            var stateMachine = UnityControllerConverter.ConvertController(
+                controller,
+                outputPath,
+                config
+            );
+
+            Assert.IsNotNull(stateMachine, "Conversion should succeed without Any State");
+
+            // Verify states were converted normally
+            Assert.Greater(stateMachine.States.Count, 0);
+
+            Debug.Log($"[Integration Test] Controller without Any State converted successfully");
+
+            // Clean up
+            if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(outputPath) != null)
+            {
+                AssetDatabase.DeleteAsset(outputPath);
+            }
+        }
+
         #endregion
     }
 }

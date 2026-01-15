@@ -72,7 +72,74 @@ namespace DMotion.Editor.UnityControllerBridge.Adapters
                 }
             }
 
+            // Expand Any State transitions
+            ExpandAnyStateTransitions(data, stateMachine);
+
             return data;
+        }
+
+        /// <summary>
+        /// Expands "Any State" transitions to explicit transitions from every state.
+        /// This converts Unity's special Any State node to explicit transitions that DMotion can understand.
+        /// </summary>
+        private static void ExpandAnyStateTransitions(StateMachineData data, AnimatorStateMachine stateMachine)
+        {
+            // Read Any State transitions
+            if (stateMachine.anyStateTransitions == null || stateMachine.anyStateTransitions.Length == 0)
+            {
+                return; // No Any State transitions
+            }
+
+            var anyStateTransitions = new List<TransitionData>();
+
+            foreach (var anyTransition in stateMachine.anyStateTransitions)
+            {
+                var transitionData = ReadTransition(anyTransition);
+                if (transitionData != null)
+                {
+                    anyStateTransitions.Add(transitionData);
+                }
+            }
+
+            if (anyStateTransitions.Count == 0)
+            {
+                return; // No valid Any State transitions
+            }
+
+            // Expand: add copy of each Any State transition to every state
+            int totalExpanded = 0;
+            foreach (var state in data.States)
+            {
+                foreach (var anyTransition in anyStateTransitions)
+                {
+                    // Create a copy of the transition
+                    var expandedTransition = new TransitionData
+                    {
+                        DestinationStateName = anyTransition.DestinationStateName,
+                        Duration = anyTransition.Duration,
+                        Offset = anyTransition.Offset,
+                        HasExitTime = anyTransition.HasExitTime,
+                        ExitTime = anyTransition.ExitTime,
+                        HasFixedDuration = anyTransition.HasFixedDuration,
+                        Conditions = new List<ConditionData>(anyTransition.Conditions)
+                    };
+
+                    // Don't create self-transition if destination is same as source
+                    if (expandedTransition.DestinationStateName == state.Name)
+                    {
+                        continue;
+                    }
+
+                    state.Transitions.Add(expandedTransition);
+                    totalExpanded++;
+                }
+            }
+
+            // Log expansion (will be picked up by conversion engine)
+            UnityEngine.Debug.Log(
+                $"[Unity Controller Bridge] Expanded {anyStateTransitions.Count} Any State transition(s) " +
+                $"to {totalExpanded} explicit transitions across {data.States.Count} states"
+            );
         }
 
         private static StateData ReadState(AnimatorState state, Vector3 position)
@@ -162,6 +229,51 @@ namespace DMotion.Editor.UnityControllerBridge.Adapters
         }
 
         private static TransitionData ReadTransition(AnimatorStateTransition transition)
+        {
+            if (transition == null)
+            {
+                return null;
+            }
+
+            var data = new TransitionData
+            {
+                Duration = transition.duration,
+                Offset = transition.offset,
+                HasExitTime = transition.hasExitTime,
+                ExitTime = transition.exitTime,
+                HasFixedDuration = transition.hasFixedDuration
+            };
+
+            // Destination state
+            if (transition.destinationState != null)
+            {
+                data.DestinationStateName = transition.destinationState.name;
+            }
+            else if (transition.isExit)
+            {
+                // Exit transition (not supported)
+                return null;
+            }
+
+            // Read conditions
+            foreach (var condition in transition.conditions)
+            {
+                data.Conditions.Add(new ConditionData
+                {
+                    ParameterName = condition.parameter,
+                    Mode = (ConditionMode)condition.mode,
+                    Threshold = condition.threshold
+                });
+            }
+
+            return data;
+        }
+
+        /// <summary>
+        /// Reads an AnimatorTransition (used by Any State transitions).
+        /// Similar to AnimatorStateTransition but with slightly different API.
+        /// </summary>
+        private static TransitionData ReadTransition(AnimatorTransition transition)
         {
             if (transition == null)
             {

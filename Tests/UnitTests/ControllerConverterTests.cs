@@ -454,5 +454,226 @@ namespace DMotion.Tests.UnitTests
         }
 
         #endregion
+
+        #region Any State Expansion Tests
+
+        [Test]
+        public void AnyStateExpansion_WithAnyStateTransitions_ExpendsToAllStates()
+        {
+            // This test simulates what UnityControllerAdapter does when it reads Any State transitions
+            // In reality, the adapter expands them before passing to the engine
+            var controller = CreateMockController();
+
+            // Create three states
+            var idle = CreateMockState("Idle");
+            var walk = CreateMockState("Walk");
+            var run = CreateMockState("Run");
+
+            // Add an "Any State" transition by manually adding it to all states
+            // (simulating what ExpandAnyStateTransitions does)
+            var anyStateTransition = new TransitionData
+            {
+                DestinationStateName = "Idle",
+                Duration = 0.2f,
+                Conditions = new System.Collections.Generic.List<ConditionData>
+                {
+                    new ConditionData { ParameterName = "Hit", Mode = ConditionMode.If }
+                }
+            };
+
+            // Add to Walk and Run (but not Idle, to avoid self-transition)
+            walk.Transitions.Add(new TransitionData
+            {
+                DestinationStateName = anyStateTransition.DestinationStateName,
+                Duration = anyStateTransition.Duration,
+                Conditions = new System.Collections.Generic.List<ConditionData>(anyStateTransition.Conditions)
+            });
+
+            run.Transitions.Add(new TransitionData
+            {
+                DestinationStateName = anyStateTransition.DestinationStateName,
+                Duration = anyStateTransition.Duration,
+                Conditions = new System.Collections.Generic.List<ConditionData>(anyStateTransition.Conditions)
+            });
+
+            controller.Parameters.Add(new ParameterData { Name = "Hit", Type = ParameterType.Bool });
+            controller.Layers[0].StateMachine.States.Add(idle);
+            controller.Layers[0].StateMachine.States.Add(walk);
+            controller.Layers[0].StateMachine.States.Add(run);
+            controller.Layers[0].StateMachine.DefaultStateName = "Idle";
+
+            var result = _engine.Convert(controller);
+
+            Assert.IsTrue(result.Success);
+
+            // Verify Walk has the expanded transition
+            var walkState = result.States.First(s => s.Name == "Walk");
+            Assert.AreEqual(1, walkState.Transitions.Count);
+            Assert.AreEqual("Idle", walkState.Transitions[0].DestinationStateName);
+
+            // Verify Run has the expanded transition
+            var runState = result.States.First(s => s.Name == "Run");
+            Assert.AreEqual(1, runState.Transitions.Count);
+            Assert.AreEqual("Idle", runState.Transitions[0].DestinationStateName);
+
+            // Verify Idle doesn't have self-transition
+            var idleState = result.States.First(s => s.Name == "Idle");
+            Assert.AreEqual(0, idleState.Transitions.Count);
+        }
+
+        [Test]
+        public void AnyStateExpansion_PreservesConditions()
+        {
+            var controller = CreateMockController();
+
+            var idle = CreateMockState("Idle");
+            var combat = CreateMockState("Combat");
+
+            // Simulated expanded Any State transition with conditions
+            combat.Transitions.Add(new TransitionData
+            {
+                DestinationStateName = "Idle",
+                Duration = 0.3f,
+                HasExitTime = false,
+                Conditions = new System.Collections.Generic.List<ConditionData>
+                {
+                    new ConditionData { ParameterName = "Health", Mode = ConditionMode.Less, Threshold = 0.1f },
+                    new ConditionData { ParameterName = "Dead", Mode = ConditionMode.If }
+                }
+            });
+
+            controller.Parameters.Add(new ParameterData { Name = "Health", Type = ParameterType.Float });
+            controller.Parameters.Add(new ParameterData { Name = "Dead", Type = ParameterType.Bool });
+            controller.Layers[0].StateMachine.States.Add(idle);
+            controller.Layers[0].StateMachine.States.Add(combat);
+            controller.Layers[0].StateMachine.DefaultStateName = "Idle";
+
+            var result = _engine.Convert(controller);
+
+            Assert.IsTrue(result.Success);
+
+            // Verify conditions were preserved
+            var combatState = result.States.First(s => s.Name == "Combat");
+            Assert.AreEqual(1, combatState.Transitions.Count);
+
+            var transition = combatState.Transitions[0];
+            Assert.AreEqual(2, transition.Conditions.Count);
+
+            // Check first condition
+            Assert.IsTrue(transition.Conditions.Any(c =>
+                c.ParameterIndex >= 0 &&
+                c.Comparison.ToString().Contains("Less")));
+
+            // Check second condition
+            Assert.IsTrue(transition.Conditions.Any(c =>
+                c.ParameterIndex >= 0 &&
+                c.Comparison.ToString().Contains("If")));
+        }
+
+        [Test]
+        public void AnyStateExpansion_MultipleAnyStateTransitions_AllExpanded()
+        {
+            var controller = CreateMockController();
+
+            var idle = CreateMockState("Idle");
+            var walk = CreateMockState("Walk");
+            var hit = CreateMockState("Hit");
+            var death = CreateMockState("Death");
+
+            // Simulate two Any State transitions expanded to Walk state
+            // Any State → Hit (on Hit trigger)
+            walk.Transitions.Add(new TransitionData
+            {
+                DestinationStateName = "Hit",
+                Duration = 0.1f,
+                Conditions = new System.Collections.Generic.List<ConditionData>
+                {
+                    new ConditionData { ParameterName = "Hit", Mode = ConditionMode.If }
+                }
+            });
+
+            // Any State → Death (on Death trigger)
+            walk.Transitions.Add(new TransitionData
+            {
+                DestinationStateName = "Death",
+                Duration = 0.05f,
+                Conditions = new System.Collections.Generic.List<ConditionData>
+                {
+                    new ConditionData { ParameterName = "Death", Mode = ConditionMode.If }
+                }
+            });
+
+            controller.Parameters.Add(new ParameterData { Name = "Hit", Type = ParameterType.Bool });
+            controller.Parameters.Add(new ParameterData { Name = "Death", Type = ParameterType.Bool });
+            controller.Layers[0].StateMachine.States.Add(idle);
+            controller.Layers[0].StateMachine.States.Add(walk);
+            controller.Layers[0].StateMachine.States.Add(hit);
+            controller.Layers[0].StateMachine.States.Add(death);
+            controller.Layers[0].StateMachine.DefaultStateName = "Idle";
+
+            var result = _engine.Convert(controller);
+
+            Assert.IsTrue(result.Success);
+
+            // Verify Walk has both expanded transitions
+            var walkState = result.States.First(s => s.Name == "Walk");
+            Assert.AreEqual(2, walkState.Transitions.Count);
+
+            Assert.IsTrue(walkState.Transitions.Any(t => t.DestinationStateName == "Hit"));
+            Assert.IsTrue(walkState.Transitions.Any(t => t.DestinationStateName == "Death"));
+        }
+
+        [Test]
+        public void AnyStateExpansion_WithManyStates_PerformanceTest()
+        {
+            var controller = CreateMockController();
+
+            // Create 50 states
+            for (int i = 0; i < 50; i++)
+            {
+                var state = CreateMockState($"State{i}");
+
+                // Simulate one Any State transition expanded to this state (if not targeting itself)
+                if (i != 0) // State0 is the target, don't create self-transition
+                {
+                    state.Transitions.Add(new TransitionData
+                    {
+                        DestinationStateName = "State0",
+                        Duration = 0.2f,
+                        Conditions = new System.Collections.Generic.List<ConditionData>
+                        {
+                            new ConditionData { ParameterName = "Reset", Mode = ConditionMode.If }
+                        }
+                    });
+                }
+
+                controller.Layers[0].StateMachine.States.Add(state);
+            }
+
+            controller.Parameters.Add(new ParameterData { Name = "Reset", Type = ParameterType.Bool });
+            controller.Layers[0].StateMachine.DefaultStateName = "State0";
+
+            // Conversion should complete without timeout
+            var result = _engine.Convert(controller);
+
+            Assert.IsTrue(result.Success);
+            Assert.AreEqual(50, result.States.Count);
+
+            // Verify all states except State0 have the transition
+            for (int i = 1; i < 50; i++)
+            {
+                var state = result.States.First(s => s.Name == $"State{i}");
+                Assert.AreEqual(1, state.Transitions.Count, $"State{i} should have 1 transition");
+                Assert.AreEqual("State0", state.Transitions[0].DestinationStateName);
+            }
+
+            // State0 should have no transitions (no self-transition)
+            var state0 = result.States.First(s => s.Name == "State0");
+            Assert.AreEqual(0, state0.Transitions.Count, "State0 should not have self-transition");
+        }
+
+        #endregion
+
+        #endregion
     }
 }
