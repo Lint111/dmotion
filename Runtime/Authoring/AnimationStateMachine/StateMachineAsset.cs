@@ -11,6 +11,10 @@ namespace DMotion.Authoring
         public List<AnimationStateAsset> States = new();
         public List<AnimationParameterAsset> Parameters = new();
 
+        [Header("Any State Transitions")]
+        [Tooltip("Global transitions that can be taken from any state. Evaluated before regular state transitions.")]
+        public List<AnimationTransitionGroup> AnyStateTransitions = new();
+
         public IEnumerable<AnimationClipAsset> Clips => States.SelectMany(s => s.Clips);
         public int ClipCount => States.Sum(s => s.ClipCount);
     }

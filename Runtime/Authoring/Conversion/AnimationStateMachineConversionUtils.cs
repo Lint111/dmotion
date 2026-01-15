@@ -32,6 +32,10 @@ namespace DMotion.Authoring
                 $"Couldn't find state {stateMachineAsset.DefaultState.name}, in state machine {stateMachineAsset.name}");
             converter.DefaultStateIndex = (byte)defaultStateIndex;
             BuildStates(stateMachineAsset, ref converter, Allocator.Persistent);
+
+            // NEW: Build Any State transitions
+            BuildAnyStateTransitions(stateMachineAsset, ref converter, Allocator.Persistent);
+
             return converter;
         }
 
@@ -201,6 +205,98 @@ namespace DMotion.Authoring
             }
 
             return stateConversionData;
+        }
+
+        private static void BuildAnyStateTransitions(StateMachineAsset stateMachineAsset,
+            ref StateMachineBlobConverter converter, Allocator allocator)
+        {
+            var anyStateCount = stateMachineAsset.AnyStateTransitions.Count;
+
+            converter.AnyStateTransitions =
+                new UnsafeList<StateOutTransitionConversionData>(anyStateCount, allocator);
+            converter.AnyStateTransitions.Resize(anyStateCount);
+
+            for (var i = 0; i < anyStateCount; i++)
+            {
+                var anyTransitionGroup = stateMachineAsset.AnyStateTransitions[i];
+
+                // Find destination state index
+                var toStateIndex =
+                    (short)stateMachineAsset.States.ToList().FindIndex(s => s == anyTransitionGroup.TargetState);
+                Assert.IsTrue(toStateIndex >= 0,
+                    $"Any State transition target {anyTransitionGroup.TargetState?.name} not present on State Machine {stateMachineAsset.name}");
+
+                var anyTransition = new StateOutTransitionConversionData()
+                {
+                    ToStateIndex = toStateIndex,
+                    TransitionEndTime = anyTransitionGroup.HasEndTime ? Mathf.Max(0, anyTransitionGroup.EndTime) : -1f,
+                    TransitionDuration = anyTransitionGroup.TransitionDuration,
+                };
+
+                // Create bool transitions
+                {
+                    var boolTransitions = anyTransitionGroup.BoolTransitions.ToArray();
+                    anyTransition.BoolTransitions =
+                        new UnsafeList<BoolTransition>(boolTransitions.Length, allocator);
+                    anyTransition.BoolTransitions.Resize(boolTransitions.Length);
+
+                    for (var boolTransitionIndex = 0;
+                         boolTransitionIndex < anyTransition.BoolTransitions.Length;
+                         boolTransitionIndex++)
+                    {
+                        var boolTransitionAsset = boolTransitions[boolTransitionIndex];
+                        var parameterIndex = stateMachineAsset.Parameters
+                            .OfType<BoolParameterAsset>()
+                            .ToList()
+                            .FindIndex(p => p == boolTransitionAsset.BoolParameter);
+
+                        Assert.IsTrue(parameterIndex >= 0,
+                            $"({stateMachineAsset.name}) Couldn't find parameter {boolTransitionAsset.BoolParameter?.name}, for Any State transition");
+
+                        anyTransition.BoolTransitions[boolTransitionIndex] = new BoolTransition
+                        {
+                            ComparisonValue = boolTransitionAsset.ComparisonValue == BoolConditionComparison.True,
+                            ParameterIndex = parameterIndex
+                        };
+                    }
+                }
+
+                // Create int transitions
+                {
+                    var intTransitions = anyTransitionGroup.IntTransitions.ToArray();
+                    var intParameters = stateMachineAsset.Parameters
+                        .OfType<IntParameterAsset>()
+                        .ToList();
+                    anyTransition.IntTransitions =
+                        new UnsafeList<IntTransition>(intTransitions.Length, allocator);
+                    anyTransition.IntTransitions.Resize(intTransitions.Length);
+
+                    for (var intTransitionIndex = 0;
+                         intTransitionIndex < anyTransition.IntTransitions.Length;
+                         intTransitionIndex++)
+                    {
+                        var intTransitionAsset = intTransitions[intTransitionIndex];
+                        var parameterIndex = intParameters.FindIndex(p => p == intTransitionAsset.IntParameter);
+
+                        Assert.IsTrue(parameterIndex >= 0,
+                            $"({stateMachineAsset.name}) Couldn't find parameter {intTransitionAsset.IntParameter?.name}, for Any State transition");
+
+                        anyTransition.IntTransitions[intTransitionIndex] = new IntTransition
+                        {
+                            ParameterIndex = parameterIndex,
+                            ComparisonValue = intTransitionAsset.ComparisonValue,
+                            ComparisonMode = intTransitionAsset.ComparisonMode
+                        };
+                    }
+                }
+
+                converter.AnyStateTransitions[i] = anyTransition;
+            }
+
+            if (anyStateCount > 0)
+            {
+                Debug.Log($"[DMotion] Built {anyStateCount} Any State transition(s) for {stateMachineAsset.name}");
+            }
         }
 
         internal static void AddAnimationStateSystemComponents(EntityCommands dstManager, Entity entity)

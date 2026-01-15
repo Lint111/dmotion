@@ -46,6 +46,9 @@ namespace DMotion.Authoring
         internal UnsafeList<SingleClipStateBlob> SingleClipStates;
         internal UnsafeList<LinearBlendStateConversionData> LinearBlendStates;
 
+        // NEW: Any State transitions (global transitions from any state)
+        internal UnsafeList<StateOutTransitionConversionData> AnyStateTransitions;
+
         public readonly unsafe BlobAssetReference<StateMachineBlob> BuildBlob()
         {
             var builder = new BlobBuilder(Allocator.Temp);
@@ -105,7 +108,7 @@ namespace DMotion.Authoring
                     //Make sure clips are sorted by threshold
                     var clipsArray = CollectionUtils.AsArray(linearBlendStateConversionData.ClipsWithThresholds);
                     clipsArray.Sort(this);
-                    
+
                     var sortedIndexes = builder.Allocate(ref linearBlendStates[i].SortedClipIndexes, clipsArray.Length);
                     var sortedThresholds = builder.Allocate(ref linearBlendStates[i].SortedClipThresholds, clipsArray.Length);
                     var sortedSpeeds = builder.Allocate(ref linearBlendStates[i].SortedClipSpeeds, clipsArray.Length);
@@ -119,7 +122,32 @@ namespace DMotion.Authoring
                     }
                 }
             }
-            
+
+            // NEW: Any State transitions
+            {
+                var anyStateTransitions = builder.Allocate(ref root.AnyStateTransitions, AnyStateTransitions.Length);
+                for (ushort i = 0; i < anyStateTransitions.Length; i++)
+                {
+                    var anyTransitionConversionData = AnyStateTransitions[i];
+                    anyStateTransitions[i] = new AnyStateTransition()
+                    {
+                        ToStateIndex = anyTransitionConversionData.ToStateIndex,
+                        TransitionEndTime = anyTransitionConversionData.TransitionEndTime,
+                        TransitionDuration = anyTransitionConversionData.TransitionDuration
+                    };
+
+                    builder.ConstructFromNativeArray(
+                        ref anyStateTransitions[i].BoolTransitions,
+                        anyTransitionConversionData.BoolTransitions.Ptr,
+                        anyTransitionConversionData.BoolTransitions.Length);
+
+                    builder.ConstructFromNativeArray(
+                        ref anyStateTransitions[i].IntTransitions,
+                        anyTransitionConversionData.IntTransitions.Ptr,
+                        anyTransitionConversionData.IntTransitions.Length);
+                }
+            }
+
             return builder.CreateBlobAssetReference<StateMachineBlob>(Allocator.Persistent);
         }
 
@@ -163,6 +191,20 @@ namespace DMotion.Authoring
                         linearBlend.ClipsWithThresholds.Dispose();
                 }
                 LinearBlendStates.Dispose();
+            }
+
+            // NEW: Dispose Any State transitions
+            if (AnyStateTransitions.IsCreated)
+            {
+                for (int i = 0; i < AnyStateTransitions.Length; i++)
+                {
+                    ref var anyTransition = ref AnyStateTransitions.ElementAt(i);
+                    if (anyTransition.BoolTransitions.IsCreated)
+                        anyTransition.BoolTransitions.Dispose();
+                    if (anyTransition.IntTransitions.IsCreated)
+                        anyTransition.IntTransitions.Dispose();
+                }
+                AnyStateTransitions.Dispose();
             }
 
             // Dispose remaining top-level list
