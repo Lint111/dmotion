@@ -139,8 +139,6 @@ namespace DMotion
         [BurstCompile]
         internal partial struct CleanAnimationStatesJob : IJobEntity
         {
-            internal float DeltaTime;
-
             internal void Execute(
                 in AnimationStateTransition transition,
                 in AnimationPreserveState animationPreserveState,
