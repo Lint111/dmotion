@@ -222,9 +222,9 @@ namespace DMotion.Authoring
 
                 // Find destination state index
                 var toStateIndex =
-                    (short)stateMachineAsset.States.ToList().FindIndex(s => s == anyTransitionGroup.TargetState);
+                    (short)stateMachineAsset.States.ToList().FindIndex(s => s == anyTransitionGroup.ToState);
                 Assert.IsTrue(toStateIndex >= 0,
-                    $"Any State transition target {anyTransitionGroup.TargetState?.name} not present on State Machine {stateMachineAsset.name}");
+                    $"Any State transition target {anyTransitionGroup.ToState?.name} not present on State Machine {stateMachineAsset.name}");
 
                 var anyTransition = new StateOutTransitionConversionData()
                 {
