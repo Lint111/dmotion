@@ -443,19 +443,23 @@ namespace DMotion.Tests
         {
             var samplers = CreateSamplerBuffer();
 
-            // Fill the buffer with alternating IDs to fragment the space
-            // Each element takes 2 IDs worth of space, leaving no room for contiguous allocation
-            for (byte i = 0; i < 60; i++)
+            // MaxSamplersCount is 127. To create unfillable fragmentation:
+            // - Place elements with gaps of exactly 1 (so no room for 2+ contiguous)
+            // - Last element near MaxSamplersCount (so can't append at end)
+            // IDs: 0, 2, 4, ... up to 124, then 126 (last valid is 126 since MaxSamplersCount-1=126)
+            for (byte i = 0; i < 64; i++)
             {
                 samplers.AddWithId(default);
                 var s = samplers[i];
-                s.Id = (byte)(i * 2); // IDs: 0, 2, 4, 6, ... 118
+                s.Id = (byte)(i * 2); // IDs: 0, 2, 4, 6, ... 126
                 samplers[i] = s;
             }
 
-            // Try to find 3 contiguous IDs - should fail due to fragmentation
-            var success = samplers.TryFindIdAndInsertIndex(3, out var id, out var insertIndex);
-            Assert.IsFalse(success, "Should return false when ID space is too fragmented");
+            // Verify last ID is at boundary - asking for 2 contiguous won't fit at end
+            // Last ID = 126, MaxSamplersCount = 127, so 126 + 2 = 128 > 127 (can't append)
+            // All gaps between elements are 1, so can't fit 2 contiguous anywhere
+            var success = samplers.TryFindIdAndInsertIndex(2, out var id, out var insertIndex);
+            Assert.IsFalse(success, "Should return false when ID space is too fragmented for 2 contiguous IDs");
             Assert.AreEqual(-1, insertIndex, "Insert index should be -1 on failure");
         }
 
