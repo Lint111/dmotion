@@ -148,12 +148,6 @@ namespace DMotion.Editor.UnityControllerBridge.Core
 
         private ConvertedState ConvertState(StateData state, List<ConvertedParameter> parameters)
         {
-            if (state.Motion == null)
-            {
-                _log.AddWarning($"State '{state.Name}' has no motion, skipping");
-                return null;
-            }
-
             var converted = new ConvertedState
             {
                 Name = state.Name,
@@ -161,6 +155,20 @@ namespace DMotion.Editor.UnityControllerBridge.Core
                 GraphPosition = state.GraphPosition,
                 Loop = true // Default, will be refined based on motion type
             };
+
+            // Check if this is a sub-state machine
+            if (state.IsSubStateMachine)
+            {
+                ConvertSubStateMachine(state.SubStateMachine, converted, parameters);
+                return converted;
+            }
+
+            // Regular animation state - must have a motion
+            if (state.Motion == null)
+            {
+                _log.AddWarning($"State '{state.Name}' has no motion, skipping");
+                return null;
+            }
 
             // Handle speed parameter
             if (state.SpeedParameterActive && !string.IsNullOrEmpty(state.SpeedParameter))
@@ -193,6 +201,90 @@ namespace DMotion.Editor.UnityControllerBridge.Core
                 default:
                     _log.AddError($"State '{state.Name}' has unknown motion type");
                     return null;
+            }
+
+            return converted;
+        }
+
+        private void ConvertSubStateMachine(SubStateMachineData subMachine, ConvertedState converted, List<ConvertedParameter> parameters)
+        {
+            converted.StateType = ConvertedStateType.SubStateMachine;
+            converted.EntryStateName = subMachine.EntryStateName;
+
+            // Recursively convert the nested state machine
+            // Create a new ControllerData with just this sub-machine
+            var nestedControllerData = new ControllerData
+            {
+                Name = $"{converted.Name}_Nested",
+                Parameters = new List<ParameterData>() // Parameters are shared at root level
+            };
+
+            var nestedLayer = new LayerData
+            {
+                Name = "Base",
+                StateMachine = subMachine.NestedStateMachine
+            };
+            nestedControllerData.Layers.Add(nestedLayer);
+
+            // Recursively convert the nested machine
+            var nestedEngine = new ConversionEngine(_options);
+            var nestedResult = nestedEngine.Convert(nestedControllerData);
+
+            if (!nestedResult.Success)
+            {
+                _log.AddError($"Failed to convert nested state machine '{converted.Name}'");
+                // Copy errors from nested conversion
+                foreach (var message in nestedEngine.Log.Messages)
+                {
+                    if (message.Level == MessageLevel.Error)
+                    {
+                        _log.AddError($"[Nested:{converted.Name}] {message.Text}");
+                    }
+                }
+                return;
+            }
+
+            converted.NestedStateMachine = nestedResult;
+
+            // Convert exit transitions
+            foreach (var exitTransitionData in subMachine.ExitTransitions)
+            {
+                var exitTransition = ConvertTransitionData(exitTransitionData, parameters);
+                if (exitTransition != null)
+                {
+                    converted.ExitTransitions.Add(exitTransition);
+                }
+            }
+
+            _log.AddInfo($"Converted sub-state machine '{converted.Name}' with {nestedResult.States.Count} nested states (native DMotion support)");
+        }
+
+        /// <summary>
+        /// Converts a single transition data (used for exit transitions).
+        /// </summary>
+        private ConvertedTransition ConvertTransitionData(TransitionData transition, List<ConvertedParameter> parameters)
+        {
+            var converted = new ConvertedTransition
+            {
+                DestinationStateName = transition.DestinationStateName,
+                Duration = transition.Duration
+            };
+
+            // Handle exit time
+            if (transition.HasExitTime)
+            {
+                converted.HasEndTime = true;
+                converted.NormalizedExitTime = transition.ExitTime;
+            }
+
+            // Convert conditions
+            foreach (var condition in transition.Conditions)
+            {
+                var convertedCondition = ConvertCondition(condition, parameters);
+                if (convertedCondition != null)
+                {
+                    converted.Conditions.Add(convertedCondition);
+                }
             }
 
             return converted;

@@ -125,6 +125,11 @@ namespace DMotion.Editor.UnityControllerBridge.Core
         public string BlendParameterName { get; set; }
         public List<ConvertedBlendClip> BlendClips { get; set; } = new();
 
+        // Sub-state machine data
+        public ConversionResult NestedStateMachine { get; set; }
+        public string EntryStateName { get; set; }
+        public List<ConvertedTransition> ExitTransitions { get; set; } = new();
+
         // Transitions
         public List<ConvertedTransition> Transitions { get; set; } = new();
     }
@@ -132,7 +137,8 @@ namespace DMotion.Editor.UnityControllerBridge.Core
     public enum ConvertedStateType
     {
         SingleClip,
-        LinearBlend
+        LinearBlend,
+        SubStateMachine
     }
 
     /// <summary>
