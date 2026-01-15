@@ -61,22 +61,53 @@ namespace DMotion
                 var currentStateAnimationState =
                     animationStates.GetWithId((byte)stateMachine.CurrentState.AnimationStateId);
 
-                var shouldStartTransition = EvaluateTransitions(
+                // NEW: Evaluate Any State transitions FIRST (Unity behavior)
+                // Use negative indices to distinguish Any State from regular transitions
+                var shouldStartTransition = EvaluateAnyStateTransitions(
                     currentStateAnimationState,
-                    ref stateMachine.CurrentStateBlob,
+                    ref stateMachineBlob,
                     boolParameters,
                     intParameters,
                     out var transitionIndex);
 
+                // If no Any State transition matched, check regular state transitions
+                if (!shouldStartTransition)
+                {
+                    shouldStartTransition = EvaluateTransitions(
+                        currentStateAnimationState,
+                        ref stateMachine.CurrentStateBlob,
+                        boolParameters,
+                        intParameters,
+                        out transitionIndex);
+                }
+
                 if (shouldStartTransition)
                 {
-                    ref var transition = ref stateMachine.CurrentStateBlob.Transitions[transitionIndex];
+                    // Get transition (from Any State if negative index, from regular if positive)
+                    short toStateIndex;
+                    float transitionDuration;
+
+                    if (transitionIndex < 0)
+                    {
+                        // Any State transition (negative index)
+                        var anyTransitionIndex = (short)(-(transitionIndex + 1));
+                        ref var anyTransition = ref stateMachineBlob.AnyStateTransitions[anyTransitionIndex];
+                        toStateIndex = anyTransition.ToStateIndex;
+                        transitionDuration = anyTransition.TransitionDuration;
+                    }
+                    else
+                    {
+                        // Regular transition (positive index)
+                        ref var transition = ref stateMachine.CurrentStateBlob.Transitions[transitionIndex];
+                        toStateIndex = transition.ToStateIndex;
+                        transitionDuration = transition.TransitionDuration;
+                    }
 
 #if UNITY_EDITOR || DEBUG
                     stateMachine.PreviousState = stateMachine.CurrentState;
 #endif
                     stateMachine.CurrentState = CreateState(
-                        transition.ToStateIndex,
+                        toStateIndex,
                         stateMachine.StateMachineBlob,
                         stateMachine.ClipsBlob,
                         stateMachine.ClipEventsBlob,
@@ -88,7 +119,7 @@ namespace DMotion
                     animationStateTransitionRequest = new AnimationStateTransitionRequest
                     {
                         AnimationStateId = stateMachine.CurrentState.AnimationStateId,
-                        TransitionDuration = transition.TransitionDuration,
+                        TransitionDuration = transitionDuration,
                     };
                 }
             }
@@ -157,6 +188,76 @@ namespace DMotion
 
             stateRef.AnimationStateId = (sbyte)animationStateId;
             return stateRef;
+        }
+
+        /// <summary>
+        /// Evaluates Any State transitions (global transitions from any state).
+        /// Returns negative index (-1, -2, -3...) to distinguish from regular transitions.
+        /// </summary>
+        [BurstCompile]
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool EvaluateAnyStateTransitions(
+            in AnimationState animation,
+            ref StateMachineBlob stateMachine,
+            in DynamicBuffer<BoolParameter> boolParameters,
+            in DynamicBuffer<IntParameter> intParameters,
+            out short transitionIndex)
+        {
+            for (short i = 0; i < stateMachine.AnyStateTransitions.Length; i++)
+            {
+                if (EvaluateAnyStateTransition(animation, ref stateMachine.AnyStateTransitions[i], boolParameters, intParameters))
+                {
+                    // Return negative index to indicate Any State transition
+                    // -1 for index 0, -2 for index 1, etc.
+                    transitionIndex = (short)(-(i + 1));
+                    return true;
+                }
+            }
+
+            transitionIndex = -1;
+            return false;
+        }
+
+        /// <summary>
+        /// Evaluates a single Any State transition (same logic as regular transitions).
+        /// </summary>
+        [BurstCompile]
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool EvaluateAnyStateTransition(
+            in AnimationState animation,
+            ref AnyStateTransition transition,
+            in DynamicBuffer<BoolParameter> boolParameters,
+            in DynamicBuffer<IntParameter> intParameters)
+        {
+            // Check end time if required
+            if (transition.HasEndTime && animation.Time < transition.TransitionEndTime)
+            {
+                return false;
+            }
+
+            var shouldTriggerTransition = transition.HasAnyConditions || transition.HasEndTime;
+
+            // Evaluate bool conditions (all must be true)
+            {
+                ref var boolTransitions = ref transition.BoolTransitions;
+                for (var i = 0; i < boolTransitions.Length; i++)
+                {
+                    var boolTransition = boolTransitions[i];
+                    shouldTriggerTransition &= boolTransition.Evaluate(boolParameters[boolTransition.ParameterIndex]);
+                }
+            }
+
+            // Evaluate int conditions (all must be true)
+            {
+                ref var intTransitions = ref transition.IntTransitions;
+                for (var i = 0; i < intTransitions.Length; i++)
+                {
+                    var intTransition = intTransitions[i];
+                    shouldTriggerTransition &= intTransition.Evaluate(intParameters[intTransition.ParameterIndex]);
+                }
+            }
+
+            return shouldTriggerTransition;
         }
 
         [BurstCompile]
