@@ -81,3 +81,7 @@ consolelog.txt*
 /Samples.meta
 
 .pre-commit-approved*
+
+# Audit reports (temporary analysis artifacts)
+AUDIT-*.md
+AUDIT-*.md.meta

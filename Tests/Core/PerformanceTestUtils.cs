@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Reflection;
 using NUnit.Framework;
 using Unity.Burst;
@@ -75,6 +75,16 @@ namespace DMotion.Tests
             AssertTestResult(nameof(benchmark.Max), benchmark.Max, sampleGroup.Max);
         }
 
+        /// <summary>
+        /// Sets Burst parameters for maximum performance measurement accuracy.
+        /// 
+        /// WARNING: EnableBurstCompileSynchronously=true can cause deadlock if:
+        /// - Many entities are instantiated before Burst has compiled all jobs
+        /// - The main thread blocks waiting for compilation while jobs can't start
+        /// 
+        /// SOLUTION: Always pre-warm Burst by running a few frames with a single entity
+        /// before bulk entity instantiation. See PerformanceIntegrationTestBase.PreWarmBurstCompilation().
+        /// </summary> 
         [MenuItem("Tools/DMotion/Set Performance Burst Parameters")]
         public static void SetMaxPerformanceBurstParameters()
         {
@@ -87,6 +97,8 @@ namespace DMotion.Tests
             BurstCompiler.Options.EnableBurstDebug = false;
             BurstCompiler.Options.EnableBurstSafetyChecks = false;
             BurstCompiler.Options.ForceEnableBurstSafetyChecks = false;
+            // WARNING: This can cause deadlock without Burst pre-warming!
+            // See PerformanceIntegrationTestBase.PreWarmBurstCompilation()
             BurstCompiler.Options.EnableBurstCompileSynchronously = true;
             Coverage.enabled = false;
         }

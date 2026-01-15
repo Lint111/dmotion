@@ -32,7 +32,10 @@ namespace DMotion.Tests
         [MenuItem("DMotion/Tests/Setup Test Scene", false, 110)]
         public static void SetupTestScene()
         {
-            // Ensure folder exists
+            // Delete existing test data folder for clean setup
+            DeleteTestDataFolder();
+
+            // Create fresh folder
             EnsureTestDataFolder();
 
             // Step 0: Validate and fix FBX import settings
@@ -188,6 +191,16 @@ namespace DMotion.Tests
 
             AssetDatabase.ImportAsset(ContentScenePath, ImportAssetOptions.ForceUpdate);
             Debug.Log("[TestSubsceneSetup] Forced reimport of content scene - baking will run.");
+        }
+
+        private static void DeleteTestDataFolder()
+        {
+            if (AssetDatabase.IsValidFolder(TestDataFolder))
+            {
+                Debug.Log($"[TestSubsceneSetup] Deleting existing folder: {TestDataFolder}");
+                AssetDatabase.DeleteAsset(TestDataFolder);
+                AssetDatabase.Refresh();
+            }
         }
 
         private static void EnsureTestDataFolder()

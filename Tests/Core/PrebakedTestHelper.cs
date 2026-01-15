@@ -25,14 +25,10 @@ namespace DMotion.Tests
         /// <summary>
         /// Loads the test scene with pre-baked animation entities.
         /// Call this in test setup for integration tests.
-        /// In Editor (play mode): Uses EditorSceneManager.LoadSceneAsyncInPlayMode (no build settings required)
-        /// In Editor (edit mode): Uses EditorSceneManager.OpenScene
-        /// In Player: Requires scene in build settings
         /// </summary>
         public static IEnumerator LoadTestScene()
         {
 #if UNITY_EDITOR
-            // In editor, use EditorSceneManager to bypass build settings requirement
             var scenePath = TestScenePath + ".unity";
             if (!System.IO.File.Exists(scenePath))
             {
@@ -42,8 +38,6 @@ namespace DMotion.Tests
 
             if (Application.isPlaying)
             {
-                // In play mode (e.g., Unity Test Runner), use async loading
-                // LoadSceneAsyncInPlayMode allows loading scenes without build settings
                 var loadParams = new LoadSceneParameters(LoadSceneMode.Additive);
                 var asyncOp = EditorSceneManager.LoadSceneAsyncInPlayMode(scenePath, loadParams);
                 if (asyncOp == null)
@@ -59,7 +53,6 @@ namespace DMotion.Tests
             }
             else
             {
-                // Edit mode - use synchronous loading
                 var scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Additive);
                 if (!scene.isLoaded)
                 {
@@ -68,7 +61,6 @@ namespace DMotion.Tests
                 }
             }
 #else
-            // In player builds, use runtime SceneManager (requires build settings)
             var asyncOp = SceneManager.LoadSceneAsync(TestSceneName, LoadSceneMode.Additive);
             if (asyncOp == null)
             {
@@ -82,14 +74,13 @@ namespace DMotion.Tests
             }
 #endif
 
-            // Wait for subscene streaming to complete
             yield return WaitForSubsceneStreaming();
 
             Debug.Log("[PrebakedTestHelper] Test scene loaded");
         }
 
         /// <summary>
-        /// Waits for all subscenes to finish streaming/loading by polling for entities.
+        /// Waits for all subscenes to finish streaming/loading.
         /// </summary>
         private static IEnumerator WaitForSubsceneStreaming()
         {
@@ -108,7 +99,6 @@ namespace DMotion.Tests
                 frameCount++;
                 yield return null;
 
-                // Check if we have animation entities yet
                 var entities = GetAnimationEntities();
                 if (entities.Length > 0)
                 {
@@ -116,7 +106,6 @@ namespace DMotion.Tests
                     Debug.Log($"[PrebakedTestHelper] Found {entities.Length} animation entities after {frameCount} frames");
                 }
 
-                // Log progress every ~0.5 seconds
                 if (frameCount % 30 == 0)
                 {
                     Debug.Log($"[PrebakedTestHelper] Waiting for subscene streaming... (frame {frameCount})");
@@ -131,17 +120,25 @@ namespace DMotion.Tests
         }
 
         /// <summary>
-        /// Unloads the test scene. Call in test teardown.
+        /// Unloads the test scene. Uses synchronous operations to avoid
+        /// Kinemation race conditions during teardown.
         /// </summary>
         public static IEnumerator UnloadTestScene()
         {
+            // Complete all jobs first
+            var world = World.DefaultGameObjectInjectionWorld;
+            if (world != null && world.IsCreated)
+            {
+                world.EntityManager.CompleteAllTrackedJobs();
+            }
+
+            // Unload scene
             var scene = SceneManager.GetSceneByName(TestSceneName);
             if (scene.isLoaded)
             {
 #if UNITY_EDITOR
                 if (Application.isPlaying)
                 {
-                    // In play mode, use async unloading
                     var asyncOp = SceneManager.UnloadSceneAsync(scene);
                     while (asyncOp != null && !asyncOp.isDone)
                     {
@@ -150,7 +147,6 @@ namespace DMotion.Tests
                 }
                 else
                 {
-                    // Edit mode - use synchronous close
                     EditorSceneManager.CloseScene(scene, true);
                 }
 #else
@@ -161,11 +157,17 @@ namespace DMotion.Tests
                 }
 #endif
             }
+
+            // GC after scene unload
+            System.GC.Collect();
+            System.GC.WaitForPendingFinalizers();
+            System.GC.Collect();
+
             yield return null;
         }
 
         /// <summary>
-        /// Gets all entities with AnimationStateMachine component from the default world.
+        /// Gets all entities with AnimationStateMachine component.
         /// </summary>
         public static Entity[] GetAnimationEntities()
         {
@@ -176,7 +178,7 @@ namespace DMotion.Tests
             }
 
             var query = world.EntityManager.CreateEntityQuery(typeof(AnimationStateMachine));
-            var entities = query.ToEntityArray(Unity.Collections.Allocator.Temp);
+            var entities = query.ToEntityArray(Unity.Collections.Allocator.TempJob);
             var result = entities.ToArray();
             entities.Dispose();
             return result;
