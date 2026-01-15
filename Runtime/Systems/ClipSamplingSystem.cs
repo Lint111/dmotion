@@ -1,10 +1,7 @@
-using System.Runtime.CompilerServices;
 using Unity.Burst;
 using Unity.Entities;
 using Unity.Jobs;
-using Unity.Jobs.LowLevel.Unsafe;
 using Unity.Profiling;
-using Unity.Transforms;
 
 namespace DMotion
 {
@@ -36,28 +33,14 @@ namespace DMotion
         {
         }
 
+        /// <summary>
+        /// Schedules all clip sampling jobs with proper dependency management.
+        /// Jobs run in parallel where possible, with root motion jobs depending on delta sampling.
+        /// </summary>
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-#if DEBUG || UNITY_EDITOR
-            if (JobsUtility.JobDebuggerEnabled)
-            {
-                OnUpdate_Safe(ref state);
-            }
-            else
-            {
-                OnUpdate_Unsafe(ref state);
-            }
-#else
-            OnUpdate_Unsafe(ref state);
-#endif
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void OnUpdate_Unsafe(ref SystemState state)
-        {
-            // new NormalizedSamplersWeights().ScheduleParallel();
-            //Sample bones (those only depend on updateFmsHandle)
+            // Sample bones - these jobs can run in parallel from initial dependency
             var sampleOptimizedHandle = new SampleOptimizedBonesJob
             {
                 Marker = Marker_SampleOptimizedBonesJob
@@ -74,45 +57,7 @@ namespace DMotion
                 Marker = Marker_SampleRootDeltasJob
             }.ScheduleParallel(state.Dependency);
 
-            var applyRootMotionHandle = new ApplyRootMotionToEntityJob
-            {
-                Marker = Marker_ApplyRootMotionToEntityJob
-            }.ScheduleParallel(sampleRootDeltasHandle);
-
-            var transferRootMotionHandle = new TransferRootMotionJob
-            {
-                CfeDeltaPosition = SystemAPI.GetComponentLookup<RootDeltaTranslation>(true),
-                CfeDeltaRotation = SystemAPI.GetComponentLookup<RootDeltaRotation>(true),
-                Marker = Marker_TransferRootMotionJob
-            }.ScheduleParallel(sampleRootDeltasHandle);
-            //end sample bones
-
-            state.Dependency = JobHandle.CombineDependencies(sampleOptimizedHandle, sampleNonOptimizedHandle,
-                transferRootMotionHandle);
-            state.Dependency = JobHandle.CombineDependencies(state.Dependency, applyRootMotionHandle);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void OnUpdate_Safe(ref SystemState state)
-        {
-            // Use same dependency management as OnUpdate_Unsafe for consistency
-            // This ensures proper job ordering even with JobDebugger enabled
-            var sampleOptimizedHandle = new SampleOptimizedBonesJob
-            {
-                Marker = Marker_SampleOptimizedBonesJob
-            }.ScheduleParallel(state.Dependency);
-
-            var sampleNonOptimizedHandle = new SampleNonOptimizedBones
-            {
-                BfeClipSampler = SystemAPI.GetBufferLookup<ClipSampler>(true),
-                Marker = Marker_SampleNonOptimizedBonesJob
-            }.ScheduleParallel(state.Dependency);
-
-            var sampleRootDeltasHandle = new SampleRootDeltasJob
-            {
-                Marker = Marker_SampleRootDeltasJob
-            }.ScheduleParallel(state.Dependency);
-
+            // Root motion jobs depend on delta sampling
             var applyRootMotionHandle = new ApplyRootMotionToEntityJob
             {
                 Marker = Marker_ApplyRootMotionToEntityJob
@@ -125,6 +70,7 @@ namespace DMotion
                 Marker = Marker_TransferRootMotionJob
             }.ScheduleParallel(sampleRootDeltasHandle);
 
+            // Combine all job handles for proper dependency tracking
             state.Dependency = JobHandle.CombineDependencies(sampleOptimizedHandle, sampleNonOptimizedHandle,
                 transferRootMotionHandle);
             state.Dependency = JobHandle.CombineDependencies(state.Dependency, applyRootMotionHandle);
