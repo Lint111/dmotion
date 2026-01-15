@@ -25,13 +25,6 @@ namespace DMotion
         internal BlobArray<AnyStateTransition> AnyStateTransitions;
 
         /// <summary>
-        /// Maximum nesting depth in this state machine hierarchy.
-        /// 0 = flat (no sub-machines), 1 = one level of sub-machines, etc.
-        /// Used to allocate stack size for StateMachineStack component.
-        /// </summary>
-        internal byte MaxNestingDepth;
-
-        /// <summary>
         /// Total number of states across all levels (including nested).
         /// Useful for validation and debugging.
         /// </summary>

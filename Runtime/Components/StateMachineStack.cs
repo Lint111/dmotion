@@ -5,106 +5,15 @@ using UnityEngine.Assertions;
 namespace DMotion
 {
     /// <summary>
-    /// Tracks the current position in the state machine hierarchy.
-    /// Each entity has its own stack for navigating nested sub-state machines.
-    /// Max depth: 8 levels (more than sufficient for typical use cases).
-    /// </summary>
-    public struct StateMachineStack : IComponentData
-    {
-        /// <summary>
-        /// Stack of state machine contexts (max depth: 8).
-        /// Index [0] is root, Index [Depth] is current level.
-        /// Using FixedList64Bytes allows up to 8 contexts (8 bytes each).
-        /// </summary>
-        internal FixedList64Bytes<StateMachineContext> Contexts;
-
-        /// <summary>
-        /// Current depth in hierarchy (0 = root, 1 = first sub-machine, etc.).
-        /// </summary>
-        internal byte Depth;
-
-        /// <summary>
-        /// Maximum allowed depth (from blob, for validation).
-        /// Set during initialization from StateMachineBlob.MaxNestingDepth.
-        /// </summary>
-        internal byte MaxDepth;
-
-        /// <summary>
-        /// Gets the current context (top of stack).
-        /// </summary>
-        internal ref StateMachineContext Current
-        {
-            get
-            {
-                Assert.IsTrue(Depth < Contexts.Length, "Stack depth out of bounds");
-                return ref Contexts.ElementAt(Depth);
-            }
-        }
-
-        /// <summary>
-        /// Gets the parent context (one level up).
-        /// Only valid if Depth > 0.
-        /// </summary>
-        internal ref StateMachineContext Parent
-        {
-            get
-            {
-                Assert.IsTrue(Depth > 0, "Cannot get parent of root context");
-                return ref Contexts.ElementAt(Depth - 1);
-            }
-        }
-
-        /// <summary>
-        /// Pushes a new context onto the stack (entering a sub-state machine).
-        /// </summary>
-        internal void Push(StateMachineContext context)
-        {
-            Assert.IsTrue(Depth + 1 < MaxDepth, $"State machine nesting too deep: {Depth + 1} (max {MaxDepth})");
-            Depth++;
-            Contexts.Add(context);
-        }
-
-        /// <summary>
-        /// Pops the top context from the stack (exiting a sub-state machine).
-        /// Returns the popped context.
-        /// </summary>
-        internal StateMachineContext Pop()
-        {
-            Assert.IsTrue(Depth > 0, "Cannot pop from empty stack (at root level)");
-            var context = Contexts[Depth];
-            Contexts.RemoveAt(Depth);
-            Depth--;
-            return context;
-        }
-
-        /// <summary>
-        /// Validates the stack integrity (for debugging/testing).
-        /// </summary>
-        internal bool Validate()
-        {
-            if (Depth > MaxDepth)
-                return false;
-
-            if (Depth >= Contexts.Length)
-                return false;
-
-            // Validate each context has correct level
-            for (int i = 0; i <= Depth; i++)
-            {
-                var context = Contexts[i];
-                if (context.Level != i)
-                    return false;
-            }
-
-            return true;
-        }
-    }
-
-    /// <summary>
     /// Context for a single level in the state machine hierarchy.
-    /// Tracks which state is active at this level and how we got here.
+    /// Each entity has a DynamicBuffer of these, tracking the full navigation stack.
+    ///
+    /// Design Philosophy: Relationship-based, not depth-limited.
+    /// A state machine node connects to another node, which happens to be a sub-machine.
+    /// We follow the connections naturally - no artificial depth constraints.
     /// </summary>
-    internal struct StateMachineContext
+    [InternalBufferCapacity(4)] // Typical case: root + 1-2 sub-machines, avoids allocation in most cases
+    public struct StateMachineContext : IBufferElementData
     {
         /// <summary>
         /// Current state index at this level of the hierarchy.
@@ -121,29 +30,102 @@ namespace DMotion
 
         /// <summary>
         /// Hierarchy depth (0 = root, 1 = first sub-machine, etc.).
-        /// Redundant with stack position but useful for validation and debugging.
+        /// Redundant with buffer position but useful for validation and debugging.
         /// </summary>
         internal byte Level;
     }
 
     /// <summary>
-    /// Extension methods for StateMachineStack (debugging utilities).
+    /// Extension methods for StateMachineContext buffer (stack operations).
     /// </summary>
-    public static class StateMachineStackExtensions
+    public static class StateMachineContextExtensions
     {
+        /// <summary>
+        /// Gets the current context (top of stack).
+        /// Buffer.Length - 1 is always the current level.
+        /// </summary>
+        public static ref StateMachineContext GetCurrent(this DynamicBuffer<StateMachineContext> buffer)
+        {
+            Assert.IsTrue(buffer.Length > 0, "Stack is empty");
+            return ref buffer.ElementAt(buffer.Length - 1);
+        }
+
+        /// <summary>
+        /// Gets the parent context (one level up).
+        /// Only valid if buffer.Length > 1.
+        /// </summary>
+        public static ref StateMachineContext GetParent(this DynamicBuffer<StateMachineContext> buffer)
+        {
+            Assert.IsTrue(buffer.Length > 1, "Cannot get parent of root context");
+            return ref buffer.ElementAt(buffer.Length - 2);
+        }
+
+        /// <summary>
+        /// Gets the current depth in hierarchy (0 = root).
+        /// </summary>
+        public static int GetDepth(this DynamicBuffer<StateMachineContext> buffer)
+        {
+            return buffer.Length - 1;
+        }
+
+        /// <summary>
+        /// Pushes a new context onto the stack (entering a sub-state machine).
+        /// </summary>
+        public static void Push(this DynamicBuffer<StateMachineContext> buffer, StateMachineContext context)
+        {
+            // No depth limit! Just push.
+            // DynamicBuffer grows as needed.
+            buffer.Add(context);
+        }
+
+        /// <summary>
+        /// Pops the top context from the stack (exiting a sub-state machine).
+        /// Returns the popped context.
+        /// </summary>
+        public static StateMachineContext Pop(this DynamicBuffer<StateMachineContext> buffer)
+        {
+            Assert.IsTrue(buffer.Length > 1, "Cannot pop root context");
+            var context = buffer[buffer.Length - 1];
+            buffer.RemoveAt(buffer.Length - 1);
+            return context;
+        }
+
+        /// <summary>
+        /// Validates the stack integrity (for debugging/testing).
+        /// </summary>
+        public static bool Validate(this DynamicBuffer<StateMachineContext> buffer)
+        {
+            if (buffer.Length == 0)
+                return false;
+
+            // Validate each context has correct level
+            for (int i = 0; i < buffer.Length; i++)
+            {
+                var context = buffer[i];
+                if (context.Level != i)
+                    return false;
+            }
+
+            // Root must have ParentSubMachineIndex = -1
+            if (buffer[0].ParentSubMachineIndex != -1)
+                return false;
+
+            return true;
+        }
+
         /// <summary>
         /// Gets the full state path for debugging.
         /// Example: "Root.Combat.LightAttack"
         /// </summary>
         public static FixedString512Bytes GetStatePath(
-            this ref StateMachineStack stack,
+            this DynamicBuffer<StateMachineContext> buffer,
             ref StateMachineBlob rootBlob)
         {
             var path = new FixedString512Bytes();
 
-            for (int i = 0; i <= stack.Depth; i++)
+            for (int i = 0; i < buffer.Length; i++)
             {
-                var context = stack.Contexts[i];
+                var context = buffer[i];
 
                 if (i > 0)
                     path.Append('.');
@@ -160,17 +142,17 @@ namespace DMotion
         /// Gets a compact string representation of the stack (for debugging).
         /// Example: "D2:S0>S1>S3" = Depth 2, states 0, 1, 3
         /// </summary>
-        public static FixedString128Bytes GetStackString(this ref StateMachineStack stack)
+        public static FixedString128Bytes GetStackString(this DynamicBuffer<StateMachineContext> buffer)
         {
             var str = new FixedString128Bytes();
-            str.Append($"D{stack.Depth}:");
+            str.Append($"D{buffer.Length - 1}:");
 
-            for (int i = 0; i <= stack.Depth; i++)
+            for (int i = 0; i < buffer.Length; i++)
             {
                 if (i > 0)
                     str.Append('>');
 
-                str.Append($"S{stack.Contexts[i].CurrentStateIndex}");
+                str.Append($"S{buffer[i].CurrentStateIndex}");
             }
 
             return str;
