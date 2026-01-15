@@ -217,6 +217,14 @@ namespace DMotion.Editor
             return state == null ? null : stateToView.TryGetValue(state, out var view) ? view : null;
         }
 
+        /// <summary>
+        /// Creates a visual transition edge for a state. Called by StateNodeView when creating transitions.
+        /// </summary>
+        internal void CreateTransitionEdgeForState(AnimationStateAsset state, int outTransitionIndex)
+        {
+            InstantiateTransitionEdge(state, outTransitionIndex);
+        }
+
         private void InstantiateTransitionEdge(AnimationStateAsset state, int outTransitionIndex)
         {
             var transitionPair = new TransitionPair(state, outTransitionIndex);

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using DMotion.Authoring;
 using Unity.Entities;
 using Unity.Entities.Editor;
@@ -183,13 +182,24 @@ namespace DMotion.Editor
             var status = Application.isPlaying
                 ? DropdownMenuAction.Status.Disabled
                 : DropdownMenuAction.Status.Normal;
-            evt.menu.AppendAction($"Create Transition", OnContextMenuCreateTransition, status);
+
+            // Build submenu with all available target states for transition creation
+            // This replaces the previous reflection-based hack that simulated mouse events
+            foreach (var targetState in StateMachine.States)
+            {
+                if (targetState != State) // Cannot transition to self
+                {
+                    var target = targetState; // Capture for closure
+                    evt.menu.AppendAction($"Create Transition/{target.name}",
+                        _ => CreateTransitionTo(target), status);
+                }
+            }
 
             var setDefaultStateMenuStatus = StateMachine.IsDefaultState(State) || Application.isPlaying
                 ? DropdownMenuAction.Status.Disabled
                 : DropdownMenuAction.Status.Normal;
 
-            evt.menu.AppendAction($"Set As Default State", OnContextMenuSetAsDefaultState, setDefaultStateMenuStatus);
+            evt.menu.AppendAction("Set As Default State", OnContextMenuSetAsDefaultState, setDefaultStateMenuStatus);
 
             evt.StopPropagation();
         }
@@ -206,12 +216,18 @@ namespace DMotion.Editor
             SetNodeStateStyle(AnimationStateStyle.Default);
         }
 
-        private void OnContextMenuCreateTransition(DropdownMenuAction obj)
+        /// <summary>
+        /// Creates a transition from this state to the target state.
+        /// Uses public GraphView APIs instead of reflection.
+        /// </summary>
+        private void CreateTransitionTo(AnimationStateAsset targetState)
         {
-            //TODO (hack): There should be a better way to create an edge
-            var ev = MouseDownEvent.GetPooled(Input.mousePosition, 0, 1, Vector2.zero);
-            output.edgeConnector.GetType().GetMethod("OnMouseDown", BindingFlags.NonPublic | BindingFlags.Instance)
-                .Invoke(output.edgeConnector, new object[] { ev });
+            var outTransition = new StateOutTransition(targetState);
+            State.OutTransitions.Add(outTransition);
+            EditorUtility.SetDirty(State);
+
+            // Request the parent view to create the visual edge
+            model.ParentView.CreateTransitionEdgeForState(State, State.OutTransitions.Count - 1);
         }
 
         protected void CreateInputPort()
