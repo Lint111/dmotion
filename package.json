@@ -4,6 +4,10 @@
   "version": "0.5.0",
   "unity": "6000.0",
   "description": "DMotion is a high level Animation framework and State Machine for DOTS",
+  "testAssemblies": [
+    "DMotion.Tests.Runtime",
+    "DMotion.Tests.Editor"
+  ],
   "dependencies": {
     "com.latios.latiosframework": "0.14.9",
     "com.unity.shadergraph": "17.0.3",

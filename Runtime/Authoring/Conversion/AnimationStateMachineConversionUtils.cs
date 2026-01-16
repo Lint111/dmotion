@@ -483,6 +483,15 @@ namespace DMotion.Authoring
 
                 dstManager.AddBuffer<SingleClipState>(entity);
                 dstManager.AddBuffer<LinearBlendStateMachineState>(entity);
+
+                // Add StateMachineContext buffer with root context
+                var stackContext = dstManager.AddBuffer<StateMachineContext>(entity);
+                stackContext.Add(new StateMachineContext
+                {
+                    CurrentStateIndex = -1, // Will be set on first update
+                    ParentSubMachineIndex = -1, // Root level
+                    Level = 0
+                });
             }
             AddStateMachineParameters(dstManager, entity, stateMachineAsset);
         }
@@ -506,6 +515,15 @@ namespace DMotion.Authoring
 
                 dstManager.AddBuffer<SingleClipState>(entity);
                 dstManager.AddBuffer<LinearBlendStateMachineState>(entity);
+
+                // Add StateMachineContext buffer with root context
+                var stackContext = dstManager.AddBuffer<StateMachineContext>(entity);
+                stackContext.Add(new StateMachineContext
+                {
+                    CurrentStateIndex = -1, // Will be set on first update
+                    ParentSubMachineIndex = -1, // Root level
+                    Level = 0
+                });
             }
         }
 
