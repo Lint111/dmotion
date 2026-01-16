@@ -144,9 +144,8 @@ namespace DMotion.Authoring
                     // Recursively build the nested state machine blob
                     var nestedBlob = subMachineConversionData.NestedConverter.BuildBlob();
 
-                    // Copy the nested blob into the parent builder
-                    // This embeds the full nested structure into the parent
-                    builder.SetBlobAssetReference(ref subStateMachines[i].NestedStateMachine, nestedBlob);
+                    // Store reference to nested blob (managed separately)
+                    subStateMachines[i].NestedStateMachine = nestedBlob;
 
                     subStateMachines[i].EntryStateIndex = subMachineConversionData.EntryStateIndex;
                     subStateMachines[i].Name = subMachineConversionData.Name;

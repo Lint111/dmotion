@@ -33,7 +33,7 @@ namespace DMotion
                 // Initialize with root context
                 buffer.Add(new StateMachineContext
                 {
-                    CurrentStateIndex = stateMachine.ValueRO.CurrentState.StateIndex,
+                    CurrentStateIndex = (short)stateMachine.ValueRO.CurrentState.StateIndex,
                     ParentSubMachineIndex = -1, // Root level
                     Level = 0
                 });

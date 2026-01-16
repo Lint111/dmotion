@@ -38,10 +38,11 @@ namespace DMotion
     internal struct SubStateMachineBlob
     {
         /// <summary>
-        /// Nested state machine data (full StateMachineBlob).
+        /// Reference to nested state machine blob.
         /// Contains states, transitions, parameters, and potentially more sub-machines (recursive).
+        /// Stored as a reference rather than inline to allow recursive structures.
         /// </summary>
-        internal StateMachineBlob NestedStateMachine;
+        internal BlobAssetReference<StateMachineBlob> NestedStateMachine;
 
         /// <summary>
         /// Index of the entry state within the nested machine.

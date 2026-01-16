@@ -130,7 +130,7 @@ namespace DMotion
                     EnterSubStateMachine(ref stackContext, (short)subMachineIndex, ref stateMachineBlob);
 
                     // Get the nested blob and create state for its entry state
-                    ref var nestedBlob = ref stateMachineBlob.SubStateMachines[subMachineIndex].NestedStateMachine;
+                    ref var nestedBlob = ref stateMachineBlob.SubStateMachines[subMachineIndex].NestedStateMachine.Value;
                     var entryStateIndex = stateMachineBlob.SubStateMachines[subMachineIndex].EntryStateIndex;
 
 #if UNITY_EDITOR || DEBUG
@@ -201,7 +201,7 @@ namespace DMotion
                 if (subMachineIndex >= 0)
                 {
                     ref var subMachine = ref currentBlob.SubStateMachines[subMachineIndex];
-                    currentBlob = ref subMachine.NestedStateMachine;
+                    currentBlob = ref subMachine.NestedStateMachine.Value;
                 }
             }
 
