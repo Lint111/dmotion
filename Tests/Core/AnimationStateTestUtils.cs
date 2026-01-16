@@ -187,7 +187,8 @@ namespace DMotion.Tests
                 stateMachine.ClipEventsBlob,
                 ref linearBlend,
                 ref animationStates,
-                ref samplers
+                ref samplers,
+                1.0f // default speed
             );
         }
 
