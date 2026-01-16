@@ -143,9 +143,9 @@ namespace DMotion.Editor
                         }
                         // Any State → state transition
                         else if (edge.output.node is AnyStateNodeView &&
-                                 edge.input.node is StateNodeView toStateView)
+                                 edge.input.node is StateNodeView anyStateTarget)
                         {
-                            CreateAnyStateTransition(toStateView.State);
+                            CreateAnyStateTransition(anyStateTarget.State);
                         }
                     }
                 }
