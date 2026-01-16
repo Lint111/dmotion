@@ -34,33 +34,29 @@ namespace DMotion
     /// <summary>
     /// Runtime blob for a sub-state machine (state containing nested states).
     /// Stores the nested state machine data and entry/exit configuration.
+    ///
+    /// NOTE: Sub-state machines are WIP. The architecture needs redesign because
+    /// BlobAssetReference cannot be stored inside blobs (contains pointers).
+    /// Options: 1) Use BlobPtr with same-builder construction, 2) Flatten hierarchy,
+    /// 3) Store refs on component instead of blob.
     /// </summary>
     internal struct SubStateMachineBlob
     {
-        /// <summary>
-        /// Reference to nested state machine blob.
-        /// Contains states, transitions, parameters, and potentially more sub-machines (recursive).
-        /// Stored as a reference rather than inline to allow recursive structures.
-        /// </summary>
-        internal BlobAssetReference<StateMachineBlob> NestedStateMachine;
+        // TODO: Implement proper nested blob structure using BlobPtr<StateMachineBlob>
+        // For now, sub-state machines are not supported at runtime.
 
         /// <summary>
         /// Index of the entry state within the nested machine.
-        /// This is the default state to transition to when entering the sub-machine.
-        /// Analogous to StateMachineBlob.DefaultStateIndex for the nested machine.
         /// </summary>
         internal short EntryStateIndex;
 
         /// <summary>
         /// Transitions to evaluate when exiting the sub-machine.
-        /// Triggered when a state within the nested machine reaches "exit".
-        /// Evaluated at the parent level (where this sub-machine node exists).
         /// </summary>
         internal BlobArray<StateOutTransitionGroup> ExitTransitions;
 
         /// <summary>
         /// Name of this sub-machine (for debugging).
-        /// Helps identify which sub-machine is active during runtime debugging.
         /// </summary>
         internal FixedString64Bytes Name;
     }

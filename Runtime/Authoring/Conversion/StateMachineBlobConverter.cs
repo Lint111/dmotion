@@ -134,18 +134,16 @@ namespace DMotion.Authoring
                 }
             }
 
-            // NEW: Sub-State Machines (recursive blob building)
+            // NEW: Sub-State Machines (WIP - nested blob not yet supported)
+            // TODO: Implement proper nested blob using BlobPtr and same-builder construction
             {
                 var subStateMachines = builder.Allocate(ref root.SubStateMachines, SubStateMachines.Length);
                 for (ushort i = 0; i < subStateMachines.Length; i++)
                 {
                     var subMachineConversionData = SubStateMachines[i];
 
-                    // Recursively build the nested state machine blob
-                    var nestedBlob = subMachineConversionData.NestedConverter.BuildBlob();
-
-                    // Store reference to nested blob (managed separately)
-                    subStateMachines[i].NestedStateMachine = nestedBlob;
+                    // NOTE: NestedConverter.BuildBlob() is not used - nested runtime execution not yet supported
+                    // The nested blob would need to be built inline with BlobPtr, not as separate BlobAssetReference
 
                     subStateMachines[i].EntryStateIndex = subMachineConversionData.EntryStateIndex;
                     subStateMachines[i].Name = subMachineConversionData.Name;

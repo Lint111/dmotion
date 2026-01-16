@@ -125,87 +125,49 @@ namespace DMotion
 
                 if (destinationState.Type == StateType.SubStateMachine)
                 {
-                    // Enter the sub-state machine
-                    var subMachineIndex = destinationState.StateIndex;
-                    EnterSubStateMachine(ref stackContext, (short)subMachineIndex, ref stateMachineBlob);
-
-                    // Get the nested blob and create state for its entry state
-                    ref var nestedBlob = ref stateMachineBlob.SubStateMachines[subMachineIndex].NestedStateMachine.Value;
-                    var entryStateIndex = stateMachineBlob.SubStateMachines[subMachineIndex].EntryStateIndex;
-
-#if UNITY_EDITOR || DEBUG
-                    stateMachine.PreviousState = stateMachine.CurrentState;
-#endif
-                    stateMachine.CurrentState = CreateState(
-                        entryStateIndex,
-                        stateMachine,
-                        ref buffers,
-                        floatParameters);
-
-                    animationStateTransitionRequest = new AnimationStateTransitionRequest
-                    {
-                        AnimationStateId = stateMachine.CurrentState.AnimationStateId,
-                        TransitionDuration = transitionDuration,
-                    };
+                    // TODO: Sub-state machine runtime execution not yet implemented
+                    // Need to use BlobPtr for nested blob storage (BlobAssetReference not allowed in blobs)
+                    // For now, sub-state machine transitions are ignored - stay in current state
+                    return;
                 }
-                else
-                {
-                    // Regular state transition (Single or LinearBlend)
+
+                // Regular state transition (Single or LinearBlend)
 #if UNITY_EDITOR || DEBUG
-                    stateMachine.PreviousState = stateMachine.CurrentState;
+                stateMachine.PreviousState = stateMachine.CurrentState;
 #endif
-                    stateMachine.CurrentState = CreateState(
-                        toStateIndex,
-                        stateMachine,
-                        ref buffers,
-                        floatParameters);
+                stateMachine.CurrentState = CreateState(
+                    toStateIndex,
+                    stateMachine,
+                    ref buffers,
+                    floatParameters);
 
-                    animationStateTransitionRequest = new AnimationStateTransitionRequest
-                    {
-                        AnimationStateId = stateMachine.CurrentState.AnimationStateId,
-                        TransitionDuration = transitionDuration,
-                    };
+                animationStateTransitionRequest = new AnimationStateTransitionRequest
+                {
+                    AnimationStateId = stateMachine.CurrentState.AnimationStateId,
+                    TransitionDuration = transitionDuration,
+                };
 
-                    // Update the stack context with the new state
-                    if (stackContext.Length > 0)
-                    {
-                        ref var currentContext = ref stackContext.GetCurrent();
-                        currentContext.CurrentStateIndex = toStateIndex;
-                    }
+                // Update the stack context with the new state
+                if (stackContext.Length > 0)
+                {
+                    ref var currentContext = ref stackContext.GetCurrent();
+                    currentContext.CurrentStateIndex = toStateIndex;
                 }
             }
         }
 
         /// <summary>
-        /// Traverse the hierarchy to get the StateMachineBlob at the current depth.
-        /// Philosophy: Follow the relationship chain - each context points to its parent sub-machine.
+        /// Get the current StateMachineBlob. Returns root blob since sub-state machine
+        /// hierarchy is not yet implemented (requires BlobPtr refactor).
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private ref StateMachineBlob GetCurrentBlob(
             ref StateMachineBlob rootBlob,
             in DynamicBuffer<StateMachineContext> stackContext)
         {
-            if (stackContext.Length == 0)
-            {
-                return ref rootBlob;
-            }
-
-            ref var currentBlob = ref rootBlob;
-
-            // Traverse down the hierarchy following the context chain
-            for (int i = 1; i < stackContext.Length; i++)
-            {
-                var context = stackContext[i];
-                var subMachineIndex = context.ParentSubMachineIndex;
-
-                if (subMachineIndex >= 0)
-                {
-                    ref var subMachine = ref currentBlob.SubStateMachines[subMachineIndex];
-                    currentBlob = ref subMachine.NestedStateMachine.Value;
-                }
-            }
-
-            return ref currentBlob;
+            // TODO: When sub-state machine hierarchy is implemented with BlobPtr,
+            // traverse the context chain to get the nested blob at current depth
+            return ref rootBlob;
         }
 
         /// <summary>
