@@ -64,7 +64,16 @@ namespace DMotion.Authoring
             var builder = new BlobBuilder(Allocator.Temp);
             ref var root = ref builder.ConstructRoot<StateMachineBlob>();
             root.DefaultStateIndex = DefaultStateIndex;
-            builder.ConstructFromNativeArray(ref root.SingleClipStates, SingleClipStates.Ptr, SingleClipStates.Length);
+
+            // Only call ConstructFromNativeArray if we have items (Ptr may be null for empty lists)
+            if (SingleClipStates.Length > 0 && SingleClipStates.Ptr != null)
+            {
+                builder.ConstructFromNativeArray(ref root.SingleClipStates, SingleClipStates.Ptr, SingleClipStates.Length);
+            }
+            else
+            {
+                builder.Allocate(ref root.SingleClipStates, 0);
+            }
 
             //States
             {
@@ -93,15 +102,21 @@ namespace DMotion.Authoring
                             TransitionDuration = transitionConversionData.TransitionDuration
                         };
                         
-                        builder.ConstructFromNativeArray(
-                            ref transitions[transitionIndex].BoolTransitions,
-                            transitionConversionData.BoolTransitions.Ptr,
-                            transitionConversionData.BoolTransitions.Length);
-                        
-                        builder.ConstructFromNativeArray(
-                            ref transitions[transitionIndex].IntTransitions,
-                            transitionConversionData.IntTransitions.Ptr,
-                            transitionConversionData.IntTransitions.Length);
+                        if (transitionConversionData.BoolTransitions.Length > 0 && transitionConversionData.BoolTransitions.Ptr != null)
+                            builder.ConstructFromNativeArray(
+                                ref transitions[transitionIndex].BoolTransitions,
+                                transitionConversionData.BoolTransitions.Ptr,
+                                transitionConversionData.BoolTransitions.Length);
+                        else
+                            builder.Allocate(ref transitions[transitionIndex].BoolTransitions, 0);
+
+                        if (transitionConversionData.IntTransitions.Length > 0 && transitionConversionData.IntTransitions.Ptr != null)
+                            builder.ConstructFromNativeArray(
+                                ref transitions[transitionIndex].IntTransitions,
+                                transitionConversionData.IntTransitions.Ptr,
+                                transitionConversionData.IntTransitions.Length);
+                        else
+                            builder.Allocate(ref transitions[transitionIndex].IntTransitions, 0);
                     }
                 }
             }
@@ -160,15 +175,21 @@ namespace DMotion.Authoring
                             TransitionDuration = exitTransitionData.TransitionDuration
                         };
 
-                        builder.ConstructFromNativeArray(
-                            ref exitTransitions[j].BoolTransitions,
-                            exitTransitionData.BoolTransitions.Ptr,
-                            exitTransitionData.BoolTransitions.Length);
+                        if (exitTransitionData.BoolTransitions.Length > 0 && exitTransitionData.BoolTransitions.Ptr != null)
+                            builder.ConstructFromNativeArray(
+                                ref exitTransitions[j].BoolTransitions,
+                                exitTransitionData.BoolTransitions.Ptr,
+                                exitTransitionData.BoolTransitions.Length);
+                        else
+                            builder.Allocate(ref exitTransitions[j].BoolTransitions, 0);
 
-                        builder.ConstructFromNativeArray(
-                            ref exitTransitions[j].IntTransitions,
-                            exitTransitionData.IntTransitions.Ptr,
-                            exitTransitionData.IntTransitions.Length);
+                        if (exitTransitionData.IntTransitions.Length > 0 && exitTransitionData.IntTransitions.Ptr != null)
+                            builder.ConstructFromNativeArray(
+                                ref exitTransitions[j].IntTransitions,
+                                exitTransitionData.IntTransitions.Ptr,
+                                exitTransitionData.IntTransitions.Length);
+                        else
+                            builder.Allocate(ref exitTransitions[j].IntTransitions, 0);
                     }
                 }
             }
@@ -186,15 +207,21 @@ namespace DMotion.Authoring
                         TransitionDuration = anyTransitionConversionData.TransitionDuration
                     };
 
-                    builder.ConstructFromNativeArray(
-                        ref anyStateTransitions[i].BoolTransitions,
-                        anyTransitionConversionData.BoolTransitions.Ptr,
-                        anyTransitionConversionData.BoolTransitions.Length);
+                    if (anyTransitionConversionData.BoolTransitions.Length > 0 && anyTransitionConversionData.BoolTransitions.Ptr != null)
+                        builder.ConstructFromNativeArray(
+                            ref anyStateTransitions[i].BoolTransitions,
+                            anyTransitionConversionData.BoolTransitions.Ptr,
+                            anyTransitionConversionData.BoolTransitions.Length);
+                    else
+                        builder.Allocate(ref anyStateTransitions[i].BoolTransitions, 0);
 
-                    builder.ConstructFromNativeArray(
-                        ref anyStateTransitions[i].IntTransitions,
-                        anyTransitionConversionData.IntTransitions.Ptr,
-                        anyTransitionConversionData.IntTransitions.Length);
+                    if (anyTransitionConversionData.IntTransitions.Length > 0 && anyTransitionConversionData.IntTransitions.Ptr != null)
+                        builder.ConstructFromNativeArray(
+                            ref anyStateTransitions[i].IntTransitions,
+                            anyTransitionConversionData.IntTransitions.Ptr,
+                            anyTransitionConversionData.IntTransitions.Length);
+                    else
+                        builder.Allocate(ref anyStateTransitions[i].IntTransitions, 0);
                 }
             }
 

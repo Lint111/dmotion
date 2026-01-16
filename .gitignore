@@ -85,3 +85,4 @@ consolelog.txt*
 # Audit reports (temporary analysis artifacts)
 AUDIT-*.md
 AUDIT-*.md.meta
+.claude/

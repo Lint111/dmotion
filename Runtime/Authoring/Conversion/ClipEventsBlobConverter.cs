@@ -23,8 +23,16 @@ namespace DMotion.Authoring
             var clipEvents = builder.Allocate(ref root.ClipEvents, ClipEvents.Length);
             for (var i = 0; i < clipEvents.Length; i++)
             {
-                builder.ConstructFromNativeArray(ref clipEvents[i].Events, ClipEvents[i].Events.Ptr,
-                    ClipEvents[i].Events.Length);
+                // Only call ConstructFromNativeArray if we have items (Ptr may be null for empty lists)
+                if (ClipEvents[i].Events.Length > 0 && ClipEvents[i].Events.Ptr != null)
+                {
+                    builder.ConstructFromNativeArray(ref clipEvents[i].Events, ClipEvents[i].Events.Ptr,
+                        ClipEvents[i].Events.Length);
+                }
+                else
+                {
+                    builder.Allocate(ref clipEvents[i].Events, 0);
+                }
             }
             return builder.CreateBlobAssetReference<ClipEventsBlob>(Allocator.Persistent);
         }
