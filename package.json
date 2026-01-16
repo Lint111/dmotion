@@ -9,7 +9,7 @@
     "DMotion.Tests.Editor"
   ],
   "dependencies": {
-    "com.latios.latiosframework": "0.14.9",
+    "com.latios.latiosframework": "https://github.com/Dreaming381/Latios-Framework.git",
     "com.unity.shadergraph": "17.0.3",
     "com.unity.test-framework": "1.4.5",
     "com.unity.testtools.codecoverage": "1.2.6"

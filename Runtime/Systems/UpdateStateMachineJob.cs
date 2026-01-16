@@ -7,9 +7,21 @@ using Unity.Profiling;
 
 namespace DMotion
 {
+    /// <summary>
+    /// Updates state machine transitions and creates animation states.
+    /// All states are flattened at conversion time - no runtime hierarchy navigation.
+    /// SubStateMachine states from the editor are inlined into the root state machine.
+    /// </summary>
     [BurstCompile]
     internal partial struct UpdateStateMachineJob : IJobEntity
     {
+        /// <summary>
+        /// Offset used to encode exit transition indices.
+        /// Exit transitions are encoded as (ExitTransitionIndexOffset + index) to distinguish
+        /// them from regular transitions (0 to 999) and any-state transitions (negative).
+        /// </summary>
+        private const short ExitTransitionIndexOffset = 1000;
+
         internal ProfilerMarker Marker;
 
         /// <summary>
@@ -24,7 +36,6 @@ namespace DMotion
             ref DynamicBuffer<LinearBlendStateMachineState> linearBlendStates,
             ref DynamicBuffer<ClipSampler> clipSamplers,
             ref DynamicBuffer<AnimationState> animationStates,
-            ref DynamicBuffer<StateMachineContext> stackContext,
             in AnimationCurrentState animationCurrentState,
             in AnimationStateTransition animationStateTransition,
             in DynamicBuffer<BoolParameter> boolParameters,
@@ -33,7 +44,7 @@ namespace DMotion
         )
         {
             using var scope = Marker.Auto();
-            ref var rootBlob = ref stateMachine.StateMachineBlob.Value;
+            ref var stateMachineBlob = ref stateMachine.StateMachineBlob.Value;
 
             if (!ShouldStateMachineBeActive(animationCurrentState, animationStateTransition, stateMachine.CurrentState))
             {
@@ -50,9 +61,6 @@ namespace DMotion
             };
             var parameters = new TransitionParameters(boolParameters, intParameters);
 
-            // Get the current blob based on hierarchy depth
-            ref var stateMachineBlob = ref GetCurrentBlob(ref rootBlob, stackContext);
-
             // Initialize if necessary
             if (!stateMachine.CurrentState.IsValid)
             {
@@ -67,13 +75,6 @@ namespace DMotion
                     AnimationStateId = stateMachine.CurrentState.AnimationStateId,
                     TransitionDuration = 0
                 };
-
-                // Update the stack context with the initial state
-                if (stackContext.Length > 0)
-                {
-                    ref var currentContext = ref stackContext.GetCurrent();
-                    currentContext.CurrentStateIndex = stateMachineBlob.DefaultStateIndex;
-                }
             }
 
             // Evaluate transitions
@@ -98,9 +99,23 @@ namespace DMotion
                     out transitionIndex);
             }
 
+            // If no regular transition matched, check exit transitions (for sub-state machine exit states)
+            if (!shouldStartTransition && stateMachine.CurrentStateBlob.ExitTransitionGroupIndex >= 0)
+            {
+                shouldStartTransition = EvaluateExitTransitions(
+                    currentStateAnimationState,
+                    ref stateMachineBlob,
+                    stateMachine.CurrentStateBlob.ExitTransitionGroupIndex,
+                    parameters,
+                    out transitionIndex);
+            }
+
             if (shouldStartTransition)
             {
-                // Get transition (from Any State if negative index, from regular if positive)
+                // Get transition info based on source:
+                // - Negative index (-1 to -N): Any State transition (index = -(transitionIndex + 1))
+                // - Zero to 999: Regular state transition
+                // - 1000+: Exit transition (encoded as 1000 + exitTransitionIndex)
                 short toStateIndex;
                 float transitionDuration;
 
@@ -112,6 +127,16 @@ namespace DMotion
                     toStateIndex = anyTransition.ToStateIndex;
                     transitionDuration = anyTransition.TransitionDuration;
                 }
+                else if (transitionIndex >= ExitTransitionIndexOffset)
+                {
+                    // Exit transition (encoded as 1000 + index)
+                    var exitTransitionIndex = (short)(transitionIndex - ExitTransitionIndexOffset);
+                    var exitGroupIndex = stateMachine.CurrentStateBlob.ExitTransitionGroupIndex;
+                    ref var exitGroup = ref stateMachineBlob.ExitTransitionGroups[exitGroupIndex];
+                    ref var exitTransition = ref exitGroup.ExitTransitions[exitTransitionIndex];
+                    toStateIndex = exitTransition.ToStateIndex;
+                    transitionDuration = exitTransition.TransitionDuration;
+                }
                 else
                 {
                     // Regular transition (positive index)
@@ -120,18 +145,7 @@ namespace DMotion
                     transitionDuration = transition.TransitionDuration;
                 }
 
-                // Check if destination is a SubStateMachine
-                ref var destinationState = ref stateMachineBlob.States[toStateIndex];
-
-                if (destinationState.Type == StateType.SubStateMachine)
-                {
-                    // TODO: Sub-state machine runtime execution not yet implemented
-                    // Need to use BlobPtr for nested blob storage (BlobAssetReference not allowed in blobs)
-                    // For now, sub-state machine transitions are ignored - stay in current state
-                    return;
-                }
-
-                // Regular state transition (Single or LinearBlend)
+                // All states are leaf states (Single or LinearBlend) - no hierarchy navigation needed
 #if UNITY_EDITOR || DEBUG
                 stateMachine.PreviousState = stateMachine.CurrentState;
 #endif
@@ -146,68 +160,7 @@ namespace DMotion
                     AnimationStateId = stateMachine.CurrentState.AnimationStateId,
                     TransitionDuration = transitionDuration,
                 };
-
-                // Update the stack context with the new state
-                if (stackContext.Length > 0)
-                {
-                    ref var currentContext = ref stackContext.GetCurrent();
-                    currentContext.CurrentStateIndex = toStateIndex;
-                }
             }
-        }
-
-        /// <summary>
-        /// Get the current StateMachineBlob. Returns root blob since sub-state machine
-        /// hierarchy is not yet implemented (requires BlobPtr refactor).
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private ref StateMachineBlob GetCurrentBlob(
-            ref StateMachineBlob rootBlob,
-            in DynamicBuffer<StateMachineContext> stackContext)
-        {
-            // TODO: When sub-state machine hierarchy is implemented with BlobPtr,
-            // traverse the context chain to get the nested blob at current depth
-            return ref rootBlob;
-        }
-
-        /// <summary>
-        /// Enter a sub-state machine by pushing a new context onto the stack.
-        /// </summary>
-        private void EnterSubStateMachine(
-            ref DynamicBuffer<StateMachineContext> stackContext,
-            short subMachineIndex,
-            ref StateMachineBlob parentBlob)
-        {
-            ref var subMachine = ref parentBlob.SubStateMachines[subMachineIndex];
-
-            var newContext = new StateMachineContext
-            {
-                CurrentStateIndex = subMachine.EntryStateIndex,
-                ParentSubMachineIndex = subMachineIndex,
-                Level = (byte)(stackContext.Length)
-            };
-
-            stackContext.Push(newContext);
-        }
-
-        /// <summary>
-        /// Exit the current sub-state machine by popping the context.
-        /// Returns true if exit transitions should be evaluated.
-        /// </summary>
-        private bool ExitSubStateMachine(
-            ref DynamicBuffer<StateMachineContext> stackContext,
-            out short exitedSubMachineIndex)
-        {
-            if (stackContext.Length <= 1)
-            {
-                // Can't exit from root level
-                exitedSubMachineIndex = -1;
-                return false;
-            }
-
-            var exitedContext = stackContext.Pop();
-            exitedSubMachineIndex = exitedContext.ParentSubMachineIndex;
-            return true;
         }
 
         public static bool ShouldStateMachineBeActive(in AnimationCurrentState animationCurrentState,
@@ -230,6 +183,7 @@ namespace DMotion
 
         /// <summary>
         /// Creates a new animation state. Uses AnimationBufferContext to reduce parameter count.
+        /// All states are leaf states (Single or LinearBlend) - SubStateMachines are flattened at conversion.
         /// </summary>
         private StateMachineStateRef CreateState(
             short stateIndex,
@@ -273,10 +227,6 @@ namespace DMotion
                         finalSpeed);
                     animationStateId = linearClipState.AnimationStateId;
                     break;
-                case StateType.SubStateMachine:
-                    throw new InvalidOperationException(
-                        "SubStateMachine states should be entered via EnterSubStateMachine, not created directly. " +
-                        "This indicates a bug in transition handling.");
                 default:
                     throw new ArgumentOutOfRangeException();
             }
@@ -375,6 +325,36 @@ namespace DMotion
             }
 
             return shouldTriggerTransition;
+        }
+
+        /// <summary>
+        /// Evaluates exit transitions for states that are designated as exit states.
+        /// Returns encoded transition index (ExitTransitionIndexOffset + index) to distinguish
+        /// from regular and any-state transitions.
+        /// </summary>
+        [BurstCompile]
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool EvaluateExitTransitions(
+            in AnimationState animation,
+            ref StateMachineBlob stateMachine,
+            short exitGroupIndex,
+            in TransitionParameters parameters,
+            out short transitionIndex)
+        {
+            ref var exitGroup = ref stateMachine.ExitTransitionGroups[exitGroupIndex];
+
+            for (short i = 0; i < exitGroup.ExitTransitions.Length; i++)
+            {
+                if (EvaluateTransitionGroup(animation, ref exitGroup.ExitTransitions[i], parameters))
+                {
+                    // Encode as exit transition (offset + index)
+                    transitionIndex = (short)(ExitTransitionIndexOffset + i);
+                    return true;
+                }
+            }
+
+            transitionIndex = -1;
+            return false;
         }
 
         /// <summary>

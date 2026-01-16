@@ -15,6 +15,11 @@ namespace DMotion.Authoring
         internal float Speed;
         internal ushort SpeedParameterIndex; // ushort.MaxValue = no parameter
         internal UnsafeList<StateOutTransitionConversionData> Transitions;
+
+        /// <summary>
+        /// Index into ExitTransitionGroups, or -1 if not an exit state.
+        /// </summary>
+        internal short ExitTransitionGroupIndex;
     }
 
     internal struct ClipIndexWithThreshold
@@ -30,14 +35,6 @@ namespace DMotion.Authoring
         internal ushort BlendParameterIndex;
     }
 
-    internal struct SubStateMachineConversionData
-    {
-        internal StateMachineBlobConverter NestedConverter;
-        internal short EntryStateIndex;
-        internal UnsafeList<StateOutTransitionConversionData> ExitTransitions;
-        internal FixedString64Bytes Name;
-    }
-
     internal struct StateOutTransitionConversionData
     {
         internal short ToStateIndex;
@@ -46,7 +43,27 @@ namespace DMotion.Authoring
         internal UnsafeList<BoolTransition> BoolTransitions;
         internal UnsafeList<IntTransition> IntTransitions;
     }
+
+    /// <summary>
+    /// Conversion data for an exit transition group (one per SubStateMachine with exit states).
+    /// </summary>
+    internal struct ExitTransitionGroupConversionData
+    {
+        /// <summary>
+        /// Flattened indices of states that can trigger these exit transitions.
+        /// </summary>
+        internal UnsafeList<short> ExitStateIndices;
+
+        /// <summary>
+        /// Exit transitions for this group.
+        /// </summary>
+        internal UnsafeList<StateOutTransitionConversionData> ExitTransitions;
+    }
     
+    /// <summary>
+    /// Temporary conversion data for building StateMachineBlob.
+    /// SubStateMachine states are flattened during conversion - the final blob contains only leaf states.
+    /// </summary>
     [TemporaryBakingType]
     internal struct StateMachineBlobConverter : IComponentData, IComparer<ClipIndexWithThreshold>, IDisposable
     {
@@ -54,10 +71,16 @@ namespace DMotion.Authoring
         internal UnsafeList<AnimationStateConversionData> States;
         internal UnsafeList<SingleClipStateBlob> SingleClipStates;
         internal UnsafeList<LinearBlendStateConversionData> LinearBlendStates;
-        internal UnsafeList<SubStateMachineConversionData> SubStateMachines;
 
-        // NEW: Any State transitions (global transitions from any state)
+        /// <summary>
+        /// Any State transitions (global transitions from any state).
+        /// </summary>
         internal UnsafeList<StateOutTransitionConversionData> AnyStateTransitions;
+
+        /// <summary>
+        /// Exit transition groups (one per SubStateMachine with exit states/transitions).
+        /// </summary>
+        internal UnsafeList<ExitTransitionGroupConversionData> ExitTransitionGroups;
 
         public readonly unsafe BlobAssetReference<StateMachineBlob> BuildBlob()
         {
@@ -88,8 +111,9 @@ namespace DMotion.Authoring
                         Loop = stateConversionData.Loop,
                         Speed = stateConversionData.Speed,
                         SpeedParameterIndex = stateConversionData.SpeedParameterIndex,
+                        ExitTransitionGroupIndex = stateConversionData.ExitTransitionGroupIndex,
                     };
-                    
+
                     //transitions
                     var transitions = builder.Allocate(ref states[stateIndex].Transitions, stateConversionData.Transitions.Length);
                     for (ushort transitionIndex = 0; transitionIndex < transitions.Length; transitionIndex++)
@@ -101,7 +125,7 @@ namespace DMotion.Authoring
                             TransitionEndTime = transitionConversionData.TransitionEndTime,
                             TransitionDuration = transitionConversionData.TransitionDuration
                         };
-                        
+
                         if (transitionConversionData.BoolTransitions.Length > 0 && transitionConversionData.BoolTransitions.Ptr != null)
                             builder.ConstructFromNativeArray(
                                 ref transitions[transitionIndex].BoolTransitions,
@@ -149,52 +173,7 @@ namespace DMotion.Authoring
                 }
             }
 
-            // NEW: Sub-State Machines (WIP - nested blob not yet supported)
-            // TODO: Implement proper nested blob using BlobPtr and same-builder construction
-            {
-                var subStateMachines = builder.Allocate(ref root.SubStateMachines, SubStateMachines.Length);
-                for (ushort i = 0; i < subStateMachines.Length; i++)
-                {
-                    var subMachineConversionData = SubStateMachines[i];
-
-                    // NOTE: NestedConverter.BuildBlob() is not used - nested runtime execution not yet supported
-                    // The nested blob would need to be built inline with BlobPtr, not as separate BlobAssetReference
-
-                    subStateMachines[i].EntryStateIndex = subMachineConversionData.EntryStateIndex;
-                    subStateMachines[i].Name = subMachineConversionData.Name;
-
-                    // Build exit transitions for this sub-machine
-                    var exitTransitions = builder.Allocate(ref subStateMachines[i].ExitTransitions, subMachineConversionData.ExitTransitions.Length);
-                    for (ushort j = 0; j < exitTransitions.Length; j++)
-                    {
-                        var exitTransitionData = subMachineConversionData.ExitTransitions[j];
-                        exitTransitions[j] = new StateOutTransitionGroup()
-                        {
-                            ToStateIndex = exitTransitionData.ToStateIndex,
-                            TransitionEndTime = exitTransitionData.TransitionEndTime,
-                            TransitionDuration = exitTransitionData.TransitionDuration
-                        };
-
-                        if (exitTransitionData.BoolTransitions.Length > 0 && exitTransitionData.BoolTransitions.Ptr != null)
-                            builder.ConstructFromNativeArray(
-                                ref exitTransitions[j].BoolTransitions,
-                                exitTransitionData.BoolTransitions.Ptr,
-                                exitTransitionData.BoolTransitions.Length);
-                        else
-                            builder.Allocate(ref exitTransitions[j].BoolTransitions, 0);
-
-                        if (exitTransitionData.IntTransitions.Length > 0 && exitTransitionData.IntTransitions.Ptr != null)
-                            builder.ConstructFromNativeArray(
-                                ref exitTransitions[j].IntTransitions,
-                                exitTransitionData.IntTransitions.Ptr,
-                                exitTransitionData.IntTransitions.Length);
-                        else
-                            builder.Allocate(ref exitTransitions[j].IntTransitions, 0);
-                    }
-                }
-            }
-
-            // NEW: Any State transitions
+            // Any State transitions
             {
                 var anyStateTransitions = builder.Allocate(ref root.AnyStateTransitions, AnyStateTransitions.Length);
                 for (ushort i = 0; i < anyStateTransitions.Length; i++)
@@ -222,6 +201,53 @@ namespace DMotion.Authoring
                             anyTransitionConversionData.IntTransitions.Length);
                     else
                         builder.Allocate(ref anyStateTransitions[i].IntTransitions, 0);
+                }
+            }
+
+            // Exit transition groups
+            {
+                var exitGroups = builder.Allocate(ref root.ExitTransitionGroups, ExitTransitionGroups.Length);
+                for (ushort groupIndex = 0; groupIndex < exitGroups.Length; groupIndex++)
+                {
+                    var groupData = ExitTransitionGroups[groupIndex];
+
+                    // Build exit state indices
+                    if (groupData.ExitStateIndices.Length > 0 && groupData.ExitStateIndices.Ptr != null)
+                        builder.ConstructFromNativeArray(
+                            ref exitGroups[groupIndex].ExitStateIndices,
+                            groupData.ExitStateIndices.Ptr,
+                            groupData.ExitStateIndices.Length);
+                    else
+                        builder.Allocate(ref exitGroups[groupIndex].ExitStateIndices, 0);
+
+                    // Build exit transitions
+                    var exitTransitions = builder.Allocate(ref exitGroups[groupIndex].ExitTransitions, groupData.ExitTransitions.Length);
+                    for (ushort transitionIndex = 0; transitionIndex < exitTransitions.Length; transitionIndex++)
+                    {
+                        var transitionData = groupData.ExitTransitions[transitionIndex];
+                        exitTransitions[transitionIndex] = new StateOutTransitionGroup()
+                        {
+                            ToStateIndex = transitionData.ToStateIndex,
+                            TransitionEndTime = transitionData.TransitionEndTime,
+                            TransitionDuration = transitionData.TransitionDuration
+                        };
+
+                        if (transitionData.BoolTransitions.Length > 0 && transitionData.BoolTransitions.Ptr != null)
+                            builder.ConstructFromNativeArray(
+                                ref exitTransitions[transitionIndex].BoolTransitions,
+                                transitionData.BoolTransitions.Ptr,
+                                transitionData.BoolTransitions.Length);
+                        else
+                            builder.Allocate(ref exitTransitions[transitionIndex].BoolTransitions, 0);
+
+                        if (transitionData.IntTransitions.Length > 0 && transitionData.IntTransitions.Ptr != null)
+                            builder.ConstructFromNativeArray(
+                                ref exitTransitions[transitionIndex].IntTransitions,
+                                transitionData.IntTransitions.Ptr,
+                                transitionData.IntTransitions.Length);
+                        else
+                            builder.Allocate(ref exitTransitions[transitionIndex].IntTransitions, 0);
+                    }
                 }
             }
 
@@ -270,34 +296,7 @@ namespace DMotion.Authoring
                 LinearBlendStates.Dispose();
             }
 
-            // NEW: Dispose SubStateMachines (recursive disposal)
-            if (SubStateMachines.IsCreated)
-            {
-                for (int i = 0; i < SubStateMachines.Length; i++)
-                {
-                    ref var subMachine = ref SubStateMachines.ElementAt(i);
-
-                    // Recursively dispose the nested converter
-                    subMachine.NestedConverter.Dispose();
-
-                    // Dispose exit transitions
-                    if (subMachine.ExitTransitions.IsCreated)
-                    {
-                        for (int j = 0; j < subMachine.ExitTransitions.Length; j++)
-                        {
-                            ref var exitTransition = ref subMachine.ExitTransitions.ElementAt(j);
-                            if (exitTransition.BoolTransitions.IsCreated)
-                                exitTransition.BoolTransitions.Dispose();
-                            if (exitTransition.IntTransitions.IsCreated)
-                                exitTransition.IntTransitions.Dispose();
-                        }
-                        subMachine.ExitTransitions.Dispose();
-                    }
-                }
-                SubStateMachines.Dispose();
-            }
-
-            // NEW: Dispose Any State transitions
+            // Dispose Any State transitions
             if (AnyStateTransitions.IsCreated)
             {
                 for (int i = 0; i < AnyStateTransitions.Length; i++)
@@ -309,6 +308,31 @@ namespace DMotion.Authoring
                         anyTransition.IntTransitions.Dispose();
                 }
                 AnyStateTransitions.Dispose();
+            }
+
+            // Dispose Exit Transition Groups
+            if (ExitTransitionGroups.IsCreated)
+            {
+                for (int i = 0; i < ExitTransitionGroups.Length; i++)
+                {
+                    ref var exitGroup = ref ExitTransitionGroups.ElementAt(i);
+                    if (exitGroup.ExitStateIndices.IsCreated)
+                        exitGroup.ExitStateIndices.Dispose();
+
+                    if (exitGroup.ExitTransitions.IsCreated)
+                    {
+                        for (int j = 0; j < exitGroup.ExitTransitions.Length; j++)
+                        {
+                            ref var exitTransition = ref exitGroup.ExitTransitions.ElementAt(j);
+                            if (exitTransition.BoolTransitions.IsCreated)
+                                exitTransition.BoolTransitions.Dispose();
+                            if (exitTransition.IntTransitions.IsCreated)
+                                exitTransition.IntTransitions.Dispose();
+                        }
+                        exitGroup.ExitTransitions.Dispose();
+                    }
+                }
+                ExitTransitionGroups.Dispose();
             }
 
             // Dispose remaining top-level list

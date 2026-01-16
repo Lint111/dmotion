@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using Latios.Kinemation;
 using Unity.Assertions;
@@ -24,349 +25,302 @@ namespace DMotion.Authoring
             }
         }
 
+        /// <summary>
+        /// Creates a converter with flattened states.
+        /// SubStateMachine states are expanded inline - their nested states become top-level states.
+        /// </summary>
         internal static StateMachineBlobConverter CreateConverter(StateMachineAsset stateMachineAsset)
         {
-            var converter = new StateMachineBlobConverter();
-            var defaultStateIndex = stateMachineAsset.States.ToList().IndexOf(stateMachineAsset.DefaultState);
-            Assert.IsTrue(defaultStateIndex >= 0,
-                $"Couldn't find state {stateMachineAsset.DefaultState.name}, in state machine {stateMachineAsset.name}");
-            converter.DefaultStateIndex = (byte)defaultStateIndex;
-            BuildStates(stateMachineAsset, ref converter, Allocator.Persistent);
+            // Flatten the state hierarchy (now also returns exit transition info)
+            var (flattenedStates, assetToIndex, exitTransitionInfos) = StateFlattener.FlattenStates(stateMachineAsset);
 
-            // NEW: Build Any State transitions
-            BuildAnyStateTransitions(stateMachineAsset, ref converter, Allocator.Persistent);
+            // Resolve default state (may be inside a SubStateMachine)
+            var resolvedDefault = StateFlattener.ResolveDefaultState(stateMachineAsset);
+            Assert.IsTrue(resolvedDefault != null && assetToIndex.ContainsKey(resolvedDefault),
+                $"Couldn't resolve default state for {stateMachineAsset.name}");
+
+            var converter = new StateMachineBlobConverter
+            {
+                DefaultStateIndex = (byte)assetToIndex[resolvedDefault]
+            };
+
+            BuildFlattenedStates(stateMachineAsset, flattenedStates, assetToIndex, ref converter, Allocator.Persistent);
+            BuildAnyStateTransitions(stateMachineAsset, assetToIndex, ref converter, Allocator.Persistent);
+            BuildExitTransitionGroups(stateMachineAsset, exitTransitionInfos, assetToIndex, ref converter, Allocator.Persistent);
 
             return converter;
         }
 
-        private static void BuildStates(StateMachineAsset stateMachineAsset, ref StateMachineBlobConverter converter,
+        /// <summary>
+        /// Builds converter state data from flattened states.
+        /// All states are leaf states (Single or LinearBlend) with global indices.
+        /// </summary>
+        private static void BuildFlattenedStates(
+            StateMachineAsset rootMachine,
+            List<FlattenedState> flattenedStates,
+            Dictionary<AnimationStateAsset, int> assetToIndex,
+            ref StateMachineBlobConverter converter,
             Allocator allocator)
         {
-            var singleClipStates = stateMachineAsset.States.OfType<SingleClipStateAsset>().ToArray();
-            var linearBlendStates = stateMachineAsset.States.OfType<LinearBlendStateAsset>().ToArray();
-            var subStateMachineStates = stateMachineAsset.States.OfType<SubStateMachineStateAsset>().ToArray();
+            // Count state types
+            int singleCount = flattenedStates.Count(s => s.Asset is SingleClipStateAsset);
+            int linearCount = flattenedStates.Count(s => s.Asset is LinearBlendStateAsset);
 
-            converter.States =
-                new UnsafeList<AnimationStateConversionData>(stateMachineAsset.States.Count, allocator);
-            converter.States.Resize(stateMachineAsset.States.Count);
+            converter.States = new UnsafeList<AnimationStateConversionData>(flattenedStates.Count, allocator);
+            converter.States.Resize(flattenedStates.Count);
 
-            converter.SingleClipStates =
-                new UnsafeList<SingleClipStateBlob>(singleClipStates.Length, allocator);
+            converter.SingleClipStates = new UnsafeList<SingleClipStateBlob>(singleCount, allocator);
+            converter.LinearBlendStates = new UnsafeList<LinearBlendStateConversionData>(linearCount, allocator);
 
-            converter.LinearBlendStates =
-                new UnsafeList<LinearBlendStateConversionData>(linearBlendStates.Length,
-                    allocator);
+            // Track clip index as we build states
+            ushort runningClipIndex = 0;
 
-            converter.SubStateMachines =
-                new UnsafeList<SubStateMachineConversionData>(subStateMachineStates.Length,
-                    allocator);
-
-            ushort clipIndex = 0;
-            for (var i = 0; i < converter.States.Length; i++)
+            foreach (var flatState in flattenedStates)
             {
-                var stateAsset = stateMachineAsset.States[i];
-                var stateImplIndex = -1;
+                var stateAsset = flatState.Asset;
+                var globalIndex = flatState.GlobalIndex;
+                int stateImplIndex;
+
                 switch (stateAsset)
                 {
-                    case LinearBlendStateAsset linearBlendStateAsset:
+                    case SingleClipStateAsset:
+                        stateImplIndex = converter.SingleClipStates.Length;
+                        converter.SingleClipStates.Add(new SingleClipStateBlob
+                        {
+                            ClipIndex = runningClipIndex
+                        });
+                        runningClipIndex++;
+                        break;
+
+                    case LinearBlendStateAsset linearBlendAsset:
                         stateImplIndex = converter.LinearBlendStates.Length;
-                        var blendParameterIndex =
-                            stateMachineAsset.Parameters
-                                .OfType<FloatParameterAsset>()
-                                .ToList()
-                                .FindIndex(f => f == linearBlendStateAsset.BlendParameter);
+                        var blendParameterIndex = rootMachine.Parameters
+                            .OfType<FloatParameterAsset>()
+                            .ToList()
+                            .FindIndex(f => f == linearBlendAsset.BlendParameter);
 
                         Assert.IsTrue(blendParameterIndex >= 0,
-                            $"({stateMachineAsset.name}) Couldn't find parameter {linearBlendStateAsset.BlendParameter.name}, for Linear Blend State");
+                            $"({rootMachine.name}) Couldn't find blend parameter for state {stateAsset.name}");
 
-                        var linearBlendState = new LinearBlendStateConversionData()
+                        var linearBlendData = new LinearBlendStateConversionData
                         {
-                            BlendParameterIndex = (ushort)blendParameterIndex
+                            BlendParameterIndex = (ushort)blendParameterIndex,
+                            ClipsWithThresholds = new UnsafeList<ClipIndexWithThreshold>(
+                                linearBlendAsset.BlendClips.Length, allocator)
                         };
+                        linearBlendData.ClipsWithThresholds.Resize(linearBlendAsset.BlendClips.Length);
 
-                        linearBlendState.ClipsWithThresholds = new UnsafeList<ClipIndexWithThreshold>(
-                            linearBlendStateAsset.BlendClips.Length, allocator);
-
-                        linearBlendState.ClipsWithThresholds.Resize(linearBlendStateAsset.BlendClips.Length);
-                        for (ushort blendClipIndex = 0;
-                             blendClipIndex < linearBlendState.ClipsWithThresholds.Length;
-                             blendClipIndex++)
+                        for (ushort i = 0; i < linearBlendAsset.BlendClips.Length; i++)
                         {
-                            linearBlendState.ClipsWithThresholds[blendClipIndex] = new ClipIndexWithThreshold
+                            linearBlendData.ClipsWithThresholds[i] = new ClipIndexWithThreshold
                             {
-                                ClipIndex = clipIndex,
-                                Threshold = linearBlendStateAsset.BlendClips[blendClipIndex].Threshold,
-                                Speed = linearBlendStateAsset.BlendClips[blendClipIndex].Speed
+                                ClipIndex = runningClipIndex,
+                                Threshold = linearBlendAsset.BlendClips[i].Threshold,
+                                Speed = linearBlendAsset.BlendClips[i].Speed
                             };
-                            clipIndex++;
+                            runningClipIndex++;
                         }
 
-                        converter.LinearBlendStates.Add(linearBlendState);
+                        converter.LinearBlendStates.Add(linearBlendData);
                         break;
-                    case SingleClipStateAsset singleClipStateAsset:
-                        stateImplIndex = converter.SingleClipStates.Length;
-                        converter.SingleClipStates.Add(new SingleClipStateBlob()
-                        {
-                            ClipIndex = clipIndex,
-                        });
-                        clipIndex++;
-                        break;
-                    case SubStateMachineStateAsset subStateMachineAsset:
-                        stateImplIndex = converter.SubStateMachines.Length;
 
-                        // Validate sub-state machine
-                        Assert.IsTrue(subStateMachineAsset.IsValid(),
-                            $"({stateMachineAsset.name}) SubStateMachine state '{stateAsset.name}' has invalid configuration");
-
-                        // Recursively create converter for nested machine
-                        var nestedConverter = CreateConverter(subStateMachineAsset.NestedStateMachine);
-
-                        // Find entry state index in nested machine
-                        var entryStateIndex = subStateMachineAsset.NestedStateMachine.States
-                            .ToList()
-                            .IndexOf(subStateMachineAsset.EntryState);
-                        Assert.IsTrue(entryStateIndex >= 0,
-                            $"({stateMachineAsset.name}) SubStateMachine '{stateAsset.name}': Entry state not found in nested machine");
-
-                        // Build exit transitions
-                        var exitTransitions = new UnsafeList<StateOutTransitionConversionData>(
-                            subStateMachineAsset.ExitTransitions.Count, allocator);
-                        exitTransitions.Resize(subStateMachineAsset.ExitTransitions.Count);
-
-                        for (var exitIndex = 0; exitIndex < exitTransitions.Length; exitIndex++)
-                        {
-                            var exitTransitionAsset = subStateMachineAsset.ExitTransitions[exitIndex];
-                            exitTransitions[exitIndex] = BuildTransitionConversionData(
-                                stateMachineAsset, exitTransitionAsset, allocator);
-                        }
-
-                        var subMachineData = new SubStateMachineConversionData
-                        {
-                            NestedConverter = nestedConverter,
-                            EntryStateIndex = (short)entryStateIndex,
-                            ExitTransitions = exitTransitions,
-                            Name = new FixedString64Bytes(stateAsset.name)
-                        };
-
-                        converter.SubStateMachines.Add(subMachineData);
-                        break;
                     default:
-                        throw new ArgumentOutOfRangeException(nameof(stateAsset));
+                        throw new ArgumentOutOfRangeException(nameof(stateAsset),
+                            $"Unexpected state type in flattened list: {stateAsset.GetType().Name}");
                 }
 
-                Assert.IsTrue(stateImplIndex >= 0, $"Index to state implementation needs to be assigned");
-                converter.States[i] =
-                    BuildStateConversionData(stateMachineAsset, stateAsset, stateImplIndex, allocator);
+                // Build state conversion data with transitions
+                converter.States[globalIndex] = BuildFlattenedStateConversionData(
+                    rootMachine, stateAsset, stateImplIndex, flatState.ExitGroupIndex, assetToIndex, allocator);
             }
         }
 
-        private static StateOutTransitionConversionData BuildTransitionConversionData(
-            StateMachineAsset stateMachineAsset,
-            StateOutTransition outTransitionAsset,
+        /// <summary>
+        /// Builds state conversion data with transitions remapped to flattened indices.
+        /// </summary>
+        private static AnimationStateConversionData BuildFlattenedStateConversionData(
+            StateMachineAsset rootMachine,
+            AnimationStateAsset state,
+            int stateImplIndex,
+            short exitTransitionGroupIndex,
+            Dictionary<AnimationStateAsset, int> assetToIndex,
             Allocator allocator)
         {
-            var toStateIndex =
-                (short)stateMachineAsset.States.ToList().FindIndex(s => s == outTransitionAsset.ToState);
-            Assert.IsTrue(toStateIndex >= 0,
-                $"State {outTransitionAsset.ToState.name} not present on State Machine {stateMachineAsset.name}");
-
-            var outTransition = new StateOutTransitionConversionData()
-            {
-                ToStateIndex = toStateIndex,
-                TransitionEndTime = outTransitionAsset.HasEndTime ? Mathf.Max(0, outTransitionAsset.EndTime) : -1f,
-                TransitionDuration = outTransitionAsset.TransitionDuration,
-            };
-
-            //Create bool transitions
-            {
-                var boolTransitions = outTransitionAsset.BoolTransitions.ToArray();
-                outTransition.BoolTransitions =
-                    new UnsafeList<BoolTransition>(boolTransitions.Length, allocator);
-                outTransition.BoolTransitions.Resize(boolTransitions.Length);
-                for (var boolTransitionIndex = 0;
-                     boolTransitionIndex < outTransition.BoolTransitions.Length;
-                     boolTransitionIndex++)
-                {
-                    var boolTransitionAsset = boolTransitions[boolTransitionIndex];
-                    var parameterIndex = stateMachineAsset.Parameters
-                        .OfType<BoolParameterAsset>()
-                        .ToList()
-                        .FindIndex(p => p == boolTransitionAsset.BoolParameter);
-
-                    Assert.IsTrue(parameterIndex >= 0,
-                        $"({stateMachineAsset.name}) Couldn't find parameter {boolTransitionAsset.BoolParameter.name}, for transition");
-                    outTransition.BoolTransitions[boolTransitionIndex] = new BoolTransition
-                    {
-                        ComparisonValue = boolTransitionAsset.ComparisonValue == BoolConditionComparison.True,
-                        ParameterIndex = parameterIndex
-                    };
-                }
-            }
-
-            //Create int transitions
-            {
-                var intTransitions = outTransitionAsset.IntTransitions.ToArray();
-                var intParameters = stateMachineAsset.Parameters
-                    .OfType<IntParameterAsset>()
-                    .ToList();
-                outTransition.IntTransitions =
-                    new UnsafeList<IntTransition>(intTransitions.Length, allocator);
-                outTransition.IntTransitions.Resize(intTransitions.Length);
-                for (var intTransitionIndex = 0;
-                     intTransitionIndex < outTransition.IntTransitions.Length;
-                     intTransitionIndex++)
-                {
-                    var intTransitionAsset = intTransitions[intTransitionIndex];
-                    var parameterIndex = intParameters.FindIndex(p => p == intTransitionAsset.IntParameter);
-
-                    Assert.IsTrue(parameterIndex >= 0,
-                        $"({stateMachineAsset.name}) Couldn't find parameter {intTransitionAsset.IntParameter.name}, for transition");
-                    outTransition.IntTransitions[intTransitionIndex] = new IntTransition
-                    {
-                        ParameterIndex = parameterIndex,
-                        ComparisonValue = intTransitionAsset.ComparisonValue,
-                        ComparisonMode = intTransitionAsset.ComparisonMode
-                    };
-                }
-            }
-
-            return outTransition;
-        }
-
-        private static AnimationStateConversionData BuildStateConversionData(StateMachineAsset stateMachineAsset,
-            AnimationStateAsset state, int stateIndex, Allocator allocator)
-        {
-            var stateConversionData = new AnimationStateConversionData()
+            var stateData = new AnimationStateConversionData
             {
                 Type = state.Type,
-                StateIndex = (ushort)stateIndex,
+                StateIndex = (ushort)stateImplIndex,
                 Loop = state.Loop,
                 Speed = state.Speed,
-                SpeedParameterIndex = ushort.MaxValue // Default: no speed parameter
+                SpeedParameterIndex = ushort.MaxValue,
+                ExitTransitionGroupIndex = exitTransitionGroupIndex
             };
 
-            // Resolve speed parameter index if present
+            // Resolve speed parameter
             if (state.SpeedParameter != null)
             {
-                var speedParamIndex = stateMachineAsset.Parameters
+                var speedParamIndex = rootMachine.Parameters
                     .OfType<FloatParameterAsset>()
                     .ToList()
                     .FindIndex(p => p == state.SpeedParameter);
 
                 if (speedParamIndex >= 0)
                 {
-                    stateConversionData.SpeedParameterIndex = (ushort)speedParamIndex;
-                }
-                else
-                {
-                    Debug.LogWarning($"({stateMachineAsset.name}) Couldn't find speed parameter {state.SpeedParameter?.name} for state {state.name}");
+                    stateData.SpeedParameterIndex = (ushort)speedParamIndex;
                 }
             }
 
-            //Create Transition Groups
-            var transitionCount = state.OutTransitions.Count;
-            stateConversionData.Transitions =
-                new UnsafeList<StateOutTransitionConversionData>(transitionCount, allocator);
-            stateConversionData.Transitions.Resize(transitionCount);
+            // Build transitions with remapped target indices
+            var transitions = state.OutTransitions;
+            stateData.Transitions = new UnsafeList<StateOutTransitionConversionData>(transitions.Count, allocator);
+            stateData.Transitions.Resize(transitions.Count);
 
-            for (var transitionIndex = 0; transitionIndex < stateConversionData.Transitions.Length; transitionIndex++)
+            for (var i = 0; i < transitions.Count; i++)
             {
-                stateConversionData.Transitions[transitionIndex] =
-                    BuildTransitionConversionData(stateMachineAsset, state.OutTransitions[transitionIndex], allocator);
+                stateData.Transitions[i] = BuildFlattenedTransitionData(
+                    rootMachine, transitions[i], assetToIndex, allocator);
             }
 
-            return stateConversionData;
+            return stateData;
         }
 
-        private static void BuildAnyStateTransitions(StateMachineAsset stateMachineAsset,
-            ref StateMachineBlobConverter converter, Allocator allocator)
+        /// <summary>
+        /// Builds transition data with target index resolved through flattening.
+        /// If target is a SubStateMachine, redirects to its entry state.
+        /// </summary>
+        private static StateOutTransitionConversionData BuildFlattenedTransitionData(
+            StateMachineAsset rootMachine,
+            StateOutTransition transition,
+            Dictionary<AnimationStateAsset, int> assetToIndex,
+            Allocator allocator)
+        {
+            // Resolve target - may redirect SubStateMachine to entry state
+            var toStateIndex = (short)StateFlattener.ResolveTransitionTarget(transition.ToState, assetToIndex);
+
+            var transitionData = new StateOutTransitionConversionData
+            {
+                ToStateIndex = toStateIndex,
+                TransitionEndTime = transition.HasEndTime ? Mathf.Max(0, transition.EndTime) : -1f,
+                TransitionDuration = transition.TransitionDuration
+            };
+
+            // Bool conditions
+            var boolConditions = transition.BoolTransitions.ToArray();
+            transitionData.BoolTransitions = new UnsafeList<BoolTransition>(boolConditions.Length, allocator);
+            transitionData.BoolTransitions.Resize(boolConditions.Length);
+
+            for (var i = 0; i < boolConditions.Length; i++)
+            {
+                var boolCond = boolConditions[i];
+                var paramIndex = rootMachine.Parameters
+                    .OfType<BoolParameterAsset>()
+                    .ToList()
+                    .FindIndex(p => p == boolCond.BoolParameter);
+
+                Assert.IsTrue(paramIndex >= 0,
+                    $"({rootMachine.name}) Bool parameter not found: {boolCond.BoolParameter?.name}");
+
+                transitionData.BoolTransitions[i] = new BoolTransition
+                {
+                    ComparisonValue = boolCond.ComparisonValue == BoolConditionComparison.True,
+                    ParameterIndex = paramIndex
+                };
+            }
+
+            // Int conditions
+            var intConditions = transition.IntTransitions.ToArray();
+            var intParams = rootMachine.Parameters.OfType<IntParameterAsset>().ToList();
+            transitionData.IntTransitions = new UnsafeList<IntTransition>(intConditions.Length, allocator);
+            transitionData.IntTransitions.Resize(intConditions.Length);
+
+            for (var i = 0; i < intConditions.Length; i++)
+            {
+                var intCond = intConditions[i];
+                var paramIndex = intParams.FindIndex(p => p == intCond.IntParameter);
+
+                Assert.IsTrue(paramIndex >= 0,
+                    $"({rootMachine.name}) Int parameter not found: {intCond.IntParameter?.name}");
+
+                transitionData.IntTransitions[i] = new IntTransition
+                {
+                    ParameterIndex = paramIndex,
+                    ComparisonValue = intCond.ComparisonValue,
+                    ComparisonMode = intCond.ComparisonMode
+                };
+            }
+
+            return transitionData;
+        }
+
+        /// <summary>
+        /// Builds Any State transitions with flattened target indices.
+        /// </summary>
+        private static void BuildAnyStateTransitions(
+            StateMachineAsset stateMachineAsset,
+            Dictionary<AnimationStateAsset, int> assetToIndex,
+            ref StateMachineBlobConverter converter,
+            Allocator allocator)
         {
             var anyStateCount = stateMachineAsset.AnyStateTransitions.Count;
 
-            converter.AnyStateTransitions =
-                new UnsafeList<StateOutTransitionConversionData>(anyStateCount, allocator);
+            converter.AnyStateTransitions = new UnsafeList<StateOutTransitionConversionData>(anyStateCount, allocator);
             converter.AnyStateTransitions.Resize(anyStateCount);
 
             for (var i = 0; i < anyStateCount; i++)
             {
-                var anyTransitionGroup = stateMachineAsset.AnyStateTransitions[i];
-
-                // Find destination state index
-                var toStateIndex =
-                    (short)stateMachineAsset.States.ToList().FindIndex(s => s == anyTransitionGroup.ToState);
-                Assert.IsTrue(toStateIndex >= 0,
-                    $"Any State transition target {anyTransitionGroup.ToState?.name} not present on State Machine {stateMachineAsset.name}");
-
-                var anyTransition = new StateOutTransitionConversionData()
-                {
-                    ToStateIndex = toStateIndex,
-                    TransitionEndTime = anyTransitionGroup.HasEndTime ? Mathf.Max(0, anyTransitionGroup.EndTime) : -1f,
-                    TransitionDuration = anyTransitionGroup.TransitionDuration,
-                };
-
-                // Create bool transitions
-                {
-                    var boolTransitions = anyTransitionGroup.BoolTransitions.ToArray();
-                    anyTransition.BoolTransitions =
-                        new UnsafeList<BoolTransition>(boolTransitions.Length, allocator);
-                    anyTransition.BoolTransitions.Resize(boolTransitions.Length);
-
-                    for (var boolTransitionIndex = 0;
-                         boolTransitionIndex < anyTransition.BoolTransitions.Length;
-                         boolTransitionIndex++)
-                    {
-                        var boolTransitionAsset = boolTransitions[boolTransitionIndex];
-                        var parameterIndex = stateMachineAsset.Parameters
-                            .OfType<BoolParameterAsset>()
-                            .ToList()
-                            .FindIndex(p => p == boolTransitionAsset.BoolParameter);
-
-                        Assert.IsTrue(parameterIndex >= 0,
-                            $"({stateMachineAsset.name}) Couldn't find parameter {boolTransitionAsset.BoolParameter?.name}, for Any State transition");
-
-                        anyTransition.BoolTransitions[boolTransitionIndex] = new BoolTransition
-                        {
-                            ComparisonValue = boolTransitionAsset.ComparisonValue == BoolConditionComparison.True,
-                            ParameterIndex = parameterIndex
-                        };
-                    }
-                }
-
-                // Create int transitions
-                {
-                    var intTransitions = anyTransitionGroup.IntTransitions.ToArray();
-                    var intParameters = stateMachineAsset.Parameters
-                        .OfType<IntParameterAsset>()
-                        .ToList();
-                    anyTransition.IntTransitions =
-                        new UnsafeList<IntTransition>(intTransitions.Length, allocator);
-                    anyTransition.IntTransitions.Resize(intTransitions.Length);
-
-                    for (var intTransitionIndex = 0;
-                         intTransitionIndex < anyTransition.IntTransitions.Length;
-                         intTransitionIndex++)
-                    {
-                        var intTransitionAsset = intTransitions[intTransitionIndex];
-                        var parameterIndex = intParameters.FindIndex(p => p == intTransitionAsset.IntParameter);
-
-                        Assert.IsTrue(parameterIndex >= 0,
-                            $"({stateMachineAsset.name}) Couldn't find parameter {intTransitionAsset.IntParameter?.name}, for Any State transition");
-
-                        anyTransition.IntTransitions[intTransitionIndex] = new IntTransition
-                        {
-                            ParameterIndex = parameterIndex,
-                            ComparisonValue = intTransitionAsset.ComparisonValue,
-                            ComparisonMode = intTransitionAsset.ComparisonMode
-                        };
-                    }
-                }
-
-                converter.AnyStateTransitions[i] = anyTransition;
+                converter.AnyStateTransitions[i] = BuildFlattenedTransitionData(
+                    stateMachineAsset,
+                    stateMachineAsset.AnyStateTransitions[i],
+                    assetToIndex,
+                    allocator);
             }
+        }
 
-            if (anyStateCount > 0)
+        /// <summary>
+        /// Builds exit transition groups from flattened exit state info.
+        /// Each SubStateMachine with exit states gets its own group.
+        /// </summary>
+        private static void BuildExitTransitionGroups(
+            StateMachineAsset rootMachine,
+            List<ExitTransitionInfo> exitTransitionInfos,
+            Dictionary<AnimationStateAsset, int> assetToIndex,
+            ref StateMachineBlobConverter converter,
+            Allocator allocator)
+        {
+            var groupCount = exitTransitionInfos.Count;
+
+            converter.ExitTransitionGroups = new UnsafeList<ExitTransitionGroupConversionData>(groupCount, allocator);
+            converter.ExitTransitionGroups.Resize(groupCount);
+
+            for (var groupIndex = 0; groupIndex < groupCount; groupIndex++)
             {
-                Debug.Log($"[DMotion] Built {anyStateCount} Any State transition(s) for {stateMachineAsset.name}");
+                var info = exitTransitionInfos[groupIndex];
+
+                // Build exit state indices
+                var exitStateIndices = new UnsafeList<short>(info.ExitStateIndices.Count, allocator);
+                exitStateIndices.Resize(info.ExitStateIndices.Count);
+                for (var i = 0; i < info.ExitStateIndices.Count; i++)
+                {
+                    exitStateIndices[i] = (short)info.ExitStateIndices[i];
+                }
+
+                // Build exit transitions
+                var exitTransitions = new UnsafeList<StateOutTransitionConversionData>(info.ExitTransitions.Count, allocator);
+                exitTransitions.Resize(info.ExitTransitions.Count);
+                for (var i = 0; i < info.ExitTransitions.Count; i++)
+                {
+                    exitTransitions[i] = BuildFlattenedTransitionData(
+                        rootMachine,
+                        info.ExitTransitions[i],
+                        assetToIndex,
+                        allocator);
+                }
+
+                converter.ExitTransitionGroups[groupIndex] = new ExitTransitionGroupConversionData
+                {
+                    ExitStateIndices = exitStateIndices,
+                    ExitTransitions = exitTransitions
+                };
             }
         }
 
@@ -469,30 +423,18 @@ namespace DMotion.Authoring
             BlobAssetReference<SkeletonClipSetBlob> clipsBlob,
             BlobAssetReference<ClipEventsBlob> clipEventsBlob)
         {
-            //state machine data
+            var stateMachine = new AnimationStateMachine
             {
-                var stateMachine = new AnimationStateMachine
-                {
-                    StateMachineBlob = stateMachineBlob,
-                    ClipsBlob = clipsBlob,
-                    ClipEventsBlob = clipEventsBlob,
-                    CurrentState = StateMachineStateRef.Null
-                };
+                StateMachineBlob = stateMachineBlob,
+                ClipsBlob = clipsBlob,
+                ClipEventsBlob = clipEventsBlob,
+                CurrentState = StateMachineStateRef.Null
+            };
 
-                dstManager.AddComponent(entity, stateMachine);
+            dstManager.AddComponent(entity, stateMachine);
+            dstManager.AddBuffer<SingleClipState>(entity);
+            dstManager.AddBuffer<LinearBlendStateMachineState>(entity);
 
-                dstManager.AddBuffer<SingleClipState>(entity);
-                dstManager.AddBuffer<LinearBlendStateMachineState>(entity);
-
-                // Add StateMachineContext buffer with root context
-                var stackContext = dstManager.AddBuffer<StateMachineContext>(entity);
-                stackContext.Add(new StateMachineContext
-                {
-                    CurrentStateIndex = -1, // Will be set on first update
-                    ParentSubMachineIndex = -1, // Root level
-                    Level = 0
-                });
-            }
             AddStateMachineParameters(dstManager, entity, stateMachineAsset);
         }
 
@@ -501,30 +443,17 @@ namespace DMotion.Authoring
             BlobAssetReference<SkeletonClipSetBlob> clipsBlob,
             BlobAssetReference<ClipEventsBlob> clipEventsBlob)
         {
-            //state machine data
+            var stateMachine = new AnimationStateMachine
             {
-                var stateMachine = new AnimationStateMachine
-                {
-                    StateMachineBlob = stateMachineBlob,
-                    ClipsBlob = clipsBlob,
-                    ClipEventsBlob = clipEventsBlob,
-                    CurrentState = StateMachineStateRef.Null
-                };
+                StateMachineBlob = stateMachineBlob,
+                ClipsBlob = clipsBlob,
+                ClipEventsBlob = clipEventsBlob,
+                CurrentState = StateMachineStateRef.Null
+            };
 
-                dstManager.AddComponent(entity, stateMachine);
-
-                dstManager.AddBuffer<SingleClipState>(entity);
-                dstManager.AddBuffer<LinearBlendStateMachineState>(entity);
-
-                // Add StateMachineContext buffer with root context
-                var stackContext = dstManager.AddBuffer<StateMachineContext>(entity);
-                stackContext.Add(new StateMachineContext
-                {
-                    CurrentStateIndex = -1, // Will be set on first update
-                    ParentSubMachineIndex = -1, // Root level
-                    Level = 0
-                });
-            }
+            dstManager.AddComponent(entity, stateMachine);
+            dstManager.AddBuffer<SingleClipState>(entity);
+            dstManager.AddBuffer<LinearBlendStateMachineState>(entity);
         }
 
         public static void AddSingleClipStateComponents(EntityCommands dstManager, Entity ownerEntity, Entity entity,

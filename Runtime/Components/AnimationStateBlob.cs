@@ -4,12 +4,13 @@ namespace DMotion
 {
     /// <summary>
     /// Type of animation state.
+    /// At runtime, all states are either Single or LinearBlend.
+    /// SubStateMachine states are flattened during conversion (visual-only hierarchy).
     /// </summary>
     public enum StateType : byte
     {
         Single = 0,
         LinearBlend = 1,
-        SubStateMachine = 2, // NEW: State containing nested state machine
     }
 
     internal struct AnimationStateBlob
@@ -20,6 +21,13 @@ namespace DMotion
         internal float Speed;
         internal ushort SpeedParameterIndex; // Parameter index for speed multiplier (ushort.MaxValue = no parameter)
         internal BlobArray<StateOutTransitionGroup> Transitions;
+
+        /// <summary>
+        /// Index into StateMachineBlob.ExitTransitionGroups.
+        /// -1 means this state is not an exit state (no exit transitions to evaluate).
+        /// >= 0 means this state can trigger exit transitions from its parent sub-machine.
+        /// </summary>
+        internal short ExitTransitionGroupIndex;
     }
     
     internal struct SingleClipStateBlob
