@@ -42,9 +42,8 @@ namespace DMotion.Editor
                 view,
                 targetState => 
                 {
-                    // Cannot connect to self
-                    if (targetState == node.State) return false;
-                    // Cannot create duplicate transition
+                    // Self-transitions are allowed (e.g., re-trigger attack, reset idle)
+                    // Cannot create duplicate transition to the same target
                     return !node.State.OutTransitions.Any(t => t.ToState == targetState);
                 },
                 targetState => view.CreateTransitionBetweenStates(node.State, targetState)
