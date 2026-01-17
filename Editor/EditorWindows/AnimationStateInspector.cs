@@ -1,4 +1,4 @@
-﻿using DMotion.Authoring;
+using DMotion.Authoring;
 using UnityEditor;
 using UnityEngine;
 
@@ -24,22 +24,47 @@ namespace DMotion.Editor
     {
         private SerializedProperty blendParameterProperty;
         private SerializedProperty clipsProperty;
-        private ObjectReferencePopupSelector<FloatParameterAsset> blendParametersSelector;
+        private SerializedProperty intRangeMinProperty;
+        private SerializedProperty intRangeMaxProperty;
+        private SubAssetReferencePopupSelector<AnimationParameterAsset> blendParametersSelector;
 
         protected override void OnEnable()
         {
             base.OnEnable();
             blendParameterProperty = serializedObject.FindProperty(nameof(LinearBlendStateAsset.BlendParameter));
             clipsProperty = serializedObject.FindProperty(nameof(LinearBlendStateAsset.BlendClips));
-            blendParametersSelector =
-                new SubAssetReferencePopupSelector<FloatParameterAsset>(blendParameterProperty.serializedObject
-                    .targetObject);
+            intRangeMinProperty = serializedObject.FindProperty(nameof(LinearBlendStateAsset.IntRangeMin));
+            intRangeMaxProperty = serializedObject.FindProperty(nameof(LinearBlendStateAsset.IntRangeMax));
+            
+            // Support both Float and Int parameters for blending
+            blendParametersSelector = new SubAssetReferencePopupSelector<AnimationParameterAsset>(
+                blendParameterProperty.serializedObject.targetObject,
+                "Add a Float or Int parameter",
+                typeof(FloatParameterAsset), typeof(IntParameterAsset));
         }
 
         protected override void DrawChildProperties()
         {
             blendParametersSelector.OnGUI(EditorGUILayout.GetControlRect(), blendParameterProperty,
-                new GUIContent(blendParameterProperty.displayName));
+                new GUIContent("Blend Parameter"));
+            
+            // Show Int range settings if using an Int parameter
+            var linearBlendAsset = target as LinearBlendStateAsset;
+            if (linearBlendAsset != null && linearBlendAsset.UsesIntParameter)
+            {
+                EditorGUI.indentLevel++;
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.PropertyField(intRangeMinProperty, new GUIContent("Min"));
+                EditorGUILayout.PropertyField(intRangeMaxProperty, new GUIContent("Max"));
+                EditorGUILayout.EndHorizontal();
+                
+                // Show normalized range info
+                EditorGUILayout.HelpBox(
+                    $"Int value {linearBlendAsset.IntRangeMin} = 0.0, {linearBlendAsset.IntRangeMax} = 1.0", 
+                    MessageType.Info);
+                EditorGUI.indentLevel--;
+            }
+            
             EditorGUILayout.PropertyField(clipsProperty);
         }
     }

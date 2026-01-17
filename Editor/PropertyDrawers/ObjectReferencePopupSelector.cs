@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -20,12 +20,23 @@ namespace DMotion.Editor
     {
         private Object target;
         private Type[] filterTypes;
+        private string customNoOptionsMessage;
 
         internal SubAssetReferencePopupSelector(Object target, params Type[] filterTypes)
         {
             this.target = target;
             this.filterTypes = filterTypes;
         }
+
+        internal SubAssetReferencePopupSelector(Object target, string noOptionsMessage, params Type[] filterTypes)
+        {
+            this.target = target;
+            this.filterTypes = filterTypes;
+            this.customNoOptionsMessage = noOptionsMessage;
+        }
+
+        protected override string NoOptionsMessage => 
+            string.IsNullOrEmpty(customNoOptionsMessage) ? base.NoOptionsMessage : customNoOptionsMessage;
         
         protected override T[] CollectOptions()
         {
@@ -50,6 +61,9 @@ namespace DMotion.Editor
     {
         private T[] allAssets;
         private string[] allAssetNameOptions;
+        
+        internal bool HasOptions => Assets != null && Assets.Length > 0;
+        
         private T[] Assets
         {
             get
@@ -84,6 +98,11 @@ namespace DMotion.Editor
                 .ToArray();
         }
 
+        /// <summary>
+        /// Message to display when no options are available. Override to customize.
+        /// </summary>
+        protected virtual string NoOptionsMessage => "No options available";
+
         internal void OnGUI(Rect position, SerializedProperty property, GUIContent label)
         {
             if (label != GUIContent.none)
@@ -96,6 +115,17 @@ namespace DMotion.Editor
                 
                 position.xMax = prevXMax;
             }
+
+            // Show helpful message when no options are available
+            if (!HasOptions)
+            {
+                using (new EditorGUI.DisabledScope(true))
+                {
+                    EditorGUI.Popup(position, 0, new[] { NoOptionsMessage });
+                }
+                IsDirty = false;
+                return;
+            }
              
             var currEventName = property.objectReferenceValue as T;
             var index = Array.FindIndex(Assets, e => e == currEventName);
@@ -106,6 +136,6 @@ namespace DMotion.Editor
             }
 
             IsDirty = false;
-        }       
+        }
     }
 }

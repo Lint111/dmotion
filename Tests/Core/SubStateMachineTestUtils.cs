@@ -14,6 +14,8 @@ namespace DMotion.Tests
 
         /// <summary>
         /// Creates a sub-state machine with a nested state machine containing the specified states.
+        /// Note: Exit states are now defined on the NestedStateMachine.ExitStates, not on SubStateMachine.
+        /// Exit transitions are just OutTransitions on the SubStateMachine.
         /// </summary>
         public static SubStateMachineStateAsset AddSubStateMachine(
             this ref AnimationStateMachineAssetBuilder builder,
@@ -24,9 +26,10 @@ namespace DMotion.Tests
             subMachine.name = name;
             subMachine.NestedStateMachine = nestedMachine;
             subMachine.EntryState = nestedMachine.DefaultState;
-            subMachine.ExitStates = new List<AnimationStateAsset>();
-            subMachine.ExitTransitions = new List<StateOutTransition>();
             subMachine.OutTransitions = new List<StateOutTransition>();
+            
+            // Ensure nested machine has ExitStates list initialized
+            nestedMachine.ExitStates ??= new List<AnimationStateAsset>();
 
             builder.AddExistingState(subMachine);
             return subMachine;
@@ -50,6 +53,7 @@ namespace DMotion.Tests
             var nested = ScriptableObject.CreateInstance<StateMachineAsset>();
             nested.States = new List<AnimationStateAsset>();
             nested.Parameters = new List<AnimationParameterAsset>();
+            nested.ExitStates = new List<AnimationStateAsset>(); // Initialize ExitStates
 
             for (int i = 0; i < stateCount; i++)
             {
@@ -105,13 +109,12 @@ namespace DMotion.Tests
             if (currentDepth < maxDepth - 1)
             {
                 var nestedMachine = CreateNestedHierarchyRecursive(maxDepth, currentDepth + 1, namePrefix);
+                nestedMachine.ExitStates = new List<AnimationStateAsset>();
 
                 var subMachine = ScriptableObject.CreateInstance<SubStateMachineStateAsset>();
                 subMachine.name = $"{namePrefix}_{currentDepth}_SubMachine";
                 subMachine.NestedStateMachine = nestedMachine;
                 subMachine.EntryState = nestedMachine.DefaultState;
-                subMachine.ExitStates = new List<AnimationStateAsset>();
-                subMachine.ExitTransitions = new List<StateOutTransition>();
                 subMachine.OutTransitions = new List<StateOutTransition>();
                 machine.States.Add(subMachine);
             }
@@ -125,17 +128,20 @@ namespace DMotion.Tests
 
         /// <summary>
         /// Marks a state as an exit state for its parent sub-machine.
+        /// NEW ARCHITECTURE: Exit states are now stored on the nested StateMachineAsset, not on SubStateMachine.
         /// </summary>
         public static void MarkAsExitState(SubStateMachineStateAsset subMachine, AnimationStateAsset exitState)
         {
-            if (!subMachine.ExitStates.Contains(exitState))
+            subMachine.NestedStateMachine.ExitStates ??= new List<AnimationStateAsset>();
+            if (!subMachine.NestedStateMachine.ExitStates.Contains(exitState))
             {
-                subMachine.ExitStates.Add(exitState);
+                subMachine.NestedStateMachine.ExitStates.Add(exitState);
             }
         }
 
         /// <summary>
         /// Adds an exit transition from the sub-machine to a target state in the parent machine.
+        /// NEW ARCHITECTURE: Exit transitions are just OutTransitions on the SubStateMachine.
         /// </summary>
         public static StateOutTransition AddExitTransition(
             SubStateMachineStateAsset subMachine,
@@ -143,7 +149,8 @@ namespace DMotion.Tests
             float transitionDuration = 0.1f)
         {
             var transition = new StateOutTransition(targetState, transitionDuration);
-            subMachine.ExitTransitions.Add(transition);
+            subMachine.OutTransitions ??= new List<StateOutTransition>();
+            subMachine.OutTransitions.Add(transition);
             return transition;
         }
 
@@ -257,7 +264,9 @@ namespace DMotion.Tests
             Assert.IsTrue(subMachine.NestedStateMachine.States.Contains(subMachine.EntryState),
                 $"SubStateMachine '{subMachine.name}' EntryState '{subMachine.EntryState.name}' is not in NestedStateMachine");
 
-            foreach (var exitState in subMachine.ExitStates)
+            // Exit states are now on the nested machine
+            var exitStates = subMachine.NestedStateMachine.ExitStates ?? new List<AnimationStateAsset>();
+            foreach (var exitState in exitStates)
             {
                 Assert.IsTrue(subMachine.NestedStateMachine.States.Contains(exitState) ||
                               IsStateInNestedMachinesRecursive(subMachine.NestedStateMachine, exitState),

@@ -1,4 +1,4 @@
-﻿using DMotion.Authoring;
+using DMotion.Authoring;
 using Latios.Kinemation;
 using NUnit.Framework;
 using Unity.Collections;
@@ -158,9 +158,10 @@ namespace DMotion.Tests
             EntityManager manager, Entity entity,
             out int firstClipIndex, out int secondClipIndex)
         {
-            var blendParams = manager.GetBuffer<FloatParameter>(entity);
+            var floatParams = manager.GetBuffer<FloatParameter>(entity);
+            var intParams = manager.GetBuffer<IntParameter>(entity);
             LinearBlendStateUtils.ExtractLinearBlendVariablesFromStateMachine(
-                linearBlendState, blendParams,
+                linearBlendState, floatParams, intParams,
                 out var blendRatio, out var thresholds, out _);
             LinearBlendStateUtils.FindActiveClipIndexes(blendRatio, thresholds, out firstClipIndex,
                 out secondClipIndex);

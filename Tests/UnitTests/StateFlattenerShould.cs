@@ -50,9 +50,8 @@ namespace DMotion.Tests
             subMachine.name = "SubMachine";
             subMachine.NestedStateMachine = nested;
             subMachine.EntryState = nested.DefaultState;
-            subMachine.ExitStates = new List<AnimationStateAsset>();
-            subMachine.ExitTransitions = new List<StateOutTransition>();
             subMachine.OutTransitions = new List<StateOutTransition>();
+            nested.ExitStates = new List<AnimationStateAsset>();
             machine.States.Add(subMachine);
 
             // Act
@@ -116,13 +115,13 @@ namespace DMotion.Tests
             var innerSubMachine = ScriptableObject.CreateInstance<SubStateMachineStateAsset>();
             innerSubMachine.NestedStateMachine = deepNested;
             innerSubMachine.EntryState = deepNested.DefaultState;
-            innerSubMachine.ExitStates = new List<AnimationStateAsset>();
-            innerSubMachine.ExitTransitions = new List<StateOutTransition>();
             innerSubMachine.OutTransitions = new List<StateOutTransition>();
+            deepNested.ExitStates = new List<AnimationStateAsset>();
 
             var outerNested = ScriptableObject.CreateInstance<StateMachineAsset>();
             outerNested.States = new List<AnimationStateAsset> { innerSubMachine };
             outerNested.DefaultState = innerSubMachine;
+            outerNested.ExitStates = new List<AnimationStateAsset>();
 
             var outerSubMachine = ScriptableObject.CreateInstance<SubStateMachineStateAsset>();
             outerSubMachine.NestedStateMachine = outerNested;
@@ -170,9 +169,8 @@ namespace DMotion.Tests
             var subMachine = ScriptableObject.CreateInstance<SubStateMachineStateAsset>();
             subMachine.NestedStateMachine = nested;
             subMachine.EntryState = nested.States[1]; // Second state is entry
-            subMachine.ExitStates = new List<AnimationStateAsset>();
-            subMachine.ExitTransitions = new List<StateOutTransition>();
             subMachine.OutTransitions = new List<StateOutTransition>();
+            nested.ExitStates = new List<AnimationStateAsset>();
             machine.States.Add(subMachine);
 
             var (_, assetToIndex, _) = StateFlattener.FlattenStates(machine);
@@ -198,16 +196,17 @@ namespace DMotion.Tests
             rootState.name = "RootState";
             var machine = builder.Build();
 
+            // NEW ARCHITECTURE: Exit states on nested machine, exit transitions as OutTransitions
+            nested.ExitStates = new List<AnimationStateAsset> { nested.States[1] }; // Second state is exit
+            
             var subMachine = ScriptableObject.CreateInstance<SubStateMachineStateAsset>();
             subMachine.name = "SubMachine";
             subMachine.NestedStateMachine = nested;
             subMachine.EntryState = nested.States[0];
-            subMachine.ExitStates = new List<AnimationStateAsset> { nested.States[1] }; // Second state is exit
-            subMachine.ExitTransitions = new List<StateOutTransition>
+            subMachine.OutTransitions = new List<StateOutTransition>
             {
-                new StateOutTransition(rootState, 0.1f)
+                new StateOutTransition(rootState, 0.1f) // Exit transition
             };
-            subMachine.OutTransitions = new List<StateOutTransition>();
             machine.States.Add(subMachine);
 
             // Act
@@ -229,15 +228,16 @@ namespace DMotion.Tests
             var rootState = builder.AddState<SingleClipStateAsset>();
             var machine = builder.Build();
 
+            // NEW ARCHITECTURE: Exit states on nested machine
+            nested.ExitStates = new List<AnimationStateAsset> { nested.States[2] }; // Third state is exit
+            
             var subMachine = ScriptableObject.CreateInstance<SubStateMachineStateAsset>();
             subMachine.NestedStateMachine = nested;
             subMachine.EntryState = nested.States[0];
-            subMachine.ExitStates = new List<AnimationStateAsset> { nested.States[2] }; // Third state is exit
-            subMachine.ExitTransitions = new List<StateOutTransition>
+            subMachine.OutTransitions = new List<StateOutTransition>
             {
-                new StateOutTransition(rootState, 0.1f)
+                new StateOutTransition(rootState, 0.1f) // Exit transition
             };
-            subMachine.OutTransitions = new List<StateOutTransition>();
             machine.States.Add(subMachine);
 
             // Act
@@ -282,11 +282,11 @@ namespace DMotion.Tests
             var machine = ScriptableObject.CreateInstance<StateMachineAsset>();
             machine.States = new List<AnimationStateAsset>();
 
+            nested.ExitStates = new List<AnimationStateAsset>();
+            
             var subMachine = ScriptableObject.CreateInstance<SubStateMachineStateAsset>();
             subMachine.NestedStateMachine = nested;
             subMachine.EntryState = nested.States[1]; // Second state is entry
-            subMachine.ExitStates = new List<AnimationStateAsset>();
-            subMachine.ExitTransitions = new List<StateOutTransition>();
             subMachine.OutTransitions = new List<StateOutTransition>();
 
             machine.States.Add(subMachine);
@@ -326,12 +326,11 @@ namespace DMotion.Tests
             var nested = ScriptableObject.CreateInstance<StateMachineAsset>();
             nested.States = new List<AnimationStateAsset> { nestedState, nestedState2 };
             nested.DefaultState = nestedState;
+            nested.ExitStates = new List<AnimationStateAsset>();
 
             var subMachine = ScriptableObject.CreateInstance<SubStateMachineStateAsset>();
             subMachine.NestedStateMachine = nested;
             subMachine.EntryState = nestedState;
-            subMachine.ExitStates = new List<AnimationStateAsset>();
-            subMachine.ExitTransitions = new List<StateOutTransition>();
             subMachine.OutTransitions = new List<StateOutTransition>();
 
             var machine = ScriptableObject.CreateInstance<StateMachineAsset>();
@@ -388,11 +387,11 @@ namespace DMotion.Tests
             var rootState = builder.AddState<SingleClipStateAsset>();
             var machine = builder.Build();
 
+            emptyNested.ExitStates = new List<AnimationStateAsset>();
+            
             var subMachine = ScriptableObject.CreateInstance<SubStateMachineStateAsset>();
             subMachine.NestedStateMachine = emptyNested;
             subMachine.EntryState = null;
-            subMachine.ExitStates = new List<AnimationStateAsset>();
-            subMachine.ExitTransitions = new List<StateOutTransition>();
             subMachine.OutTransitions = new List<StateOutTransition>();
             machine.States.Add(subMachine);
 

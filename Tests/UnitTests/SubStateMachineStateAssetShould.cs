@@ -173,35 +173,35 @@ namespace DMotion.Tests
         [Test]
         public void ExitStates_CanBeConfigured()
         {
-            // Arrange
+            // Arrange - NEW ARCHITECTURE: ExitStates are on the nested StateMachineAsset
             var nested = SubStateMachineTestUtils.CreateNestedStateMachine(3);
             var subMachine = CreateSubStateMachine(nested, nested.States[0]);
 
-            // Act
-            subMachine.ExitStates.Add(nested.States[2]);
+            // Act - Add to nested machine's ExitStates
+            nested.ExitStates.Add(nested.States[2]);
 
             // Assert
-            Assert.AreEqual(1, subMachine.ExitStates.Count);
-            Assert.AreEqual(nested.States[2], subMachine.ExitStates[0]);
+            Assert.AreEqual(1, nested.ExitStates.Count);
+            Assert.AreEqual(nested.States[2], nested.ExitStates[0]);
         }
 
         [Test]
         public void ExitTransitions_CanBeConfigured()
         {
-            // Arrange
+            // Arrange - NEW ARCHITECTURE: Exit transitions are OutTransitions on SubStateMachine
             var nested = SubStateMachineTestUtils.CreateNestedStateMachine(2);
             var parentState = ScriptableObject.CreateInstance<SingleClipStateAsset>();
 
             var subMachine = CreateSubStateMachine(nested, nested.States[0]);
 
-            // Act
+            // Act - Exit transitions are just OutTransitions
             var exitTransition = new StateOutTransition(parentState, 0.15f);
-            subMachine.ExitTransitions.Add(exitTransition);
+            subMachine.OutTransitions.Add(exitTransition);
 
             // Assert
-            Assert.AreEqual(1, subMachine.ExitTransitions.Count);
-            Assert.AreEqual(parentState, subMachine.ExitTransitions[0].ToState);
-            Assert.AreEqual(0.15f, subMachine.ExitTransitions[0].TransitionDuration);
+            Assert.AreEqual(1, subMachine.OutTransitions.Count);
+            Assert.AreEqual(parentState, subMachine.OutTransitions[0].ToState);
+            Assert.AreEqual(0.15f, subMachine.OutTransitions[0].TransitionDuration);
         }
 
         #endregion
@@ -347,11 +347,12 @@ namespace DMotion.Tests
             StateMachineAsset nestedMachine,
             AnimationStateAsset entryState)
         {
+            // NEW ARCHITECTURE: ExitStates are on the nested machine, not on SubStateMachine
+            nestedMachine.ExitStates ??= new List<AnimationStateAsset>();
+            
             var subMachine = ScriptableObject.CreateInstance<SubStateMachineStateAsset>();
             subMachine.NestedStateMachine = nestedMachine;
             subMachine.EntryState = entryState;
-            subMachine.ExitStates = new List<AnimationStateAsset>();
-            subMachine.ExitTransitions = new List<StateOutTransition>();
             subMachine.OutTransitions = new List<StateOutTransition>();
             return subMachine;
         }

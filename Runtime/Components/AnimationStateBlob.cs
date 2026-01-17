@@ -41,5 +41,21 @@ namespace DMotion
         internal BlobArray<float> SortedClipThresholds;
         internal BlobArray<float> SortedClipSpeeds;
         internal ushort BlendParameterIndex;
+        
+        /// <summary>
+        /// If true, BlendParameterIndex refers to an Int parameter instead of Float.
+        /// The Int value is normalized using IntRangeMin/Max.
+        /// </summary>
+        internal bool UsesIntParameter;
+        
+        /// <summary>
+        /// For Int parameters: minimum value (maps to 0.0 blend ratio).
+        /// </summary>
+        internal int IntRangeMin;
+        
+        /// <summary>
+        /// For Int parameters: maximum value (maps to 1.0 blend ratio).
+        /// </summary>
+        internal int IntRangeMax;
     }
 }

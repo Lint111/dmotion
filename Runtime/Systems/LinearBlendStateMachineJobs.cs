@@ -1,4 +1,4 @@
-﻿using Unity.Burst;
+using Unity.Burst;
 using Unity.Entities;
 
 namespace DMotion
@@ -12,7 +12,8 @@ namespace DMotion
             ref DynamicBuffer<ClipSampler> clipSamplers,
             in DynamicBuffer<AnimationState> animationStates,
             in DynamicBuffer<LinearBlendStateMachineState> linearBlendStates,
-            in DynamicBuffer<FloatParameter> blendParameters
+            in DynamicBuffer<FloatParameter> floatParameters,
+            in DynamicBuffer<IntParameter> intParameters
         )
         {
             for (var i = 0; i < linearBlendStates.Length; i++)
@@ -21,7 +22,7 @@ namespace DMotion
                 {
                     var linearBlendState = linearBlendStates[i];
                     LinearBlendStateUtils.ExtractLinearBlendVariablesFromStateMachine(linearBlendState,
-                        blendParameters, out var blendRatio, out var thresholds, out var speeds);
+                        floatParameters, intParameters, out var blendRatio, out var thresholds, out var speeds);
 
                     LinearBlendStateUtils.UpdateSamplers(
                         DeltaTime,

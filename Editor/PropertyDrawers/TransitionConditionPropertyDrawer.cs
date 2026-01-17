@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using DMotion.Authoring;
 using UnityEditor;
@@ -10,13 +10,21 @@ namespace DMotion.Editor
     internal class TransitionConditionPropertyDrawer : PropertyDrawer
     {
         private ObjectReferencePopupSelector<AnimationParameterAsset> parameterPopupSelector;
+        private UnityEngine.Object cachedTarget;
 
         public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
         {
-            if (parameterPopupSelector == null)
+            // Recreate selector if target changed (drawer instances are reused)
+            // Parameters are sub-assets of StateMachineAsset, not AnimationStateAsset
+            // So we need to find the main asset (StateMachineAsset) from the sub-asset
+            var currentTarget = property.serializedObject.targetObject;
+            var mainAsset = GetMainAsset(currentTarget);
+            
+            if (parameterPopupSelector == null || cachedTarget != mainAsset)
             {
+                cachedTarget = mainAsset;
                 parameterPopupSelector =
-                    new SubAssetReferencePopupSelector<AnimationParameterAsset>(property.serializedObject.targetObject,
+                    new SubAssetReferencePopupSelector<AnimationParameterAsset>(mainAsset,
                         typeof(BoolParameterAsset),
                         typeof(IntParameterAsset));
             }
@@ -27,7 +35,15 @@ namespace DMotion.Editor
 
             if (parameterProperty.objectReferenceValue == null)
             {
-                parameterPopupSelector.OnGUI(position, parameterProperty, GUIContent.none);
+                // Check if there are any parameters available
+                if (!parameterPopupSelector.HasOptions)
+                {
+                    EditorGUI.LabelField(position, "No Bool/Int parameters defined", EditorStyles.helpBox);
+                }
+                else
+                {
+                    parameterPopupSelector.OnGUI(position, parameterProperty, GUIContent.none);
+                }
             }
             else
             {
@@ -103,6 +119,16 @@ namespace DMotion.Editor
         public override float GetPropertyHeight(SerializedProperty property, GUIContent label)
         {
             return EditorGUIUtility.singleLineHeight;
+        }
+
+        private static UnityEngine.Object GetMainAsset(UnityEngine.Object obj)
+        {
+            var path = AssetDatabase.GetAssetPath(obj);
+            if (string.IsNullOrEmpty(path))
+                return obj;
+            
+            var mainAsset = AssetDatabase.LoadMainAssetAtPath(path);
+            return mainAsset != null ? mainAsset : obj;
         }
     }
 }

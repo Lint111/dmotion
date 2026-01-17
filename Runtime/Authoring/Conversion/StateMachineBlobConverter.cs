@@ -33,6 +33,9 @@ namespace DMotion.Authoring
     {
         internal UnsafeList<ClipIndexWithThreshold> ClipsWithThresholds;
         internal ushort BlendParameterIndex;
+        internal bool UsesIntParameter;
+        internal int IntRangeMin;
+        internal int IntRangeMax;
     }
 
     internal struct StateOutTransitionConversionData
@@ -88,8 +91,8 @@ namespace DMotion.Authoring
             ref var root = ref builder.ConstructRoot<StateMachineBlob>();
             root.DefaultStateIndex = DefaultStateIndex;
 
-            // Only call ConstructFromNativeArray if we have items (Ptr may be null for empty lists)
-            if (SingleClipStates.Length > 0 && SingleClipStates.Ptr != null)
+            // Only call ConstructFromNativeArray if we have items
+            if (SingleClipStates.IsCreated && SingleClipStates.Length > 0)
             {
                 builder.ConstructFromNativeArray(ref root.SingleClipStates, SingleClipStates.Ptr, SingleClipStates.Length);
             }
@@ -126,7 +129,7 @@ namespace DMotion.Authoring
                             TransitionDuration = transitionConversionData.TransitionDuration
                         };
 
-                        if (transitionConversionData.BoolTransitions.Length > 0 && transitionConversionData.BoolTransitions.Ptr != null)
+                        if (transitionConversionData.BoolTransitions.IsCreated && transitionConversionData.BoolTransitions.Length > 0)
                             builder.ConstructFromNativeArray(
                                 ref transitions[transitionIndex].BoolTransitions,
                                 transitionConversionData.BoolTransitions.Ptr,
@@ -134,7 +137,7 @@ namespace DMotion.Authoring
                         else
                             builder.Allocate(ref transitions[transitionIndex].BoolTransitions, 0);
 
-                        if (transitionConversionData.IntTransitions.Length > 0 && transitionConversionData.IntTransitions.Ptr != null)
+                        if (transitionConversionData.IntTransitions.IsCreated && transitionConversionData.IntTransitions.Length > 0)
                             builder.ConstructFromNativeArray(
                                 ref transitions[transitionIndex].IntTransitions,
                                 transitionConversionData.IntTransitions.Ptr,
@@ -152,7 +155,12 @@ namespace DMotion.Authoring
                 {
                     var linearBlendStateConversionData = LinearBlendStates[i];
                     linearBlendStates[i] = new LinearBlendStateBlob
-                        { BlendParameterIndex = linearBlendStateConversionData.BlendParameterIndex };
+                    { 
+                        BlendParameterIndex = linearBlendStateConversionData.BlendParameterIndex,
+                        UsesIntParameter = linearBlendStateConversionData.UsesIntParameter,
+                        IntRangeMin = linearBlendStateConversionData.IntRangeMin,
+                        IntRangeMax = linearBlendStateConversionData.IntRangeMax
+                    };
 
                     //TODO: Actually sort things first
                     //Make sure clips are sorted by threshold
@@ -186,7 +194,7 @@ namespace DMotion.Authoring
                         TransitionDuration = anyTransitionConversionData.TransitionDuration
                     };
 
-                    if (anyTransitionConversionData.BoolTransitions.Length > 0 && anyTransitionConversionData.BoolTransitions.Ptr != null)
+                    if (anyTransitionConversionData.BoolTransitions.IsCreated && anyTransitionConversionData.BoolTransitions.Length > 0)
                         builder.ConstructFromNativeArray(
                             ref anyStateTransitions[i].BoolTransitions,
                             anyTransitionConversionData.BoolTransitions.Ptr,
@@ -194,7 +202,7 @@ namespace DMotion.Authoring
                     else
                         builder.Allocate(ref anyStateTransitions[i].BoolTransitions, 0);
 
-                    if (anyTransitionConversionData.IntTransitions.Length > 0 && anyTransitionConversionData.IntTransitions.Ptr != null)
+                    if (anyTransitionConversionData.IntTransitions.IsCreated && anyTransitionConversionData.IntTransitions.Length > 0)
                         builder.ConstructFromNativeArray(
                             ref anyStateTransitions[i].IntTransitions,
                             anyTransitionConversionData.IntTransitions.Ptr,
@@ -212,7 +220,7 @@ namespace DMotion.Authoring
                     var groupData = ExitTransitionGroups[groupIndex];
 
                     // Build exit state indices
-                    if (groupData.ExitStateIndices.Length > 0 && groupData.ExitStateIndices.Ptr != null)
+                    if (groupData.ExitStateIndices.IsCreated && groupData.ExitStateIndices.Length > 0)
                         builder.ConstructFromNativeArray(
                             ref exitGroups[groupIndex].ExitStateIndices,
                             groupData.ExitStateIndices.Ptr,
@@ -232,7 +240,7 @@ namespace DMotion.Authoring
                             TransitionDuration = transitionData.TransitionDuration
                         };
 
-                        if (transitionData.BoolTransitions.Length > 0 && transitionData.BoolTransitions.Ptr != null)
+                        if (transitionData.BoolTransitions.IsCreated && transitionData.BoolTransitions.Length > 0)
                             builder.ConstructFromNativeArray(
                                 ref exitTransitions[transitionIndex].BoolTransitions,
                                 transitionData.BoolTransitions.Ptr,
@@ -240,7 +248,7 @@ namespace DMotion.Authoring
                         else
                             builder.Allocate(ref exitTransitions[transitionIndex].BoolTransitions, 0);
 
-                        if (transitionData.IntTransitions.Length > 0 && transitionData.IntTransitions.Ptr != null)
+                        if (transitionData.IntTransitions.IsCreated && transitionData.IntTransitions.Length > 0)
                             builder.ConstructFromNativeArray(
                                 ref exitTransitions[transitionIndex].IntTransitions,
                                 transitionData.IntTransitions.Ptr,

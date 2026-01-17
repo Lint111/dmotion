@@ -60,7 +60,7 @@ The **easiest way** to use sub-state machines is through Unity's AnimatorControl
 | Sub-State Machine | `SubStateMachineStateAsset` |
 | Default State | Entry State |
 | Nested States | Recursive `StateMachineAsset` |
-| Entry Transitions | Exit Transitions (future) |
+| Exit Transitions | Exit Transitions (fully supported) |
 | Unlimited Depth | ✅ Fully supported |
 
 ---
@@ -104,87 +104,175 @@ For custom workflows without Unity AnimatorController.
    Attack → Block (in CombatStateMachine)
    ```
 
-3. Exit transitions (when implemented):
-   ```
-   Combat → Idle (on bool "InCombat" = false)
-   ```
+3. Configure **exit transitions** (see Exit Transitions section below)
+
+---
+
+## Exit Transitions
+
+Exit transitions allow states within a SubStateMachine to trigger transitions back to the parent level. This is essential for creating self-contained behavior groups.
+
+### Understanding Exit Transitions
+
+DMotion uses a **visual-only flattening** approach (like Unity Mecanim):
+- **Editor time:** Hierarchical structure with SubStateMachines
+- **Runtime:** All states flattened to a single array for efficiency
+
+Exit transitions are evaluated when the current state is marked as an "exit state" for a SubStateMachine.
+
+### Configuring Exit Transitions
+
+#### Step 1: Mark Exit States
+
+In the SubStateMachineStateAsset inspector:
+
+1. Select the SubStateMachine in the graph or hierarchy
+2. In the **Exit Configuration** section:
+   - Click **"Add Exit State"** dropdown
+   - Select states that can trigger exits (e.g., "AttackFinished", "BlockEnd")
+3. These states will now be able to trigger exit transitions
+
+#### Step 2: Add Exit Transitions
+
+Still in the SubStateMachineStateAsset inspector:
+
+1. Expand **"Exit Transitions"** list
+2. Click **"+"** to add a transition
+3. Configure:
+   - **To State**: Target state in parent level (e.g., "Idle")
+   - **Transition Duration**: Blend time
+   - **Conditions**: Bool/Int parameters that must be true
+
+#### Step 3: Visualize in Graph View
+
+Exit transitions appear as **orange edges** in the graph view:
+- Regular transitions: White/gray edges
+- Exit transitions: Orange edges from SubStateMachine to target
+
+### Exit Transition Example
+
+```
+Combat (SubStateMachine)
+├─ Attack (entry)
+├─ Block
+├─ Dodge
+└─ CombatIdle (exit state)
+
+Exit States: [CombatIdle]
+Exit Transitions:
+  CombatIdle → Idle (when "InCombat" = false, duration: 0.2s)
+  CombatIdle → Walk (when "Speed" > 0.1, duration: 0.15s)
+```
+
+When an entity is in the "CombatIdle" state and the "InCombat" parameter becomes false, the exit transition fires and the entity transitions to "Idle".
+
+### Transition Priority
+
+Transitions are evaluated in this order:
+1. **Any State transitions** (highest priority)
+2. **Regular state transitions** (from current state)
+3. **Exit transitions** (if current state is an exit state)
+
+### Multiple Exit States
+
+You can have multiple exit states in a single SubStateMachine:
+
+```
+Locomotion (SubStateMachine)
+├─ Walk
+├─ Run  
+├─ Sprint
+├─ StopWalk (exit state) → Idle
+├─ StopRun (exit state) → Idle
+└─ StopSprint (exit state) → Idle
+```
+
+Each exit state can have different exit transitions with different conditions.
 
 ---
 
 ## How It Works: Runtime Behavior
 
+### Visual-Only Flattening
+
+At conversion time, SubStateMachines are **flattened**:
+
+```
+Editor Structure:              Runtime Blob:
+Root                           States[0] = Idle
+├─ Idle                        States[1] = Walk
+├─ Locomotion (Sub)            States[2] = Run
+│  ├─ Walk                     States[3] = Sprint
+│  ├─ Run                      States[4] = Attack
+│  └─ Sprint                   States[5] = Block
+└─ Combat (Sub)                States[6] = Dodge
+   ├─ Attack
+   ├─ Block
+   └─ Dodge
+```
+
+This means:
+- **No runtime stack** - all states are peers
+- **Single array traversal** - O(1) state lookup
+- **Efficient memory** - no nested blob structures
+
 ### Entering a Sub-State Machine
 
 When a transition targets a `SubStateMachineStateAsset`:
 
-1. **Push Context**: Current position saved to stack
-2. **Enter Nested Machine**: Transition to entry state
-3. **Continue Evaluation**: Normal transition logic applies inside
-
-```
-Current Stack: [Root:Idle]
-Transition to Combat →
-Current Stack: [Root:Combat, Combat:Attack]
-```
+1. The transition is **redirected to the entry state**
+2. Example: "Idle → Combat" becomes "Idle → Attack" (if Attack is entry state)
 
 ### Navigating Within Sub-Machine
 
-- Transitions work normally inside the sub-machine
-- Parameters are **shared** across all levels (root and nested)
-- Any State transitions work at each level independently
+- States inside the SubStateMachine transition normally
+- Parameters are **shared** across all levels
+- Any State transitions work globally
 
-```
-[Root:Combat, Combat:Attack]
-Transition Attack → Block →
-[Root:Combat, Combat:Block]
-```
+### Exiting via Exit Transitions
 
-### Exiting Sub-State Machine (Future)
+When the current state is marked as an exit state:
 
-Exit transitions will pop the stack:
-
-```
-[Root:Combat, Combat:Block]
-Exit transition to Idle →
-[Root:Idle]
-```
-
-> ⚠️ **Note**: Exit transitions are not yet implemented in runtime evaluation. Sub-machines can be entered but not exited via transitions. Current workaround: Use parameter-based transitions at parent level.
+1. After checking regular transitions, exit transitions are evaluated
+2. If conditions match, transition fires to target state in parent
+3. Exit transitions use the same condition system as regular transitions
 
 ---
 
 ## Technical Details
 
-### Architecture: DMotion-First
+### Architecture: Visual-Only Flattening
 
-Sub-state machines are **natively supported** in DMotion runtime:
+Sub-state machines follow Unity Mecanim's pattern:
 
-- ✅ No name mangling or flattening
-- ✅ Unlimited nesting depth (relationship-based)
-- ✅ Efficient stack-based hierarchy tracking
-- ✅ Recursive blob building
+- ✅ **Visual-only hierarchy** - organization at edit time
+- ✅ **Flat runtime blob** - no nested structures
+- ✅ **Exit transition groups** - stored efficiently in blob
+- ✅ **Single array traversal** - O(1) state access
 
 ### Data Structures
 
-**Runtime**:
-- `StateMachineContext` (IBufferElementData): Stack of current positions
-- `SubStateMachineBlob`: Recursive blob structure
-- `StateType.SubStateMachine`: New state type
+**Runtime (StateMachineBlob)**:
+- `States[]`: Flat array of all leaf states
+- `ExitTransitionGroups[]`: Exit transitions per SubStateMachine
+- `AnimationStateBlob.ExitTransitionGroupIndex`: Links exit states to groups
 
 **Authoring**:
-- `SubStateMachineStateAsset`: Authoring asset
-- Recursive `StateMachineAsset` references
+- `SubStateMachineStateAsset`: Visual hierarchy container
+- `StateMachineAsset`: Nested machine reference
+- `ExitStates`: States that can trigger exits
+- `ExitTransitions`: Transition conditions and targets
 
 ### Performance
 
 **Memory**:
-- Stack context: ~12 bytes per nesting level
-- Typical usage (1-2 levels): ~24-48 bytes per entity
-- Blobs: Shared immutable data (no per-entity cost)
+- Flat blob: No per-entity hierarchy overhead
+- Exit groups: Shared across all entities
+- Typical overhead: ~0 bytes per entity (blob is shared)
 
 **CPU**:
-- Hierarchy traversal: O(depth) pointer chasing
-- Typical depth 1-3: negligible overhead (~0.01ms)
+- Flat array access: O(1)
+- Exit transition check: Only if current state is exit state
 - Burst-compiled for efficiency
 
 ---
@@ -232,26 +320,26 @@ Parameters are shared across all levels automatically.
 
 ---
 
-## Limitations & Roadmap
+## Limitations & Known Issues
 
 ### Current Limitations
 
-1. **No Exit Transitions**: Can't exit sub-machines via "Up" node
-   - **Workaround**: Use parent-level parameter transitions
+1. **No Nested Graph Navigation**: Can't double-click to enter SubStateMachine in graph view
+   - **Workaround**: Use Unity AnimatorController for visual editing, or edit nested StateMachineAsset directly
 
-2. **No Visual Editor Enhancements**: Sub-machines render as regular states
-   - **Workaround**: Use Unity AnimatorController for visual editing
+2. **No Breadcrumb UI**: Can't see "Root > Combat > Attack" path in graph
+   - **Workaround**: Use `StateMachineAsset.GetStatePath()` in code
 
-3. **No Breadcrumb UI**: Can't see "Root > Combat > Attack" in inspector
-   - **Workaround**: Check StateMachineContext buffer manually
+3. **Exit Transitions at Parent Level Only**: Exit transitions go to sibling states, not grandparent
+   - **Design Choice**: Keeps flattening simple and predictable
 
-### Planned Features
+### Completed Features
 
-- [ ] Exit transition runtime support
-- [ ] Visual hierarchy in DMotion editor
-- [ ] Current state path display
-- [ ] Circular reference validation
-- [ ] Performance profiling tools
+- [x] Exit transition runtime support (fully implemented)
+- [x] Exit state custom inspector with picker UI
+- [x] Orange exit transition edges in graph view
+- [x] Validation warnings for misconfigured SubStateMachines
+- [x] API reference documentation
 
 ---
 
@@ -328,7 +416,7 @@ A: Yes! Parameters are shared across all levels automatically.
 A: Yes! Recursion is fully supported.
 
 **Q: How do I exit a sub-machine?**
-A: Currently: Use parent-level transitions. Future: Exit transitions will be supported.
+A: Mark states as "exit states" in the SubStateMachine inspector, then add exit transitions with conditions. When conditions are met, the entity transitions to the target state.
 
 **Q: Does this work with Any State transitions?**
 A: Yes! Any State transitions work at each level independently.
@@ -338,14 +426,65 @@ A: Minimal. Each level adds ~12 bytes and ~0.001ms traversal time.
 
 ---
 
+---
+
+## Testing SubStateMachines in the Editor
+
+### Quick Test: Create a SubStateMachine
+
+1. **Create a State Machine Asset**
+   - Right-click in Project: `Create > DMotion > State Machine`
+   - Name it "TestStateMachine"
+
+2. **Open the State Machine Editor**
+   - Double-click the StateMachineAsset
+   - Or: `Window > DMotion > State Machine Editor`
+
+3. **Create a SubStateMachine**
+   - Right-click in graph: `New Sub-State Machine`
+   - Name it "Combat"
+
+4. **Create a Nested State Machine**
+   - Right-click in Project: `Create > DMotion > State Machine`
+   - Name it "CombatStateMachine"
+   - Add states: "Attack", "Block", "Dodge"
+   - Set "Attack" as Default State
+
+5. **Configure the SubStateMachine**
+   - Select the "Combat" node in graph
+   - In Inspector:
+     - Assign "CombatStateMachine" to **Nested State Machine**
+     - **Entry State** dropdown: Select "Attack"
+     - **Add Exit State**: Select "Dodge" (or any state)
+     - **Exit Transitions**: Add transition to "Idle" with conditions
+
+6. **Add States at Root Level**
+   - Right-click: `New State` → Name it "Idle"
+   - Create transition from "Idle" to "Combat"
+
+7. **Verify Exit Transitions**
+   - You should see **orange edges** from "Combat" to exit targets
+   - Select the orange edge to see the SubStateMachine in inspector
+
+### Verify in Play Mode
+
+1. Create a test scene with an entity using the state machine
+2. Add parameters needed for transitions
+3. Enter Play Mode
+4. Use Entity Inspector to watch state changes
+5. Trigger exit transition conditions and observe state change
+
+---
+
 ## Support & Feedback
 
 **Issues**: GitHub Issues
 **Docs**: `Docs/SubStateMachines_*.md`
 **Tests**: `Tests/UnitTests/SubStateMachine*.cs`
 
-**Architecture Docs**:
+**Documentation**:
+- `SubStateMachines_API_REFERENCE.md` - Complete API documentation
 - `SubStateMachines_ArchitectureAnalysis.md` - Deep dive into design
-- `SubStateMachines_DMotionFirst_Strategy.md` - Implementation approach
 - `SubStateMachines_QUICKSTART.md` - Developer quick start
+- `SubStateMachines_FEATURE_STATUS.md` - Current implementation status
 

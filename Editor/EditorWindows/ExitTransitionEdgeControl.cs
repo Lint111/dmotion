@@ -4,39 +4,38 @@ using UnityEngine.UIElements;
 
 namespace DMotion.Editor
 {
-    //TODO: This class needs some clean up pass. We need a Vector2.Rotate function and stop using 4x4 matrixes. Control aren't quite centered as well
-    public class TransitionEdgeControl : EdgeControl
+    /// <summary>
+    /// Custom edge control for exit transitions with distinctive orange appearance.
+    /// Uses the same rendering as TransitionEdgeControl but with orange color.
+    /// </summary>
+    public class ExitTransitionEdgeControl : EdgeControl
     {
         internal TransitionEdge Edge;
         
-        /// <summary>
-        /// Optional color override. When set, uses this instead of Edge.defaultColor.
-        /// Set to null to use default color.
-        /// </summary>
-        internal Color? ColorOverride;
+        // Exit transition color (orange)
+        private static readonly Color ExitTransitionColor = new Color(1f, 0.6f, 0.1f, 1f);
 
-        //rectangle for line + 3 triangle for arrow
-        private Vertex[] vertices = new Vertex[4 + 3*3];
+        // Rectangle for line + 3 triangles for arrow
+        private Vertex[] vertices = new Vertex[4 + 3 * 3];
 
-        static ushort[] indices =
+        private static readonly ushort[] indices =
         {
-            //rectangle (line)
+            // Rectangle (line)
             0, 1, 2, 2, 3, 0,
-            //arrows
+            // Arrows
             4, 5, 6,
             7, 8, 9,
             10, 11, 12
         };
 
         private Vector2[] localRect = new Vector2[4];
-
         private Matrix4x4 edgeLtw;
         private Matrix4x4 edgeInverseLtw;
-        protected bool isDirty = true;
+        private bool isDirty = true;
         private Vector2 TopLeft => localRect[1];
         private Vector2 BottomRight => localRect[3];
 
-        public TransitionEdgeControl()
+        public ExitTransitionEdgeControl()
         {
             generateVisualContent = DrawEdge;
         }
@@ -60,15 +59,13 @@ namespace DMotion.Editor
 
                 if (!Edge.isGhostEdge && Edge.input != null && Edge.output != null)
                 {
-                    //We shift the lines on their perpendicular direction. This is reversed transitions (i.e A -> B and B -> A) don't overlap
-                    {
-                        const float shiftAmount = 8f;
-                        var shiftDir = ((Vector2)(Quaternion.Euler(0, 0, 90) * v)).normalized;
-                        lineStart += shiftDir * shiftAmount;
-                    }
+                    // Shift lines on perpendicular direction so reversed transitions don't overlap
+                    const float shiftAmount = 8f;
+                    var shiftDir = ((Vector2)(Quaternion.Euler(0, 0, 90) * v)).normalized;
+                    lineStart += shiftDir * shiftAmount;
                 }
 
-                //Set line vertices
+                // Set line vertices
                 {
                     edgeLtw = Matrix4x4.TRS(lineStart, Quaternion.Euler(0, 0, angle), Vector3.one);
                     edgeInverseLtw = edgeLtw.inverse;
@@ -87,7 +84,7 @@ namespace DMotion.Editor
                     }
                 }
 
-                //Set arrow vertices (1 transition = 1 arrow, >1 transitions = 3 arrows)
+                // Set arrow vertices (1 transition = 1 arrow, >1 transitions = 3 arrows)
                 {
                     const float arrowHalfHeight = 8f;
                     const float arrowHalfWidth = 7f;
@@ -96,7 +93,7 @@ namespace DMotion.Editor
                     {
                         var arrowIndex = 4 + 3 * i;
                         var offset = arrowOffset * i;
-                        var midPoint = lineStart + v * 0.5f + v.normalized*offset;
+                        var midPoint = lineStart + v * 0.5f + v.normalized * offset;
                         var arrowLtw = Matrix4x4.TRS(midPoint, Quaternion.Euler(0, 0, angle - 90f), Vector3.one);
                         vertices[arrowIndex].position = arrowLtw.MultiplyPoint3x4(
                             new Vector2(-arrowHalfWidth, -arrowHalfHeight));
@@ -108,10 +105,10 @@ namespace DMotion.Editor
                 }
             }
 
-            var tintColor = ColorOverride ?? Edge.defaultColor;
+            // Use orange color for exit transitions
             for (var i = 0; i < vertices.Length; i++)
             {
-                vertices[i].tint = tintColor;
+                vertices[i].tint = ExitTransitionColor;
             }
 
             var mwd = mgc.Allocate(vertices.Length, indices.Length);
@@ -132,7 +129,7 @@ namespace DMotion.Editor
             base.ComputeControlPoints();
             var v = to - from;
             const float boxExtent = 10f;
-            var pv = ((Vector2) (Quaternion.Euler(0, 0, 90) * v)).normalized * boxExtent;
+            var pv = ((Vector2)(Quaternion.Euler(0, 0, 90) * v)).normalized * boxExtent;
 
             controlPoints[0] = from - pv;
             controlPoints[1] = from + pv;

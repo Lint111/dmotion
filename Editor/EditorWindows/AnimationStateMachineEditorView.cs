@@ -67,8 +67,17 @@ namespace DMotion.Editor
         private Dictionary<AnimationStateAsset, TransitionEdge> anyStateTransitionEdges =
             new Dictionary<AnimationStateAsset, TransitionEdge>();
 
+        // Exit transitions from SubStateMachines
+        private Dictionary<TransitionPair, TransitionEdge> exitTransitionEdges =
+            new Dictionary<TransitionPair, TransitionEdge>();
+
         internal StateMachineAsset StateMachine => model.StateMachineAsset;
         internal VisualTreeAsset StateNodeXml => model.StateNodeXml;
+        
+        /// <summary>
+        /// Event fired when user double-clicks a SubStateMachine node to navigate into it.
+        /// </summary>
+        internal Action<StateMachineAsset> OnEnterSubStateMachine;
 
         public AnimationStateMachineEditorView()
         {
@@ -79,6 +88,29 @@ namespace DMotion.Editor
             this.AddManipulator(new ContentDragger());
             this.AddManipulator(new SelectionDragger());
             this.AddManipulator(new RectangleSelector());
+            
+            // Centralized keyboard handling for all nodes
+            RegisterCallback<KeyDownEvent>(OnKeyDown);
+        }
+        
+        private void OnKeyDown(KeyDownEvent evt)
+        {
+            if (Application.isPlaying) return;
+            
+            // F2 or Ctrl+R to rename selected node
+            bool isRenameShortcut = evt.keyCode == KeyCode.F2 || 
+                                    (evt.keyCode == KeyCode.R && evt.ctrlKey);
+            
+            if (isRenameShortcut)
+            {
+                // Find the selected state node and trigger rename
+                var selectedNode = selection.OfType<StateNodeView>().FirstOrDefault();
+                if (selectedNode != null)
+                {
+                    selectedNode.StartRename();
+                    evt.StopImmediatePropagation();
+                }
+            }
         }
 
         public override void BuildContextualMenu(ContextualMenuPopulateEvent evt)
@@ -182,6 +214,19 @@ namespace DMotion.Editor
             InstantiateTransitionEdge(fromState, fromState.OutTransitions.Count - 1);
         }
 
+        /// <summary>
+        /// Creates a transition between two states. Called by TransitionDragManipulator.
+        /// </summary>
+        internal void CreateTransitionBetweenStates(AnimationStateAsset fromState, AnimationStateAsset toState)
+        {
+            if (fromState == null || toState == null) return;
+            if (fromState == toState) return; // No self-transitions
+            
+            Undo.RecordObject(fromState, "Create Transition");
+            CreateOutTransition(fromState, toState);
+            EditorUtility.SetDirty(fromState);
+        }
+
         public override List<Port> GetCompatiblePorts(Port startPort, NodeAdapter nodeAdapter)
         {
             return ports.ToList()
@@ -208,6 +253,7 @@ namespace DMotion.Editor
             stateToView.Clear();
             transitionToEdgeView.Clear();
             anyStateTransitionEdges.Clear();
+            exitTransitionEdges.Clear();
 
             graphViewChanged -= OnGraphViewChanged;
             DeleteElements(graphElements.ToList());
@@ -233,6 +279,15 @@ namespace DMotion.Editor
             foreach (var anyTransition in model.StateMachineAsset.AnyStateTransitions)
             {
                 InstantiateAnyStateTransitionEdge(anyTransition);
+            }
+
+            // Create exit transition edges for SubStateMachines
+            foreach (var state in model.StateMachineAsset.States)
+            {
+                if (state is SubStateMachineStateAsset subState)
+                {
+                    InstantiateSubStateMachineExitTransitions(subState);
+                }
             }
 
             model.ParametersInspectorView.SetInspector<ParametersInspector, ParameterInspectorModel>(
@@ -288,6 +343,9 @@ namespace DMotion.Editor
             stateToView.Add(state, stateView);
 
             stateView.StateSelectedEvent += OnStateSelected;
+            
+            // Add right-click drag to create transitions
+            stateView.AddManipulator(TransitionDragManipulator.ForStateNode(stateView, this));
         }
 
         private void OnStateSelected(StateNodeView obj)
@@ -306,8 +364,15 @@ namespace DMotion.Editor
                     model.InspectorView.SetInspector<LinearBlendStateInspector, AnimationStateInspectorModel>
                         (inspectorModel.StateAsset, inspectorModel);
                     break;
+                case SubStateMachineStateNodeView _:
+                    // SubStateMachine uses the custom editor defined in SubStateMachineStateAssetEditor
+                    // Just select the asset in the inspector - Unity will use our custom editor
+                    Selection.activeObject = inspectorModel.StateAsset;
+                    break;
                 default:
-                    throw new ArgumentOutOfRangeException(nameof(obj));
+                    // Fallback: just select the asset
+                    Selection.activeObject = inspectorModel.StateAsset;
+                    break;
             }
         }
 
@@ -326,9 +391,13 @@ namespace DMotion.Editor
 
         private void InstantiateAnyStateNode()
         {
-            anyStateNodeView = new AnyStateNodeView(model.StateMachineAsset);
+            anyStateNodeView = new AnyStateNodeView(model.StateMachineAsset, this);
             AddElement(anyStateNodeView);
             anyStateNodeView.AnyStateSelectedEvent += OnAnyStateSelected;
+            
+            // Add right-click drag to create transitions
+            anyStateNodeView.AddManipulator(
+                TransitionDragManipulator.ForAnyStateNode(anyStateNodeView, this, model.StateMachineAsset));
         }
 
         private void InstantiateAnyStateTransitionEdge(StateOutTransition anyTransition)
@@ -357,6 +426,22 @@ namespace DMotion.Editor
             InstantiateAnyStateTransitionEdge(transition);
         }
 
+        /// <summary>
+        /// Creates an Any State transition to the specified state. Called by TransitionDragManipulator.
+        /// </summary>
+        internal void CreateAnyStateTransitionTo(AnimationStateAsset toState)
+        {
+            if (toState == null) return;
+            
+            // Check for duplicate
+            if (model.StateMachineAsset.AnyStateTransitions.Exists(t => t.ToState == toState))
+                return;
+            
+            Undo.RecordObject(model.StateMachineAsset, "Create Any State Transition");
+            CreateAnyStateTransition(toState);
+            EditorUtility.SetDirty(model.StateMachineAsset);
+        }
+
         private void DeleteAnyStateTransition(AnimationStateAsset toState)
         {
             model.StateMachineAsset.AnyStateTransitions.RemoveAll(t => t.ToState == toState);
@@ -375,14 +460,70 @@ namespace DMotion.Editor
 
         private void OnAnyStateTransitionSelected(TransitionEdge obj)
         {
-            if (obj.input.node is StateNodeView toStateView)
-            {
-                var inspectorModel = new AnyStateInspectorModel()
+            // Set inspector for any state transition - shows all transitions to this state
+            model.InspectorView.SetInspector<AnyStateTransitionsInspector, AnyStateInspectorModel>(
+                model.StateMachineAsset,
+                new AnyStateInspectorModel
                 {
-                    ToState = toStateView.State
+                    ToState = obj.ToState
+                });
+        }
+
+        private void InstantiateSubStateMachineExitTransitions(SubStateMachineStateAsset subState)
+        {
+            for (int i = 0; i < subState.OutTransitions.Count; i++)
+            {
+                var exitTransition = subState.OutTransitions[i];
+                InstantiateExitTransitionEdge(subState, exitTransition, i);
+            }
+        }
+
+        private void InstantiateExitTransitionEdge(SubStateMachineStateAsset subState, StateOutTransition exitTransition, int exitTransitionIndex)
+        {
+            var transitionPair = new TransitionPair(subState, exitTransition.ToState);
+            
+            // Skip if target state doesn't exist in this state machine
+            var toStateView = GetViewForState(exitTransition.ToState);
+            if (toStateView == null) return;
+
+            if (exitTransitionEdges.TryGetValue(transitionPair, out var existingEdge))
+            {
+                existingEdge.Model.TransitionCount++;
+                existingEdge.MarkDirtyRepaint();
+            }
+            else
+            {
+                var fromStateView = GetViewForState(subState);
+                var edge = fromStateView.output.ConnectTo<ExitTransitionEdge>(toStateView.input);
+                edge.Model = new TransitionEdgeModel()
+                {
+                    TransitionCount = 1,
+                    StateMachineAsset = model.StateMachineAsset,
+                    SelectedEntity = model.SelectedEntity
                 };
-                model.InspectorView.SetInspector<AnyStateTransitionsInspector, AnyStateInspectorModel>(
-                    model.StateMachineAsset, inspectorModel);
+                edge.ExitTransition = exitTransition;
+                edge.SubStateMachine = subState;
+                edge.ExitTransitionIndex = exitTransitionIndex;
+                
+                AddElement(edge);
+                exitTransitionEdges.Add(transitionPair, edge);
+
+                edge.TransitionSelectedEvent += OnExitTransitionSelected;
+            }
+        }
+
+        private void OnExitTransitionSelected(TransitionEdge obj)
+        {
+            if (obj is ExitTransitionEdge exitEdge)
+            {
+                // Set inspector for exit transition - for now, just show the SubStateMachine inspector
+                var inspectorModel = new AnimationStateInspectorModel
+                {
+                    StateView = GetViewForState(exitEdge.SubStateMachine)
+                };
+                // For now, show the standard inspector for the SubStateMachine
+                var subMachineView = GetViewForState(exitEdge.SubStateMachine);
+                subMachineView?.OnSelected();
             }
         }
     }

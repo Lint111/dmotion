@@ -40,6 +40,11 @@ namespace DMotion.Authoring
         [Tooltip("Global transitions that can be taken from any state. Evaluated before regular state transitions.")]
         public List<StateOutTransition> AnyStateTransitions = new();
 
+        [Header("Exit States")]
+        [Tooltip("States that can trigger an exit when this machine is used as a nested state machine. " +
+                 "Draw transitions TO the Exit node in the graph editor to define these.")]
+        public List<AnimationStateAsset> ExitStates = new();
+
         public IEnumerable<AnimationClipAsset> Clips => States.SelectMany(s => s.Clips);
         public int ClipCount => States.Sum(s => s.ClipCount);
 

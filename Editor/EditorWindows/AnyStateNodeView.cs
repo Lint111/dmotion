@@ -10,15 +10,21 @@ namespace DMotion.Editor
     /// Special node representing "Any State" in the visual editor.
     /// Not an actual state - just a visual element for managing global transitions.
     /// </summary>
-    internal class AnyStateNodeView : Node
+    internal class AnyStateNodeView : BaseNodeView
     {
+        // Fixed position for static nodes (Any State at Y=50, Exit at Y=150)
+        private const float FixedNodeX = 50f;
+        private const float FixedNodeY = 50f;
+        private static readonly Vector2 FixedPosition = new(FixedNodeX, FixedNodeY);
+        
         internal Action<AnyStateNodeView> AnyStateSelectedEvent;
-        private readonly StateMachineAsset stateMachine;
-        public Port output;
+        internal StateMachineAsset StateMachine { get; }
 
-        public AnyStateNodeView(StateMachineAsset stateMachineAsset)
+        public AnyStateNodeView(StateMachineAsset stateMachineAsset, AnimationStateMachineEditorView graphView)
         {
-            stateMachine = stateMachineAsset;
+            StateMachine = stateMachineAsset;
+            SetGraphView(graphView);
+            
             title = "Any State";
             viewDataKey = "AnyState"; // Fixed key for consistent positioning
 
@@ -26,7 +32,7 @@ namespace DMotion.Editor
             AddToClassList("anystate");
 
             // Set fixed position (top-left corner)
-            SetPosition(new Rect(new Vector2(50, 50), Vector2.one));
+            SetPosition(new Rect(FixedPosition, Vector2.one));
 
             // Only output port (Any State can only transition OUT, never IN)
             CreateOutputPort();
@@ -40,30 +46,21 @@ namespace DMotion.Editor
             capabilities &= ~Capabilities.Movable;
         }
 
-        private void CreateOutputPort()
-        {
-            output = Port.Create<TransitionEdge>(Orientation.Vertical, Direction.Output, Port.Capacity.Multi,
-                typeof(bool));
-            output.portName = "";
-            outputContainer.Add(output);
-        }
+        // Output port creation inherited from BaseNodeView
 
-        public override void BuildContextualMenu(ContextualMenuPopulateEvent evt)
+        protected override void BuildNodeContextMenu(ContextualMenuPopulateEvent evt, DropdownMenuAction.Status status)
         {
-            var status = Application.isPlaying
-                ? DropdownMenuAction.Status.Disabled
-                : DropdownMenuAction.Status.Normal;
-
-            evt.menu.AppendAction("Create Any State Transition", OnContextMenuCreateTransition, status);
-            evt.StopPropagation();
-        }
-
-        private void OnContextMenuCreateTransition(DropdownMenuAction obj)
-        {
-            // Trigger edge creation (same hack as regular state nodes)
-            var ev = MouseDownEvent.GetPooled(Input.mousePosition, 0, 1, Vector2.zero);
-            output.edgeConnector.GetType().GetMethod("OnMouseDown", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .Invoke(output.edgeConnector, new object[] { ev });
+            // Build submenu with all available target states
+            foreach (var targetState in StateMachine.States)
+            {
+                var target = targetState; // Capture for closure
+                // Check if transition already exists
+                bool exists = StateMachine.AnyStateTransitions.Exists(t => t.ToState == target);
+                var itemStatus = exists ? DropdownMenuAction.Status.Disabled : status;
+                
+                evt.menu.AppendAction($"Create Transition/{target.name}",
+                    _ => GraphView.CreateAnyStateTransitionTo(target), itemStatus);
+            }
         }
 
         public override void OnSelected()
@@ -76,7 +73,7 @@ namespace DMotion.Editor
         public override void SetPosition(Rect newPos)
         {
             // Keep fixed position
-            base.SetPosition(new Rect(new Vector2(50, 50), Vector2.one));
+            base.SetPosition(new Rect(FixedPosition, Vector2.one));
         }
     }
 }

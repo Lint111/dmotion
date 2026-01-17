@@ -28,10 +28,16 @@ namespace DMotion.Editor
     {
         [SerializeField] internal VisualTreeAsset StateMachineEditorXml;
         [SerializeField] internal VisualTreeAsset StateNodeXml;
+        
+        // Persisted across domain reloads
+        [SerializeField] private StateMachineAsset lastEditedStateMachine;
+        [SerializeField] private string lastEditedAssetGuid;
 
         private AnimationStateMachineEditorView stateMachineEditorView;
         private StateMachineInspectorView inspectorView;
         private StateMachineInspectorView parametersInspectorView;
+        private BreadcrumbBar breadcrumbBar;
+        private bool hasRestoredAfterDomainReload;
 
         [MenuItem(ToolMenuConstants.DMotionPath + "/State Machine Editor")]
         internal static void ShowExample()
@@ -78,7 +84,115 @@ namespace DMotion.Editor
                 stateMachineEditorView = root.Q<AnimationStateMachineEditorView>();
                 inspectorView = root.Q<StateMachineInspectorView>("inspector");
                 parametersInspectorView = root.Q<StateMachineInspectorView>("parameters-inspector");
+                breadcrumbBar = root.Q<BreadcrumbBar>("breadcrumb-bar");
+                
+                // Wire up breadcrumb navigation
+                if (breadcrumbBar != null)
+                {
+                    breadcrumbBar.OnNavigate += OnBreadcrumbNavigate;
+                }
+                
+                // Wire up graph view to notify when entering a sub-state machine
+                if (stateMachineEditorView != null)
+                {
+                    stateMachineEditorView.OnEnterSubStateMachine += OnEnterSubStateMachine;
+                }
             }
+            
+            // Restore last edited asset after domain reload
+            RestoreAfterDomainReload();
+        }
+        
+        private void OnBreadcrumbNavigate(int index)
+        {
+            var target = breadcrumbBar?.NavigationStack[index];
+            if (target != null)
+            {
+                LoadStateMachineInternal(target, updateBreadcrumb: false);
+            }
+        }
+        
+        private void OnEnterSubStateMachine(StateMachineAsset nestedMachine)
+        {
+            if (nestedMachine == null) return;
+            breadcrumbBar?.Push(nestedMachine);
+            LoadStateMachineInternal(nestedMachine, updateBreadcrumb: false);
+        }
+        
+        private void OnEnable()
+        {
+            // Reset the restore flag when window is enabled
+            hasRestoredAfterDomainReload = false;
+        }
+        
+        /// <summary>
+        /// Restores the previously edited state machine after domain reload.
+        /// </summary>
+        private void RestoreAfterDomainReload()
+        {
+            if (hasRestoredAfterDomainReload) return;
+            hasRestoredAfterDomainReload = true;
+            
+            // Try to restore from serialized reference first
+            if (lastEditedStateMachine != null)
+            {
+                LoadStateMachine(lastEditedStateMachine);
+                return;
+            }
+            
+            // Fall back to GUID if reference was lost
+            if (!string.IsNullOrEmpty(lastEditedAssetGuid))
+            {
+                string assetPath = AssetDatabase.GUIDToAssetPath(lastEditedAssetGuid);
+                if (!string.IsNullOrEmpty(assetPath))
+                {
+                    var asset = AssetDatabase.LoadAssetAtPath<StateMachineAsset>(assetPath);
+                    if (asset != null)
+                    {
+                        LoadStateMachine(asset);
+                    }
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Loads a state machine into the editor and persists the reference.
+        /// Called when selecting a new root state machine (resets breadcrumb).
+        /// </summary>
+        private void LoadStateMachine(StateMachineAsset stateMachineAsset)
+        {
+            if (stateMachineAsset == null) return;
+            
+            // Reset breadcrumb to new root
+            breadcrumbBar?.SetRoot(stateMachineAsset);
+            
+            LoadStateMachineInternal(stateMachineAsset, updateBreadcrumb: false);
+        }
+        
+        /// <summary>
+        /// Internal method to load a state machine without resetting breadcrumb.
+        /// </summary>
+        private void LoadStateMachineInternal(StateMachineAsset stateMachineAsset, bool updateBreadcrumb = true)
+        {
+            if (stateMachineAsset == null) return;
+            if (stateMachineEditorView == null) return;
+            
+            // Persist for domain reload recovery
+            lastEditedStateMachine = stateMachineAsset;
+            string assetPath = AssetDatabase.GetAssetPath(stateMachineAsset);
+            if (!string.IsNullOrEmpty(assetPath))
+            {
+                lastEditedAssetGuid = AssetDatabase.AssetPathToGUID(assetPath);
+            }
+            
+            stateMachineEditorView.PopulateView(new StateMachineEditorViewModel
+            {
+                StateMachineAsset = stateMachineAsset,
+                StateNodeXml = StateNodeXml,
+                InspectorView = inspectorView,
+                ParametersInspectorView = parametersInspectorView
+            });
+            WaitAndFrameAll();
         }
 
         [OnOpenAsset]
@@ -106,17 +220,10 @@ namespace DMotion.Editor
             if (stateMachineEditorView != null && !Application.isPlaying &&
                 Selection.activeObject is StateMachineAsset stateMachineAsset)
             {
-                stateMachineEditorView.PopulateView(new StateMachineEditorViewModel
-                {
-                    StateMachineAsset = stateMachineAsset,
-                    StateNodeXml = StateNodeXml,
-                    InspectorView = inspectorView,
-                    ParametersInspectorView = parametersInspectorView
-                });
-                WaitAndFrameAll();
+                LoadStateMachine(stateMachineAsset);
             }
 
-            //
+            // Handle play mode entity selection
             if (stateMachineEditorView != null && Application.isPlaying &&
                 EntitySelectionProxyUtils.TryExtractEntitySelectionProxy(out var entitySelectionProxy))
             {
@@ -125,6 +232,14 @@ namespace DMotion.Editor
                     Assert.IsNotNull(stateMachineDebug.StateMachineAsset);
                     if (stateMachineDebug.StateMachineAsset != null)
                     {
+                        // Persist for domain reload recovery
+                        lastEditedStateMachine = stateMachineDebug.StateMachineAsset;
+                        string assetPath = AssetDatabase.GetAssetPath(stateMachineDebug.StateMachineAsset);
+                        if (!string.IsNullOrEmpty(assetPath))
+                        {
+                            lastEditedAssetGuid = AssetDatabase.AssetPathToGUID(assetPath);
+                        }
+                        
                         stateMachineEditorView.PopulateView(new StateMachineEditorViewModel
                         {
                             StateMachineAsset = stateMachineDebug.StateMachineAsset,

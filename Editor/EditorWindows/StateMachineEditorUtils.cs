@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using DMotion.Authoring;
 using UnityEditor;
@@ -12,6 +12,10 @@ namespace DMotion.Editor
         public static AnimationStateAsset CreateState(this StateMachineAsset stateMachineAsset, Type type)
         {
             Assert.IsTrue(typeof(AnimationStateAsset).IsAssignableFrom(type));
+            
+            // Record undo for the state machine before modifying
+            Undo.RecordObject(stateMachineAsset, "Create State");
+            
             var state = ScriptableObject.CreateInstance(type) as AnimationStateAsset;
             Assert.IsNotNull(state);
 
@@ -28,6 +32,9 @@ namespace DMotion.Editor
             }
 
             AssetDatabase.AddObjectToAsset(state, stateMachineAsset);
+            
+            // Register the created object with Undo so it can be destroyed on undo
+            Undo.RegisterCreatedObjectUndo(state, "Create State");
 
             AssetDatabase.SaveAssets();
             return state;
@@ -114,6 +121,21 @@ namespace DMotion.Editor
         internal static void DrawTransitionSummary(AnimationStateAsset fromState, AnimationStateAsset toState,
             float transitionTime)
         {
+            // Guard against null states (can happen with broken references)
+            if (fromState == null || toState == null)
+            {
+                using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
+                {
+                    var oldColor = GUI.color;
+                    GUI.color = Color.red;
+                    EditorGUILayout.LabelField(fromState == null ? "Missing" : fromState.name);
+                    EditorGUILayout.LabelField("--->");
+                    EditorGUILayout.LabelField(toState == null ? "Missing" : toState.name);
+                    GUI.color = oldColor;
+                }
+                return;
+            }
+            
             var labelWidth = Mathf.Min(EditorGUIUtility.labelWidth, 80f);
             using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
             {

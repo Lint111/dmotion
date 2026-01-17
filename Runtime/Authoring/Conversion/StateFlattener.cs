@@ -267,16 +267,19 @@ namespace DMotion.Authoring
             }
 
             // After processing all states in this machine, collect exit transition info
-            // if we have a parent sub-machine with exit states/transitions
+            // if we have a parent sub-machine whose nested machine has exit states
+            // NEW ARCHITECTURE:
+            // - ExitStates are defined on the nested StateMachineAsset (machine.ExitStates)
+            // - Exit transitions are the OutTransitions on the SubStateMachineStateAsset (parentSubMachine.OutTransitions)
             if (parentSubMachine != null &&
-                parentSubMachine.ExitStates != null &&
-                parentSubMachine.ExitStates.Count > 0 &&
-                parentSubMachine.ExitTransitions != null &&
-                parentSubMachine.ExitTransitions.Count > 0)
+                machine.ExitStates != null &&
+                machine.ExitStates.Count > 0 &&
+                parentSubMachine.OutTransitions != null &&
+                parentSubMachine.OutTransitions.Count > 0)
             {
                 // Only create an exit transition group if we have valid exit states with resolved indices
                 var exitStateIndices = new List<int>();
-                foreach (var exitState in parentSubMachine.ExitStates)
+                foreach (var exitState in machine.ExitStates)
                 {
                     if (exitState == null)
                         continue;
@@ -302,7 +305,7 @@ namespace DMotion.Authoring
                     {
                         SubMachine = parentSubMachine,
                         ExitStateIndices = exitStateIndices,
-                        ExitTransitions = parentSubMachine.ExitTransitions
+                        ExitTransitions = parentSubMachine.OutTransitions
                     });
                 }
             }

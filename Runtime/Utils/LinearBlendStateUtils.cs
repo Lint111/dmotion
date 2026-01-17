@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using Latios.Kinemation;
 using Unity.Collections;
 using Unity.Entities;
@@ -64,13 +64,33 @@ namespace DMotion
 
         internal static void ExtractLinearBlendVariablesFromStateMachine(
             in LinearBlendStateMachineState linearBlendState,
-            in DynamicBuffer<FloatParameter> blendParameters,
+            in DynamicBuffer<FloatParameter> floatParameters,
+            in DynamicBuffer<IntParameter> intParameters,
             out float blendRatio,
             out NativeArray<float> thresholds,
             out NativeArray<float> speeds)
         {
             ref var linearBlendBlob = ref linearBlendState.LinearBlendBlob;
-            blendRatio = blendParameters[linearBlendBlob.BlendParameterIndex].Value;
+            
+            if (linearBlendBlob.UsesIntParameter)
+            {
+                // Read Int parameter and normalize to 0-1 range
+                var intValue = intParameters[linearBlendBlob.BlendParameterIndex].Value;
+                var rangeMin = linearBlendBlob.IntRangeMin;
+                var rangeMax = linearBlendBlob.IntRangeMax;
+                var range = rangeMax - rangeMin;
+                
+                // Normalize: (value - min) / (max - min), clamped to 0-1
+                blendRatio = range > 0 
+                    ? math.saturate((float)(intValue - rangeMin) / range)
+                    : 0f;
+            }
+            else
+            {
+                // Read Float parameter directly
+                blendRatio = floatParameters[linearBlendBlob.BlendParameterIndex].Value;
+            }
+            
             thresholds = CollectionUtils.AsArray(ref linearBlendBlob.SortedClipThresholds);
             speeds = CollectionUtils.AsArray(ref linearBlendBlob.SortedClipSpeeds);
         }

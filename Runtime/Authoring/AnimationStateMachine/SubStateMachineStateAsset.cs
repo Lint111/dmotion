@@ -9,6 +9,9 @@ namespace DMotion.Authoring
     /// Authoring asset for a sub-state machine (state containing a nested state machine).
     /// Visual-only organization (like Unity Mecanim) - flattened during conversion.
     /// At runtime, all nested states become top-level states with remapped indices.
+    /// 
+    /// Exit behavior: The NestedStateMachine defines its own ExitStates (states that can trigger exit).
+    /// When used as a nested machine, those exit states trigger the OutTransitions on this SubStateMachine.
     /// </summary>
     public class SubStateMachineStateAsset : AnimationStateAsset
     {
@@ -17,13 +20,6 @@ namespace DMotion.Authoring
 
         [Tooltip("The entry state to transition to when entering this sub-machine")]
         public AnimationStateAsset EntryState;
-
-        [Header("Exit Transitions")]
-        [Tooltip("States that can trigger exit transitions (must be in NestedStateMachine)")]
-        public List<AnimationStateAsset> ExitStates = new();
-
-        [Tooltip("Transitions to evaluate when exiting the sub-machine (triggered by exit states)")]
-        public List<StateOutTransition> ExitTransitions = new();
 
         /// <summary>
         /// SubStateMachine states are flattened during conversion and have no runtime type.
@@ -61,6 +57,18 @@ namespace DMotion.Authoring
 #if UNITY_EDITOR
         private void OnValidate()
         {
+            // Check for circular reference - get parent state machine
+            var parentMachine = GetParentStateMachine();
+            if (NestedStateMachine != null && parentMachine != null)
+            {
+                if (NestedStateMachine == parentMachine || ContainsStateMachineRecursive(NestedStateMachine, parentMachine))
+                {
+                    Debug.LogError($"SubStateMachine '{name}': Circular reference detected! Clearing NestedStateMachine.", this);
+                    NestedStateMachine = null;
+                    return;
+                }
+            }
+            
             // Auto-set entry state to default if not set
             if (NestedStateMachine != null && EntryState == null)
             {
@@ -75,48 +83,38 @@ namespace DMotion.Authoring
                     Debug.LogWarning($"SubStateMachine '{name}': EntryState '{EntryState.name}' is not in NestedStateMachine '{NestedStateMachine.name}'", this);
                 }
             }
-
-            // Validate exit states are in nested machine
-            if (NestedStateMachine != null && ExitStates != null)
-            {
-                for (int i = ExitStates.Count - 1; i >= 0; i--)
-                {
-                    var exitState = ExitStates[i];
-                    if (exitState == null)
-                        continue;
-
-                    if (!IsStateInNestedMachine(exitState))
-                    {
-                        Debug.LogWarning($"SubStateMachine '{name}': ExitState '{exitState.name}' is not in NestedStateMachine '{NestedStateMachine.name}'", this);
-                    }
-                }
-            }
         }
 
-        /// <summary>
-        /// Checks if a state is in the nested machine (recursively handles nested sub-machines).
-        /// </summary>
-        private bool IsStateInNestedMachine(AnimationStateAsset state)
+        private StateMachineAsset GetParentStateMachine()
         {
-            if (NestedStateMachine == null)
+            var path = UnityEditor.AssetDatabase.GetAssetPath(this);
+            if (string.IsNullOrEmpty(path))
+                return null;
+            return UnityEditor.AssetDatabase.LoadMainAssetAtPath(path) as StateMachineAsset;
+        }
+
+        private static bool ContainsStateMachineRecursive(StateMachineAsset machine, StateMachineAsset target, HashSet<StateMachineAsset> visited = null)
+        {
+            if (machine == null || target == null)
                 return false;
+            
+            visited ??= new HashSet<StateMachineAsset>();
+            if (visited.Contains(machine))
+                return false;
+            visited.Add(machine);
 
-            return IsStateInMachineRecursive(state, NestedStateMachine);
-        }
-
-        private static bool IsStateInMachineRecursive(AnimationStateAsset state, StateMachineAsset machine)
-        {
-            foreach (var s in machine.States)
+            foreach (var state in machine.States)
             {
-                if (s == state)
-                    return true;
-
-                if (s is SubStateMachineStateAsset nestedSub && nestedSub.NestedStateMachine != null)
+                if (state is SubStateMachineStateAsset subState && subState.NestedStateMachine != null)
                 {
-                    if (IsStateInMachineRecursive(state, nestedSub.NestedStateMachine))
+                    if (subState.NestedStateMachine == target)
+                        return true;
+                    
+                    if (ContainsStateMachineRecursive(subState.NestedStateMachine, target, visited))
                         return true;
                 }
             }
+
             return false;
         }
 #endif

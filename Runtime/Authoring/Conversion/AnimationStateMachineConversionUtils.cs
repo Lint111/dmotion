@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Latios.Kinemation;
@@ -94,17 +94,40 @@ namespace DMotion.Authoring
 
                     case LinearBlendStateAsset linearBlendAsset:
                         stateImplIndex = converter.LinearBlendStates.Length;
-                        var blendParameterIndex = rootMachine.Parameters
-                            .OfType<FloatParameterAsset>()
-                            .ToList()
-                            .FindIndex(f => f == linearBlendAsset.BlendParameter);
-
-                        Assert.IsTrue(blendParameterIndex >= 0,
-                            $"({rootMachine.name}) Couldn't find blend parameter for state {stateAsset.name}");
+                        
+                        // Determine if using Float or Int parameter
+                        var usesIntParameter = linearBlendAsset.UsesIntParameter;
+                        int blendParameterIndex;
+                        
+                        if (usesIntParameter)
+                        {
+                            // Find index in Int parameters list
+                            blendParameterIndex = rootMachine.Parameters
+                                .OfType<IntParameterAsset>()
+                                .ToList()
+                                .FindIndex(p => p == linearBlendAsset.BlendParameter);
+                            
+                            Assert.IsTrue(blendParameterIndex >= 0,
+                                $"({rootMachine.name}) Couldn't find Int blend parameter for state {stateAsset.name}");
+                        }
+                        else
+                        {
+                            // Find index in Float parameters list
+                            blendParameterIndex = rootMachine.Parameters
+                                .OfType<FloatParameterAsset>()
+                                .ToList()
+                                .FindIndex(p => p == linearBlendAsset.BlendParameter);
+                            
+                            Assert.IsTrue(blendParameterIndex >= 0,
+                                $"({rootMachine.name}) Couldn't find Float blend parameter for state {stateAsset.name}");
+                        }
 
                         var linearBlendData = new LinearBlendStateConversionData
                         {
                             BlendParameterIndex = (ushort)blendParameterIndex,
+                            UsesIntParameter = usesIntParameter,
+                            IntRangeMin = linearBlendAsset.IntRangeMin,
+                            IntRangeMax = linearBlendAsset.IntRangeMax,
                             ClipsWithThresholds = new UnsafeList<ClipIndexWithThreshold>(
                                 linearBlendAsset.BlendClips.Length, allocator)
                         };
