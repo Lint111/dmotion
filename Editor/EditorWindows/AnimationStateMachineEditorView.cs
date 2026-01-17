@@ -88,6 +88,7 @@ namespace DMotion.Editor
             this.AddManipulator(new ContentDragger());
             this.AddManipulator(new SelectionDragger());
             this.AddManipulator(new RectangleSelector());
+            this.AddManipulator(new TransitionCutManipulator(this));
             
             // Centralized keyboard handling for all nodes
             RegisterCallback<KeyDownEvent>(OnKeyDown);
@@ -220,7 +221,7 @@ namespace DMotion.Editor
         internal void CreateTransitionBetweenStates(AnimationStateAsset fromState, AnimationStateAsset toState)
         {
             if (fromState == null || toState == null) return;
-            if (fromState == toState) return; // No self-transitions
+            // Self-transitions are allowed (e.g., re-trigger attack, reset idle)
             
             Undo.RecordObject(fromState, "Create Transition");
             CreateOutTransition(fromState, toState);

@@ -261,15 +261,14 @@ namespace DMotion.Editor
         protected override void BuildNodeContextMenu(ContextualMenuPopulateEvent evt, DropdownMenuAction.Status status)
         {
             // Build submenu with all available target states for transition creation
-            // This replaces the previous reflection-based hack that simulated mouse events
+            // Self-transitions are allowed (e.g., re-trigger attack, reset idle)
             foreach (var targetState in StateMachine.States)
             {
-                if (targetState != State) // Cannot transition to self
-                {
-                    var target = targetState; // Capture for closure
-                    evt.menu.AppendAction($"Create Transition/{target.name}",
-                        _ => CreateTransitionTo(target), status);
-                }
+                var target = targetState; // Capture for closure
+                var label = targetState == State 
+                    ? $"Create Transition/{target.name} (Self)" 
+                    : $"Create Transition/{target.name}";
+                evt.menu.AppendAction(label, _ => CreateTransitionTo(target), status);
             }
 
             var setDefaultStateMenuStatus = StateMachine.IsDefaultState(State) || Application.isPlaying

@@ -199,24 +199,33 @@ namespace DMotion.Editor
             dragLine.pickingMode = PickingMode.Ignore;
             dragLine.style.position = Position.Absolute;
             dragLine.style.backgroundColor = DragLineColor;
-            dragLine.style.height = 2;
+            dragLine.style.height = 3;
             dragLine.style.transformOrigin = new TransformOrigin(0, Length.Percent(50));
             
-            graphView.contentViewContainer.Add(dragLine);
+            // Add directly to graph view (not contentViewContainer) - same as TransitionCutManipulator
+            graphView.Add(dragLine);
         }
 
         private void UpdateDragLine(Vector2 mousePosition)
         {
             if (dragLine == null) return;
 
+            // Get source node center in world coordinates, then convert to graphView local
             var nodeRect = sourceNode.GetPosition();
-            var startPos = new Vector2(nodeRect.x + nodeRect.width / 2, nodeRect.y + nodeRect.height / 2);
-            var endPos = graphView.contentViewContainer.WorldToLocal(mousePosition);
+            var nodeCenterContent = new Vector2(nodeRect.x + nodeRect.width / 2, nodeRect.y + nodeRect.height / 2);
+            var nodeCenterWorld = graphView.contentViewContainer.LocalToWorld(nodeCenterContent);
+            var startPos = graphView.WorldToLocal(nodeCenterWorld);
             
+            // End position: mouse in graphView local coordinates
+            var endPos = graphView.WorldToLocal(mousePosition);
+            
+            // Snap to target node center if hovering valid target
             if (hoveredNode != null && isValidTarget(hoveredNode.State))
             {
                 var targetRect = hoveredNode.GetPosition();
-                endPos = new Vector2(targetRect.x + targetRect.width / 2, targetRect.y + targetRect.height / 2);
+                var targetCenterContent = new Vector2(targetRect.x + targetRect.width / 2, targetRect.y + targetRect.height / 2);
+                var targetCenterWorld = graphView.contentViewContainer.LocalToWorld(targetCenterContent);
+                endPos = graphView.WorldToLocal(targetCenterWorld);
             }
             
             var direction = endPos - startPos;

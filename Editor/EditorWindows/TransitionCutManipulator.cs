@@ -256,7 +256,37 @@ namespace DMotion.Editor
             var edgeStart = new Vector2(outputRect.x + outputRect.width / 2, outputRect.y + outputRect.height / 2);
             var edgeEnd = new Vector2(inputRect.x + inputRect.width / 2, inputRect.y + inputRect.height / 2);
 
+            // Check if this is a self-loop (same node)
+            if (outputNode == inputNode)
+            {
+                return LineIntersectsSelfLoop(lineStart, lineEnd, edgeStart);
+            }
+
             return LinesIntersect(lineStart, lineEnd, edgeStart, edgeEnd);
+        }
+        
+        private bool LineIntersectsSelfLoop(Vector2 lineStart, Vector2 lineEnd, Vector2 nodeCenter)
+        {
+            // Self-loop path matches TransitionEdgeControl.DrawSelfLoop
+            // Uses shared constants from TransitionEdgeControl
+            var loopWidth = TransitionEdgeControl.SelfLoopWidth;
+            var loopHeight = TransitionEdgeControl.SelfLoopHeight;
+            var arrowEntry = TransitionEdgeControl.SelfLoopArrowEntry;
+            
+            // Key points of the loop (relative to node center, which is the port position)
+            var p0 = nodeCenter;                                            // Start at port
+            var p1 = nodeCenter + new Vector2(loopWidth, 0);                // Right
+            var p2 = nodeCenter + new Vector2(loopWidth, -loopHeight);      // Top-right
+            var p3 = nodeCenter + new Vector2(0, -loopHeight);              // Top-left
+            var p4 = nodeCenter + new Vector2(0, -loopHeight + arrowEntry); // Arrow entry
+            
+            // Check intersection with each segment of the loop
+            if (LinesIntersect(lineStart, lineEnd, p0, p1)) return true;  // Right segment
+            if (LinesIntersect(lineStart, lineEnd, p1, p2)) return true;  // Up segment
+            if (LinesIntersect(lineStart, lineEnd, p2, p3)) return true;  // Left segment
+            if (LinesIntersect(lineStart, lineEnd, p3, p4)) return true;  // Down segment
+            
+            return false;
         }
 
         /// <summary>
