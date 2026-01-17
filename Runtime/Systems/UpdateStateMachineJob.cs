@@ -87,6 +87,7 @@ namespace DMotion
                 currentStateAnimationState,
                 ref stateMachineBlob,
                 parameters,
+                stateMachine.CurrentState.StateIndex,
                 out var transitionIndex);
 
             // If no Any State transition matched, check regular state transitions
@@ -269,11 +270,12 @@ namespace DMotion
             in AnimationState animation,
             ref StateMachineBlob stateMachine,
             in TransitionParameters parameters,
+            short currentStateIndex,
             out short transitionIndex)
         {
             for (short i = 0; i < stateMachine.AnyStateTransitions.Length; i++)
             {
-                if (EvaluateAnyStateTransition(animation, ref stateMachine.AnyStateTransitions[i], parameters))
+                if (EvaluateAnyStateTransition(animation, ref stateMachine.AnyStateTransitions[i], parameters, currentStateIndex))
                 {
                     // Return negative index to indicate Any State transition
                     // -1 for index 0, -2 for index 1, etc.
@@ -287,15 +289,23 @@ namespace DMotion
         }
 
         /// <summary>
-        /// Evaluates a single Any State transition (same logic as regular transitions).
+        /// Evaluates a single Any State transition.
+        /// Checks CanTransitionToSelf to prevent self-transitions when not allowed.
         /// </summary>
         [BurstCompile]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool EvaluateAnyStateTransition(
             in AnimationState animation,
             ref AnyStateTransition transition,
-            in TransitionParameters parameters)
+            in TransitionParameters parameters,
+            short currentStateIndex)
         {
+            // Check if this would be a self-transition and if that's allowed
+            if (!transition.CanTransitionToSelf && transition.ToStateIndex == currentStateIndex)
+            {
+                return false;
+            }
+            
             // Check end time if required
             if (transition.HasEndTime && animation.Time < transition.TransitionEndTime)
             {

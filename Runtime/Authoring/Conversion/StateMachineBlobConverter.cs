@@ -45,6 +45,7 @@ namespace DMotion.Authoring
         internal float TransitionEndTime;
         internal UnsafeList<BoolTransition> BoolTransitions;
         internal UnsafeList<IntTransition> IntTransitions;
+        internal bool CanTransitionToSelf;
     }
 
     /// <summary>
@@ -191,7 +192,8 @@ namespace DMotion.Authoring
                     {
                         ToStateIndex = anyTransitionConversionData.ToStateIndex,
                         TransitionEndTime = anyTransitionConversionData.TransitionEndTime,
-                        TransitionDuration = anyTransitionConversionData.TransitionDuration
+                        TransitionDuration = anyTransitionConversionData.TransitionDuration,
+                        CanTransitionToSelf = anyTransitionConversionData.CanTransitionToSelf
                     };
 
                     if (anyTransitionConversionData.BoolTransitions.IsCreated && anyTransitionConversionData.BoolTransitions.Length > 0)

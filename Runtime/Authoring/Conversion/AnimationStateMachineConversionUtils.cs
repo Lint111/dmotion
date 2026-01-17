@@ -224,7 +224,8 @@ namespace DMotion.Authoring
             {
                 ToStateIndex = toStateIndex,
                 TransitionEndTime = transition.HasEndTime ? Mathf.Max(0, transition.EndTime) : -1f,
-                TransitionDuration = transition.TransitionDuration
+                TransitionDuration = transition.TransitionDuration,
+                CanTransitionToSelf = transition.CanTransitionToSelf
             };
 
             // Bool conditions

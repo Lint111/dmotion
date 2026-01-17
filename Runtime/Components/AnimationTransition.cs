@@ -75,6 +75,13 @@ namespace DMotion
 
         /// <summary>Int transition conditions (all must be true)</summary>
         internal BlobArray<IntTransition> IntTransitions;
+        
+        /// <summary>
+        /// Whether this transition can target the current state (self-transition).
+        /// If false, the transition won't fire when already in the destination state.
+        /// Matches Unity's AnimatorStateTransition.canTransitionToSelf property.
+        /// </summary>
+        internal bool CanTransitionToSelf;
 
         /// <summary>Whether this transition requires reaching an end time</summary>
         internal bool HasEndTime => TransitionEndTime > 0;
