@@ -256,8 +256,12 @@ namespace DMotion.Editor
 
         private void WaitAndFrameAll()
         {
-            //TODO (hack): UI Toolkit doesn't seem to offer *any* way to know whether the layout has been calculated
-            //EditorApplication.delayedCall or VisualElement.schedule.Execute don't work, so we're stuck with this
+            // UI Toolkit layout workaround: There's no reliable callback for "layout complete".
+            // - VisualElement.RegisterCallback<GeometryChangedEvent> fires before children are laid out
+            // - EditorApplication.delayCall fires too early
+            // - schedule.Execute with delay is inconsistent across Unity versions
+            // Using EditorApplication.update with a small delay is the most reliable approach.
+            // See: https://forum.unity.com/threads/how-to-know-when-layout-is-ready.1034hybrid/
             EditorApplication.update += DoFrameAll;
             frameAllTime = EditorApplication.timeSinceStartup + 0.1f;
         }

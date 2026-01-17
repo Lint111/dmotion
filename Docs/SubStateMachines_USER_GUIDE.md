@@ -320,17 +320,80 @@ Parameters are shared across all levels automatically.
 
 ---
 
+## Editor Features
+
+### Graph Navigation
+
+The State Machine Editor now supports full SubStateMachine navigation:
+
+1. **Double-click to Enter**: Double-click any SubStateMachine node to navigate into it
+2. **Breadcrumb Navigation**: Visual breadcrumb bar shows current path (e.g., "Root > Combat > Special")
+3. **Click Breadcrumb**: Click any breadcrumb segment to navigate back to that level
+4. **Keyboard Navigation**: Use standard navigation shortcuts
+
+### Creating Transitions
+
+Multiple ways to create transitions between states:
+
+1. **Right-click Drag**: Right-click and drag from source to target node
+   - Visual line shows while dragging
+   - Valid targets highlight in green, invalid in red
+   - Release on valid target to create transition
+
+2. **Context Menu**: Right-click on a state node
+   - Select "Create Transition" submenu
+   - Choose target state from list
+
+3. **Any State Transitions**: From the "Any State" node
+   - Right-click drag to any state
+   - Creates global transition that can fire from any state
+
+### Deleting Transitions
+
+1. **Right-click Drag Cut**: Right-click and drag across transition edges
+   - Red cut line appears while dragging
+   - Crossed edges highlight in red
+   - Release to delete all crossed transitions
+
+2. **Select and Delete**: Click edge to select, press Delete key
+
+### Exit Node
+
+The **Exit** node marks states that can trigger exit from a nested SubStateMachine:
+
+1. **Location**: Fixed position below "Any State" node
+2. **Creating Exit States**: Draw a transition FROM a state TO the Exit node
+   - This marks that state as an "exit state"
+   - When the nested machine is in an exit state, parent OutTransitions can fire
+
+3. **Visual Feedback**: Right-click Exit node shows list of current exit states
+
+### Node Interactions
+
+| Action | Result |
+|--------|--------|
+| Double-click title | Rename state |
+| Double-click body (SubStateMachine) | Enter nested machine |
+| F2 or Ctrl+R | Rename selected state |
+| Right-click drag | Create transition |
+| Right-click drag (cut gesture) | Delete transitions |
+
+### Creating SubStateMachines
+
+1. Right-click in graph: **"New Sub-State Machine"**
+2. Popup appears with options:
+   - **Name**: SubStateMachine name
+   - **Create New Nested Machine**: Auto-create a new StateMachineAsset
+   - **Use Existing**: Assign existing StateMachineAsset
+3. Click "Create" to add to graph
+
+---
+
 ## Limitations & Known Issues
 
 ### Current Limitations
 
-1. **No Nested Graph Navigation**: Can't double-click to enter SubStateMachine in graph view
-   - **Workaround**: Use Unity AnimatorController for visual editing, or edit nested StateMachineAsset directly
-
-2. **No Breadcrumb UI**: Can't see "Root > Combat > Attack" path in graph
-   - **Workaround**: Use `StateMachineAsset.GetStatePath()` in code
-
-3. **Exit Transitions at Parent Level Only**: Exit transitions go to sibling states, not grandparent
+1. **Exit Transitions at Parent Level Only**: Exit transitions go to sibling states, not grandparent
    - **Design Choice**: Keeps flattening simple and predictable
 
 ### Completed Features
@@ -340,6 +403,12 @@ Parameters are shared across all levels automatically.
 - [x] Orange exit transition edges in graph view
 - [x] Validation warnings for misconfigured SubStateMachines
 - [x] API reference documentation
+- [x] Breadcrumb navigation for SubStateMachine hierarchy
+- [x] Double-click to enter/exit nested machines
+- [x] Right-click drag to create transitions
+- [x] Right-click drag cut gesture to delete transitions
+- [x] Exit node for marking exit states visually
+- [x] State renaming with F2/double-click
 
 ---
 
@@ -440,31 +509,61 @@ A: Minimal. Each level adds ~12 bytes and ~0.001ms traversal time.
    - Double-click the StateMachineAsset
    - Or: `Window > DMotion > State Machine Editor`
 
-3. **Create a SubStateMachine**
+3. **Create Root States**
+   - Right-click in graph: `New State` → Name it "Idle"
+   - Right-click in graph: `New State` → Name it "Walk"
+
+4. **Create a SubStateMachine**
    - Right-click in graph: `New Sub-State Machine`
-   - Name it "Combat"
+   - In the popup:
+     - Name: "Combat"
+     - Check "Create New Nested Machine"
+     - Click "Create"
 
-4. **Create a Nested State Machine**
-   - Right-click in Project: `Create > DMotion > State Machine`
-   - Name it "CombatStateMachine"
-   - Add states: "Attack", "Block", "Dodge"
-   - Set "Attack" as Default State
+5. **Navigate Into SubStateMachine**
+   - Double-click the "Combat" node
+   - Breadcrumb bar shows: "Root > Combat"
+   - You're now editing the nested machine
 
-5. **Configure the SubStateMachine**
-   - Select the "Combat" node in graph
-   - In Inspector:
-     - Assign "CombatStateMachine" to **Nested State Machine**
-     - **Entry State** dropdown: Select "Attack"
-     - **Add Exit State**: Select "Dodge" (or any state)
-     - **Exit Transitions**: Add transition to "Idle" with conditions
+6. **Add Nested States**
+   - Right-click: `New State` → "Attack"
+   - Right-click: `New State` → "Block"
+   - Right-click: `New State` → "Dodge"
+   - Set "Attack" as Default State in the StateMachineAsset inspector
 
-6. **Add States at Root Level**
-   - Right-click: `New State` → Name it "Idle"
-   - Create transition from "Idle" to "Combat"
+7. **Create Transitions (Right-click Drag)**
+   - Right-click on "Attack", drag to "Block", release
+   - Right-click on "Block", drag to "Dodge", release
+   - Right-click on "Dodge", drag to "Attack", release
 
-7. **Verify Exit Transitions**
-   - You should see **orange edges** from "Combat" to exit targets
-   - Select the orange edge to see the SubStateMachine in inspector
+8. **Mark Exit State**
+   - Right-click on "Dodge", drag to the **Exit** node (bottom-left)
+   - This marks "Dodge" as an exit state
+
+9. **Navigate Back to Parent**
+   - Click "Root" in the breadcrumb bar
+   - Or click the back arrow
+
+10. **Create Entry Transition**
+    - Right-click on "Idle", drag to "Combat"
+    - This creates a transition into the SubStateMachine
+
+11. **Configure Exit Transitions**
+    - Select the "Combat" SubStateMachine node
+    - In Inspector, add an **OutTransition**:
+      - To State: "Idle"
+      - Add conditions as needed
+
+12. **Verify Visual Feedback**
+    - Orange edges show exit transitions from "Combat" to targets
+    - The Exit node in nested view shows exit states on right-click
+
+### Delete Transitions (Cut Gesture)
+
+1. Right-click and drag across any transition edges
+2. Red cut line appears
+3. Edges being cut highlight in red
+4. Release to delete all crossed transitions
 
 ### Verify in Play Mode
 
