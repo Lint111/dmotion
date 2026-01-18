@@ -577,48 +577,14 @@ namespace DMotion.Editor
 
         private void OnStateSelected(StateNodeView obj)
         {
-            // Raise event for any subscribers
+            // Raise event - InspectorController handles the inspector update
             StateMachineEditorEvents.RaiseStateSelected(model.StateMachineAsset, obj.State);
-            
-            // Update inspector (TODO: move to event subscriber for full decoupling)
-            var inspectorModel = new AnimationStateInspectorModel
-            {
-                StateView = obj
-            };
-            switch (obj)
-            {
-                case SingleClipStateNodeView _:
-                    model.InspectorView.SetInspector<SingleStateInspector, AnimationStateInspectorModel>
-                        (inspectorModel.StateAsset, inspectorModel);
-                    break;
-                case LinearBlendStateNodeView _:
-                    model.InspectorView.SetInspector<LinearBlendStateInspector, AnimationStateInspectorModel>
-                        (inspectorModel.StateAsset, inspectorModel);
-                    break;
-                case SubStateMachineStateNodeView _:
-                    model.InspectorView.SetInspector<SubStateMachineInspector, AnimationStateInspectorModel>
-                        (inspectorModel.StateAsset, inspectorModel);
-                    break;
-                default:
-                    // Fallback: just select the asset
-                    Selection.activeObject = inspectorModel.StateAsset;
-                    break;
-            }
         }
 
         private void OnTransitionSelected(TransitionEdge obj)
         {
-            // Raise event for any subscribers
+            // Raise event - InspectorController handles the inspector update
             StateMachineEditorEvents.RaiseTransitionSelected(model.StateMachineAsset, obj.FromState, obj.ToState);
-            
-            // Update inspector
-            var inspectorModel = new TransitionGroupInspectorModel()
-            {
-                FromState = obj.FromState,
-                ToState = obj.ToState
-            };
-            model.InspectorView.SetInspector<TransitionGroupInspector, TransitionGroupInspectorModel>(
-                inspectorModel.FromState, inspectorModel);
         }
 
         // NEW: Any State support methods
@@ -643,11 +609,8 @@ namespace DMotion.Editor
 
         private void OnExitNodeSelected(ExitNodeView obj)
         {
-            // Raise event for any subscribers
+            // Raise event - InspectorController handles the inspector update
             StateMachineEditorEvents.RaiseExitNodeSelected(model.StateMachineAsset);
-            
-            // Clear the inspector or show exit state info
-            model.InspectorView.Clear();
         }
 
         private void InstantiateAnyStateTransitionEdge(StateOutTransition anyTransition)
@@ -832,43 +795,21 @@ namespace DMotion.Editor
         
         private void OnAnyStateExitTransitionSelected(TransitionEdge obj)
         {
-            // Raise event for any subscribers (null toState indicates exit transition)
+            // Raise event - InspectorController handles the inspector update
+            // null toState indicates exit transition
             StateMachineEditorEvents.RaiseAnyStateTransitionSelected(model.StateMachineAsset, null);
-            
-            // Show Any State exit transition inspector
-            model.InspectorView.SetInspector<AnyStateTransitionsInspector, AnyStateInspectorModel>(
-                model.StateMachineAsset,
-                new AnyStateInspectorModel
-                {
-                    ToState = null, // Will show exit transition when ToState is null and checking for exit
-                });
         }
 
         private void OnAnyStateSelected(AnyStateNodeView obj)
         {
-            // Raise event for any subscribers
+            // Raise event - InspectorController handles the inspector update
             StateMachineEditorEvents.RaiseAnyStateSelected(model.StateMachineAsset);
-            
-            // Show Any State transitions inspector (not parameters - those are in a separate panel)
-            model.InspectorView.SetInspector<AnyStateTransitionsInspector, AnyStateInspectorModel>(
-                model.StateMachineAsset, new AnyStateInspectorModel()
-                {
-                    ToState = null // Show all Any State transitions
-                });
         }
 
         private void OnAnyStateTransitionSelected(TransitionEdge obj)
         {
-            // Raise event for any subscribers
+            // Raise event - InspectorController handles the inspector update
             StateMachineEditorEvents.RaiseAnyStateTransitionSelected(model.StateMachineAsset, obj.ToState);
-            
-            // Set inspector for any state transition - shows all transitions to this state
-            model.InspectorView.SetInspector<AnyStateTransitionsInspector, AnyStateInspectorModel>(
-                model.StateMachineAsset,
-                new AnyStateInspectorModel
-                {
-                    ToState = obj.ToState
-                });
         }
 
         private void InstantiateSubStateMachineExitTransitions(SubStateMachineStateAsset subState)

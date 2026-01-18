@@ -39,6 +39,7 @@ namespace DMotion.Editor
         private StateMachineInspectorView parametersInspectorView;
         private StateMachineInspectorView dependenciesInspectorView;
         private BreadcrumbBar breadcrumbBar;
+        private InspectorController inspectorController;
         private bool hasRestoredAfterDomainReload;
 
         [MenuItem(ToolMenuConstants.DMotionPath + "/State Machine Editor")]
@@ -57,6 +58,9 @@ namespace DMotion.Editor
         private void OnDestroy()
         {
             EditorApplication.playModeStateChanged -= OnPlaymodeStateChanged;
+            
+            // Unsubscribe inspector controller
+            inspectorController?.Unsubscribe();
             
             // Clear all event subscriptions to prevent memory leaks
             StateMachineEditorEvents.ClearAllSubscriptions();
@@ -102,6 +106,13 @@ namespace DMotion.Editor
                 if (stateMachineEditorView != null)
                 {
                     stateMachineEditorView.OnEnterSubStateMachine += OnEnterSubStateMachine;
+                }
+                
+                // Create inspector controller and subscribe to selection events
+                if (inspectorView != null && stateMachineEditorView != null)
+                {
+                    inspectorController = new InspectorController(inspectorView, stateMachineEditorView);
+                    inspectorController.Subscribe();
                 }
             }
             
@@ -225,6 +236,9 @@ namespace DMotion.Editor
             {
                 lastEditedAssetGuid = AssetDatabase.AssetPathToGUID(assetPath);
             }
+            
+            // Update inspector controller context
+            inspectorController?.SetContext(stateMachineAsset);
             
             stateMachineEditorView.PopulateView(new StateMachineEditorViewModel
             {
