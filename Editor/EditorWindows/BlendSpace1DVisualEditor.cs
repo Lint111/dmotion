@@ -305,7 +305,7 @@ namespace DMotion.Editor
             else if (isPanning)
             {
                 var delta = e.mousePosition.x - lastMousePos.x;
-                var range = (baseMax - baseMin) * zoom;
+                var range = (baseMax - baseMin) / zoom;
                 panOffset -= delta / trackRect.width * range;
                 e.Use();
             }
@@ -319,7 +319,7 @@ namespace DMotion.Editor
 
         private void DrawTicks(Rect trackRect, float lineY)
         {
-            var range = (baseMax - baseMin) * zoom;
+            var range = (baseMax - baseMin) / zoom;
             var visibleMin = baseMin + panOffset;
             var visibleMax = visibleMin + range;
             
@@ -462,7 +462,7 @@ namespace DMotion.Editor
 
         private float ThresholdToScreen(float threshold, Rect trackRect)
         {
-            var range = (baseMax - baseMin) * zoom;
+            var range = (baseMax - baseMin) / zoom;
             var visibleMin = baseMin + panOffset;
             var normalized = (threshold - visibleMin) / range;
             return trackRect.x + normalized * trackRect.width;
@@ -470,7 +470,7 @@ namespace DMotion.Editor
 
         private float ScreenToThreshold(float screenX, Rect trackRect)
         {
-            var range = (baseMax - baseMin) * zoom;
+            var range = (baseMax - baseMin) / zoom;
             var visibleMin = baseMin + panOffset;
             var normalized = (screenX - trackRect.x) / trackRect.width;
             return visibleMin + normalized * range;
