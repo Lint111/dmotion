@@ -120,7 +120,7 @@ namespace DMotion.Authoring
 
             converter.SingleClipStates = new UnsafeList<SingleClipStateBlob>(singleCount, allocator);
             converter.LinearBlendStates = new UnsafeList<LinearBlendStateConversionData>(linearCount, allocator);
-            converter.Directional2DBlendStates = new UnsafeList<Directional2DBlendStateBlob>(directional2DCount, allocator);
+            converter.Directional2DBlendStates = new UnsafeList<Directional2DBlendStateConversionData>(directional2DCount, allocator);
 
             // Track clip index as we build states
             ushort runningClipIndex = 0;
