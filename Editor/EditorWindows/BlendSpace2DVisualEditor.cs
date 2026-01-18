@@ -11,14 +11,20 @@ namespace DMotion.Editor
     /// </summary>
     internal class BlendSpace2DVisualEditor : BlendSpaceVisualEditorBase
     {
+        // Current clip data (set during Draw)
+        private Directional2DClipWithPosition[] clips;
+        private SerializedObject serializedObject;
+        private Rect drawRect;
+        
         // 2D-specific visual settings
         private const float GridSize = 0.5f;
-        private const float AxisLabelOffset = 15f;
         
         /// <summary>
         /// Event fired when a clip position is changed via dragging.
         /// </summary>
         public event Action<int, Vector2> OnClipPositionChanged;
+
+        #region Public API
 
         /// <summary>
         /// Draws the 2D blend space editor.
@@ -27,29 +33,13 @@ namespace DMotion.Editor
         {
             if (clips == null) return;
             
-            // Draw background
-            EditorGUI.DrawRect(rect, BackgroundColor);
+            // Store references for use in abstract method implementations
+            this.clips = clips;
+            this.serializedObject = serializedObject;
+            this.drawRect = rect;
             
-            // Handle input
-            HandleInput(rect, clips, serializedObject);
-            
-            // Draw grid
-            DrawGrid(rect);
-            
-            // Draw axes
-            DrawAxes(rect);
-            
-            // Draw clips
-            DrawClips(rect, clips);
-            
-            // Draw selection info
-            if (selectedClipIndex >= 0 && selectedClipIndex < clips.Length)
-            {
-                DrawSelectionInfo(rect, clips[selectedClipIndex]);
-            }
-            
-            // Draw zoom indicator
-            DrawZoomIndicator(rect);
+            // Use base class core draw loop
+            DrawCore(rect, serializedObject);
         }
 
         /// <summary>
@@ -73,7 +63,7 @@ namespace DMotion.Editor
             EditorGUILayout.BeginHorizontal();
             var colorRect = GUILayoutUtility.GetRect(16, 16, GUILayout.Width(16));
             EditorGUI.DrawRect(colorRect, GetClipColor(selectedClipIndex));
-            EditorGUILayout.LabelField($"Clip {selectedClipIndex}: {(clip.Clip != null ? clip.Clip.name : "None")}", 
+            EditorGUILayout.LabelField($"Clip {selectedClipIndex}: {GetClipName(selectedClipIndex)}", 
                 EditorStyles.boldLabel);
             EditorGUILayout.EndHorizontal();
             
@@ -93,102 +83,96 @@ namespace DMotion.Editor
             return false;
         }
 
-        private void HandleInput(Rect rect, Directional2DClipWithPosition[] clips, SerializedObject serializedObject)
-        {
-            var e = Event.current;
-            var mousePos = e.mousePosition;
-            
-            if (!rect.Contains(mousePos) && e.type != EventType.MouseUp)
-                return;
+        #endregion
 
-            switch (e.type)
-            {
-                case EventType.ScrollWheel:
-                    HandleZoom(rect, e);
-                    break;
-                    
-                case EventType.MouseDown:
-                    HandleMouseDown(rect, clips, e);
-                    break;
-                    
-                case EventType.MouseDrag:
-                    HandleMouseDrag(rect, clips, serializedObject, e);
-                    break;
-                    
-                case EventType.MouseUp:
-                    HandleMouseUp();
-                    break;
-            }
-            
-            lastMousePos = mousePos;
+        #region Abstract Method Implementations
+
+        protected override int GetClipCount() => clips?.Length ?? 0;
+
+        protected override string GetClipName(int index)
+        {
+            if (clips == null || index < 0 || index >= clips.Length) return "None";
+            return clips[index].Clip != null ? clips[index].Clip.name : $"Clip {index}";
         }
 
-        private void HandleZoom(Rect rect, Event e)
+        protected override void DrawBackground(Rect rect)
         {
-            // Zoom toward mouse position
+            DrawGrid(rect);
+            DrawAxes(rect);
+        }
+
+        protected override void DrawClips(Rect rect)
+        {
+            if (clips == null) return;
+            
+            for (var i = 0; i < clips.Length; i++)
+            {
+                var clip = clips[i];
+                var screenPos = BlendSpaceToScreen(new Vector2(clip.Position.x, clip.Position.y), rect);
+                
+                if (!rect.Contains(screenPos))
+                    continue;
+                
+                var valueText = $"({clip.Position.x:F2}, {clip.Position.y:F2})";
+                DrawClipCircle(screenPos, i, GetClipName(i), true, valueText);
+            }
+        }
+
+        protected override int GetClipAtPosition(Rect rect, Vector2 mousePos)
+        {
+            if (clips == null) return -1;
+            
+            for (var i = clips.Length - 1; i >= 0; i--)
+            {
+                var clip = clips[i];
+                var screenPos = BlendSpaceToScreen(new Vector2(clip.Position.x, clip.Position.y), rect);
+                
+                if (IsPointInCircle(mousePos, screenPos, ClipCircleRadius))
+                    return i;
+            }
+            return -1;
+        }
+
+        protected override void HandleZoom(Rect rect, Event e)
+        {
             var mouseBlendPos = ScreenToBlendSpace(e.mousePosition, rect);
             ApplyZoomDelta(GetZoomDelta(e));
             var newMouseBlendPos = ScreenToBlendSpace(e.mousePosition, rect);
             panOffset += (mouseBlendPos - newMouseBlendPos) * zoom;
-            
             e.Use();
         }
 
-        private void HandleMouseDown(Rect rect, Directional2DClipWithPosition[] clips, Event e)
+        protected override void HandleClipDrag(Rect rect, Event e)
         {
-            if (e.button == 0) // Left click
+            var blendPos = ScreenToBlendSpace(e.mousePosition, rect);
+            
+            // Snap to grid if shift is held
+            if (e.shift)
             {
-                var clickedIndex = GetClipAtPosition(rect, clips, e.mousePosition);
-                if (clickedIndex >= 0)
-                {
-                    SetSelection(clickedIndex);
-                    isDraggingClip = true;
-                    e.Use();
-                }
-                else
-                {
-                    SetSelection(-1);
-                }
+                blendPos.x = Mathf.Round(blendPos.x / GridSize) * GridSize;
+                blendPos.y = Mathf.Round(blendPos.y / GridSize) * GridSize;
             }
-            else if (e.button == 2 || (e.button == 0 && e.alt))
-            {
-                isPanning = true;
-                e.Use();
-            }
+            
+            // Update position via serialized property for undo support
+            var clipsProperty = serializedObject.FindProperty("BlendClips");
+            var clipProperty = clipsProperty.GetArrayElementAtIndex(selectedClipIndex);
+            var positionProperty = clipProperty.FindPropertyRelative("Position");
+            positionProperty.FindPropertyRelative("x").floatValue = blendPos.x;
+            positionProperty.FindPropertyRelative("y").floatValue = blendPos.y;
+            serializedObject.ApplyModifiedProperties();
+            
+            OnClipPositionChanged?.Invoke(selectedClipIndex, blendPos);
         }
 
-        private void HandleMouseDrag(Rect rect, Directional2DClipWithPosition[] clips, 
-            SerializedObject serializedObject, Event e)
+        protected override void HandlePan(Event e, Rect rect)
         {
-            if (isDraggingClip && selectedClipIndex >= 0)
-            {
-                var blendPos = ScreenToBlendSpace(e.mousePosition, rect);
-                
-                // Snap to grid if shift is held
-                if (e.shift)
-                {
-                    blendPos.x = Mathf.Round(blendPos.x / GridSize) * GridSize;
-                    blendPos.y = Mathf.Round(blendPos.y / GridSize) * GridSize;
-                }
-                
-                // Update position via serialized property for undo support
-                var clipsProperty = serializedObject.FindProperty("BlendClips");
-                var clipProperty = clipsProperty.GetArrayElementAtIndex(selectedClipIndex);
-                var positionProperty = clipProperty.FindPropertyRelative("Position");
-                positionProperty.FindPropertyRelative("x").floatValue = blendPos.x;
-                positionProperty.FindPropertyRelative("y").floatValue = blendPos.y;
-                serializedObject.ApplyModifiedProperties();
-                
-                OnClipPositionChanged?.Invoke(selectedClipIndex, blendPos);
-                e.Use();
-            }
-            else if (isPanning)
-            {
-                var delta = e.mousePosition - lastMousePos;
-                panOffset -= delta / (100f * zoom);
-                e.Use();
-            }
+            var delta = e.mousePosition - lastMousePos;
+            panOffset -= delta / (100f * zoom);
         }
+
+        #endregion
+
+        #region Private Helpers
 
         private void DrawGrid(Rect rect)
         {
@@ -204,27 +188,21 @@ namespace DMotion.Editor
             
             Handles.color = GridColor;
             
-            // Vertical lines
             for (var x = minX; x <= maxX; x += gridSpacing)
             {
                 var screenX = center.x + x;
                 if (screenX >= rect.x && screenX <= rect.xMax)
                 {
-                    Handles.DrawLine(
-                        new Vector3(screenX, rect.y, 0),
-                        new Vector3(screenX, rect.yMax, 0));
+                    Handles.DrawLine(new Vector3(screenX, rect.y, 0), new Vector3(screenX, rect.yMax, 0));
                 }
             }
             
-            // Horizontal lines
             for (var y = minY; y <= maxY; y += gridSpacing)
             {
                 var screenY = center.y + y;
                 if (screenY >= rect.y && screenY <= rect.yMax)
                 {
-                    Handles.DrawLine(
-                        new Vector3(rect.x, screenY, 0),
-                        new Vector3(rect.xMax, screenY, 0));
+                    Handles.DrawLine(new Vector3(rect.x, screenY, 0), new Vector3(rect.xMax, screenY, 0));
                 }
             }
             
@@ -238,85 +216,19 @@ namespace DMotion.Editor
             var center = GetBlendSpaceCenter(rect);
             Handles.color = AxisColor;
             
-            // X axis
             if (center.y >= rect.y && center.y <= rect.yMax)
             {
-                Handles.DrawLine(
-                    new Vector3(rect.x, center.y, 0),
-                    new Vector3(rect.xMax, center.y, 0));
+                Handles.DrawLine(new Vector3(rect.x, center.y, 0), new Vector3(rect.xMax, center.y, 0));
                 GUI.Label(new Rect(rect.xMax - 20, center.y + 2, 20, 16), "X", EditorStyles.miniLabel);
             }
             
-            // Y axis
             if (center.x >= rect.x && center.x <= rect.xMax)
             {
-                Handles.DrawLine(
-                    new Vector3(center.x, rect.y, 0),
-                    new Vector3(center.x, rect.yMax, 0));
+                Handles.DrawLine(new Vector3(center.x, rect.y, 0), new Vector3(center.x, rect.yMax, 0));
                 GUI.Label(new Rect(center.x + 2, rect.y + 2, 20, 16), "Y", EditorStyles.miniLabel);
             }
             
             Handles.EndGUI();
-        }
-
-        private void DrawClips(Rect rect, Directional2DClipWithPosition[] clips)
-        {
-            for (var i = 0; i < clips.Length; i++)
-            {
-                var clip = clips[i];
-                var screenPos = BlendSpaceToScreen(new Vector2(clip.Position.x, clip.Position.y), rect);
-                
-                if (!rect.Contains(screenPos))
-                    continue;
-                
-                var isSelected = i == selectedClipIndex;
-                var color = GetClipColor(i);
-                
-                // Draw selection ring
-                if (isSelected)
-                {
-                    DrawCircle(screenPos, ClipCircleRadius + 3, SelectionColor);
-                }
-                
-                // Draw clip circle
-                DrawCircle(screenPos, ClipCircleRadius, color);
-                
-                // Draw clip name
-                var clipName = clip.Clip != null ? clip.Clip.name : $"Clip {i}";
-                var labelRect = GetLabelRectAbove(screenPos, clipName);
-                DrawLabelWithBackground(labelRect, clipName);
-                
-                // Draw position text for selected clip
-                if (isSelected)
-                {
-                    var posText = $"({clip.Position.x:F2}, {clip.Position.y:F2})";
-                    var posRect = GetLabelRectBelow(screenPos, posText);
-                    DrawLabelWithBackground(posRect, posText);
-                }
-            }
-        }
-
-        private void DrawSelectionInfo(Rect rect, Directional2DClipWithPosition clip)
-        {
-            var infoText = $"Selected: {(clip.Clip != null ? clip.Clip.name : "None")}";
-            var style = new GUIStyle(EditorStyles.miniLabel)
-            {
-                normal = { textColor = SelectionColor }
-            };
-            GUI.Label(new Rect(rect.x + 5, rect.y + 5, 200, 16), infoText, style);
-        }
-
-        private int GetClipAtPosition(Rect rect, Directional2DClipWithPosition[] clips, Vector2 mousePos)
-        {
-            for (var i = clips.Length - 1; i >= 0; i--)
-            {
-                var clip = clips[i];
-                var screenPos = BlendSpaceToScreen(new Vector2(clip.Position.x, clip.Position.y), rect);
-                
-                if (IsPointInCircle(mousePos, screenPos, ClipCircleRadius))
-                    return i;
-            }
-            return -1;
         }
 
         private Vector2 GetBlendSpaceCenter(Rect rect)
@@ -331,7 +243,7 @@ namespace DMotion.Editor
             var center = GetBlendSpaceCenter(rect);
             return new Vector2(
                 center.x + blendPos.x * 100f * zoom,
-                center.y - blendPos.y * 100f * zoom); // Y is inverted
+                center.y - blendPos.y * 100f * zoom);
         }
 
         private Vector2 ScreenToBlendSpace(Vector2 screenPos, Rect rect)
@@ -339,7 +251,9 @@ namespace DMotion.Editor
             var center = GetBlendSpaceCenter(rect);
             return new Vector2(
                 (screenPos.x - center.x) / (100f * zoom),
-                -(screenPos.y - center.y) / (100f * zoom)); // Y is inverted
+                -(screenPos.y - center.y) / (100f * zoom));
         }
+
+        #endregion
     }
 }

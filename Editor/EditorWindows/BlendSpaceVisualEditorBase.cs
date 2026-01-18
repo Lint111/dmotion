@@ -31,7 +31,7 @@ namespace DMotion.Editor
         protected static readonly Color SelectionColor = new Color(1f, 0.8f, 0f, 1f);
         protected static readonly Color BackgroundColor = new Color(0.15f, 0.15f, 0.15f, 1f);
         
-        // Cached clip colors (generated from index)
+        // Cached clip colors
         private static readonly Color[] ClipColors = GenerateClipColors(16);
         
         /// <summary>
@@ -43,6 +43,57 @@ namespace DMotion.Editor
         /// Event fired when selection changes.
         /// </summary>
         public event Action<int> OnSelectionChanged;
+
+        #region Abstract Methods - Must be implemented by derived classes
+
+        /// <summary>
+        /// Gets the number of clips in the current data.
+        /// </summary>
+        protected abstract int GetClipCount();
+
+        /// <summary>
+        /// Gets the name of the clip at the specified index.
+        /// </summary>
+        protected abstract string GetClipName(int index);
+
+        /// <summary>
+        /// Draws the background elements (grid, track, axes).
+        /// </summary>
+        protected abstract void DrawBackground(Rect rect);
+
+        /// <summary>
+        /// Draws all clips in the blend space.
+        /// </summary>
+        protected abstract void DrawClips(Rect rect);
+
+        /// <summary>
+        /// Gets the clip index at the given mouse position, or -1 if none.
+        /// </summary>
+        protected abstract int GetClipAtPosition(Rect rect, Vector2 mousePos);
+
+        /// <summary>
+        /// Handles zoom input, updating view state accordingly.
+        /// </summary>
+        protected abstract void HandleZoom(Rect rect, Event e);
+
+        /// <summary>
+        /// Handles dragging a clip to a new position.
+        /// </summary>
+        protected abstract void HandleClipDrag(Rect rect, Event e);
+
+        /// <summary>
+        /// Handles panning the view.
+        /// </summary>
+        protected abstract void HandlePan(Event e, Rect rect);
+
+        /// <summary>
+        /// Gets the help text shown at the bottom of the editor.
+        /// </summary>
+        protected virtual string GetHelpText() => "Scroll: Zoom | MMB: Pan | Shift+Drag: Snap";
+
+        #endregion
+
+        #region Public API
 
         /// <summary>
         /// Resets the view to default zoom and pan.
@@ -65,6 +116,131 @@ namespace DMotion.Editor
             }
         }
 
+        #endregion
+
+        #region Core Draw Loop
+
+        /// <summary>
+        /// Core draw method that orchestrates the rendering.
+        /// Call this from derived class Draw() after setting up clip data.
+        /// </summary>
+        protected void DrawCore(Rect rect, SerializedObject serializedObject)
+        {
+            // Draw background
+            EditorGUI.DrawRect(rect, BackgroundColor);
+            
+            // Handle input
+            HandleInput(rect, serializedObject);
+            
+            // Draw background elements (grid/track/axes)
+            DrawBackground(rect);
+            
+            // Draw clips
+            DrawClips(rect);
+            
+            // Draw selection info
+            if (selectedClipIndex >= 0 && selectedClipIndex < GetClipCount())
+            {
+                DrawSelectionInfo(rect);
+            }
+            
+            // Draw zoom indicator
+            DrawZoomIndicator(rect);
+        }
+
+        #endregion
+
+        #region Input Handling
+
+        /// <summary>
+        /// Main input handler that delegates to specific handlers.
+        /// </summary>
+        protected void HandleInput(Rect rect, SerializedObject serializedObject)
+        {
+            var e = Event.current;
+            var mousePos = e.mousePosition;
+            
+            if (!rect.Contains(mousePos) && e.type != EventType.MouseUp)
+                return;
+
+            switch (e.type)
+            {
+                case EventType.ScrollWheel:
+                    HandleZoom(rect, e);
+                    break;
+                    
+                case EventType.MouseDown:
+                    HandleMouseDown(rect, e);
+                    break;
+                    
+                case EventType.MouseDrag:
+                    HandleMouseDrag(rect, e, serializedObject);
+                    break;
+                    
+                case EventType.MouseUp:
+                    HandleMouseUp();
+                    break;
+            }
+            
+            lastMousePos = mousePos;
+        }
+
+        /// <summary>
+        /// Handles mouse down for selection and pan initiation.
+        /// </summary>
+        protected virtual void HandleMouseDown(Rect rect, Event e)
+        {
+            if (e.button == 0) // Left click
+            {
+                var clickedIndex = GetClipAtPosition(rect, e.mousePosition);
+                if (clickedIndex >= 0)
+                {
+                    SetSelection(clickedIndex);
+                    isDraggingClip = true;
+                    e.Use();
+                }
+                else
+                {
+                    SetSelection(-1);
+                }
+            }
+            else if (e.button == 2 || (e.button == 0 && e.alt)) // Middle click or Alt+Left
+            {
+                isPanning = true;
+                e.Use();
+            }
+        }
+
+        /// <summary>
+        /// Handles mouse drag for clip movement and panning.
+        /// </summary>
+        protected virtual void HandleMouseDrag(Rect rect, Event e, SerializedObject serializedObject)
+        {
+            if (isDraggingClip && selectedClipIndex >= 0)
+            {
+                HandleClipDrag(rect, e);
+                e.Use();
+            }
+            else if (isPanning)
+            {
+                HandlePan(e, rect);
+                e.Use();
+            }
+        }
+
+        /// <summary>
+        /// Handles mouse up to end dragging/panning.
+        /// </summary>
+        protected void HandleMouseUp()
+        {
+            isDraggingClip = false;
+            isPanning = false;
+        }
+
+        #endregion
+
+        #region Selection
+
         /// <summary>
         /// Sets the selected clip index and raises the selection changed event.
         /// </summary>
@@ -86,13 +262,22 @@ namespace DMotion.Editor
         }
 
         /// <summary>
-        /// Handles mouse up event - ends dragging and panning.
+        /// Draws selection info in the top-left corner.
         /// </summary>
-        protected void HandleMouseUp()
+        protected virtual void DrawSelectionInfo(Rect rect)
         {
-            isDraggingClip = false;
-            isPanning = false;
+            var clipName = GetClipName(selectedClipIndex);
+            var infoText = $"Selected: {clipName}";
+            var style = new GUIStyle(EditorStyles.miniLabel)
+            {
+                normal = { textColor = SelectionColor }
+            };
+            GUI.Label(new Rect(rect.x + 5, rect.y + 5, 200, 16), infoText, style);
         }
+
+        #endregion
+
+        #region Drawing Utilities
 
         /// <summary>
         /// Draws a filled circle at the specified position.
@@ -119,7 +304,7 @@ namespace DMotion.Editor
         /// <summary>
         /// Draws the zoom indicator in the bottom-right corner.
         /// </summary>
-        protected void DrawZoomIndicator(Rect rect, string helpText = "Scroll: Zoom | MMB: Pan | Shift+Drag: Snap")
+        protected void DrawZoomIndicator(Rect rect)
         {
             var zoomText = $"Zoom: {zoom:F1}x";
             var style = new GUIStyle(EditorStyles.miniLabel)
@@ -127,10 +312,45 @@ namespace DMotion.Editor
                 alignment = TextAnchor.LowerRight
             };
             GUI.Label(new Rect(rect.xMax - 60, rect.yMax - 18, 55, 16), zoomText, style);
-            
-            // Instructions
-            GUI.Label(new Rect(rect.x + 5, rect.yMax - 18, 250, 16), helpText, EditorStyles.miniLabel);
+            GUI.Label(new Rect(rect.x + 5, rect.yMax - 18, 250, 16), GetHelpText(), EditorStyles.miniLabel);
         }
+
+        /// <summary>
+        /// Draws a clip circle with optional selection ring and label.
+        /// </summary>
+        protected void DrawClipCircle(Vector2 screenPos, int clipIndex, string label, bool showValue = false, string valueText = null)
+        {
+            var isSelected = clipIndex == selectedClipIndex;
+            var color = GetClipColor(clipIndex);
+            
+            // Draw selection ring
+            if (isSelected)
+            {
+                DrawCircle(screenPos, ClipCircleRadius + 3, SelectionColor);
+            }
+            
+            // Draw clip circle
+            DrawCircle(screenPos, ClipCircleRadius, color);
+            
+            // Draw clip name above
+            var labelRect = GetLabelRectAbove(screenPos, label);
+            DrawLabelWithBackground(labelRect, label);
+            
+            // Draw value below for selected clip
+            if (isSelected && showValue && !string.IsNullOrEmpty(valueText))
+            {
+                var valueRect = GetLabelRectBelow(screenPos, valueText);
+                var selectedStyle = new GUIStyle(EditorStyles.miniLabel)
+                {
+                    normal = { textColor = SelectionColor }
+                };
+                GUI.Label(valueRect, valueText, selectedStyle);
+            }
+        }
+
+        #endregion
+
+        #region Geometry Utilities
 
         /// <summary>
         /// Gets the color for a clip based on its index.
@@ -207,5 +427,7 @@ namespace DMotion.Editor
         {
             return -e.delta.y * 0.05f;
         }
+
+        #endregion
     }
 }

@@ -11,6 +11,12 @@ namespace DMotion.Editor
     /// </summary>
     internal class BlendSpace1DVisualEditor : BlendSpaceVisualEditorBase
     {
+        // Current clip data (set during Draw)
+        private ClipWithThreshold[] clips;
+        private SerializedObject serializedObject;
+        private Rect trackRect;
+        private float lineY;
+        
         // Stable base range (doesn't change during drag)
         private float baseMin;
         private float baseMax;
@@ -29,6 +35,8 @@ namespace DMotion.Editor
         /// </summary>
         public event Action<int, float> OnClipThresholdChanged;
 
+        #region Public API
+
         /// <summary>
         /// Draws the 1D blend space editor.
         /// </summary>
@@ -36,75 +44,26 @@ namespace DMotion.Editor
         {
             if (clips == null) return;
             
+            // Store references for use in abstract method implementations
+            this.clips = clips;
+            this.serializedObject = serializedObject;
+            
             // Initialize or update base range only when not dragging
             if (!hasInitializedRange || (!isDraggingClip && !isPanning))
             {
                 UpdateBaseRange(clips);
             }
             
-            // Draw background
-            EditorGUI.DrawRect(rect, BackgroundColor);
-            
             // Calculate track rect (centered vertically)
-            var trackRect = new Rect(
+            trackRect = new Rect(
                 rect.x + TrackPadding,
                 rect.y + (rect.height - TrackHeight) / 2,
                 rect.width - TrackPadding * 2,
                 TrackHeight);
+            lineY = trackRect.y + trackRect.height / 2;
             
-            // Handle input
-            HandleInput(rect, trackRect, clips, serializedObject);
-            
-            // Draw track background
-            var lineY = trackRect.y + trackRect.height / 2;
-            EditorGUI.DrawRect(new Rect(trackRect.x, lineY - 2, trackRect.width, 4), TrackColor);
-            
-            // Draw ticks and labels
-            DrawTicks(trackRect, lineY);
-            
-            // Draw clips
-            DrawClips(trackRect, lineY, clips);
-            
-            // Draw zoom indicator
-            DrawZoomIndicator(rect);
-        }
-
-        /// <summary>
-        /// Updates the base range from clip positions.
-        /// </summary>
-        private void UpdateBaseRange(ClipWithThreshold[] clips)
-        {
-            if (clips == null || clips.Length == 0)
-            {
-                baseMin = 0f;
-                baseMax = 1f;
-            }
-            else
-            {
-                baseMin = float.MaxValue;
-                baseMax = float.MinValue;
-                foreach (var clip in clips)
-                {
-                    baseMin = Mathf.Min(baseMin, clip.Threshold);
-                    baseMax = Mathf.Max(baseMax, clip.Threshold);
-                }
-                
-                // Ensure minimum range
-                var range = baseMax - baseMin;
-                if (range < 0.1f)
-                {
-                    var center = (baseMin + baseMax) / 2f;
-                    baseMin = center - 0.5f;
-                    baseMax = center + 0.5f;
-                    range = 1f;
-                }
-                
-                // Add padding
-                baseMin -= range * DefaultRangePadding;
-                baseMax += range * DefaultRangePadding;
-            }
-            
-            hasInitializedRange = true;
+            // Use base class core draw loop
+            DrawCore(rect, serializedObject);
         }
 
         /// <summary>
@@ -128,7 +87,7 @@ namespace DMotion.Editor
             EditorGUILayout.BeginHorizontal();
             var colorRect = GUILayoutUtility.GetRect(16, 16, GUILayout.Width(16));
             EditorGUI.DrawRect(colorRect, GetClipColor(selectedClipIndex));
-            EditorGUILayout.LabelField($"Clip {selectedClipIndex}: {(clip.Clip != null ? clip.Clip.name : "None")}", 
+            EditorGUILayout.LabelField($"Clip {selectedClipIndex}: {GetClipName(selectedClipIndex)}", 
                 EditorStyles.boldLabel);
             EditorGUILayout.EndHorizontal();
             
@@ -150,115 +109,151 @@ namespace DMotion.Editor
         public override void ResetView()
         {
             base.ResetView();
-            hasInitializedRange = false; // Force recalculation on next draw
+            hasInitializedRange = false;
         }
 
-        private void HandleInput(Rect rect, Rect trackRect, ClipWithThreshold[] clips, 
-            SerializedObject serializedObject)
-        {
-            var e = Event.current;
-            var mousePos = e.mousePosition;
-            
-            if (!rect.Contains(mousePos) && e.type != EventType.MouseUp)
-                return;
+        #endregion
 
-            switch (e.type)
+        #region Abstract Method Implementations
+
+        protected override int GetClipCount() => clips?.Length ?? 0;
+
+        protected override string GetClipName(int index)
+        {
+            if (clips == null || index < 0 || index >= clips.Length) return "None";
+            return clips[index].Clip != null ? clips[index].Clip.name : $"Clip {index}";
+        }
+
+        protected override void DrawBackground(Rect rect)
+        {
+            // Draw track line
+            EditorGUI.DrawRect(new Rect(trackRect.x, lineY - 2, trackRect.width, 4), TrackColor);
+            
+            // Draw ticks
+            DrawTicks();
+        }
+
+        protected override void DrawClips(Rect rect)
+        {
+            if (clips == null) return;
+            
+            // Sort clips by threshold for proper z-ordering
+            var sortedIndices = new int[clips.Length];
+            for (var i = 0; i < clips.Length; i++) sortedIndices[i] = i;
+            Array.Sort(sortedIndices, (a, b) => clips[a].Threshold.CompareTo(clips[b].Threshold));
+            
+            foreach (var i in sortedIndices)
             {
-                case EventType.ScrollWheel:
-                    HandleZoom(trackRect, e);
-                    break;
-                    
-                case EventType.MouseDown:
-                    HandleMouseDown(trackRect, clips, e);
-                    break;
-                    
-                case EventType.MouseDrag:
-                    HandleMouseDrag(trackRect, clips, serializedObject, e);
-                    break;
-                    
-                case EventType.MouseUp:
-                    HandleMouseUp();
-                    break;
+                var clip = clips[i];
+                var screenX = ThresholdToScreen(clip.Threshold);
+                
+                if (screenX < trackRect.x - ClipCircleRadius || screenX > trackRect.xMax + ClipCircleRadius)
+                    continue;
+                
+                var circleCenter = new Vector2(screenX, lineY - 25);
+                
+                // Draw vertical line from track to circle
+                EditorGUI.DrawRect(new Rect(screenX - 1, lineY - 20, 2, 20), GetClipColor(i));
+                
+                // Draw clip circle with label
+                DrawClipCircle(circleCenter, i, GetClipName(i), true, clip.Threshold.ToString("F2"));
             }
-            
-            lastMousePos = mousePos;
         }
 
-        private void HandleZoom(Rect trackRect, Event e)
+        protected override int GetClipAtPosition(Rect rect, Vector2 mousePos)
         {
-            // Zoom toward mouse position
-            var mouseThreshold = ScreenToThreshold(e.mousePosition.x, trackRect);
-            ApplyZoomDelta(GetZoomDelta(e));
-            var newMouseThreshold = ScreenToThreshold(e.mousePosition.x, trackRect);
-            panOffset.x += (mouseThreshold - newMouseThreshold);
+            if (clips == null) return -1;
             
+            for (var i = clips.Length - 1; i >= 0; i--)
+            {
+                var screenX = ThresholdToScreen(clips[i].Threshold);
+                var circleCenter = new Vector2(screenX, lineY - 25);
+                
+                if (IsPointInCircle(mousePos, circleCenter, ClipCircleRadius))
+                    return i;
+            }
+            return -1;
+        }
+
+        protected override void HandleZoom(Rect rect, Event e)
+        {
+            var mouseThreshold = ScreenToThreshold(e.mousePosition.x);
+            ApplyZoomDelta(GetZoomDelta(e));
+            var newMouseThreshold = ScreenToThreshold(e.mousePosition.x);
+            panOffset.x += (mouseThreshold - newMouseThreshold);
             e.Use();
         }
 
-        private void HandleMouseDown(Rect trackRect, ClipWithThreshold[] clips, Event e)
+        protected override void HandleClipDrag(Rect rect, Event e)
         {
-            var lineY = trackRect.y + trackRect.height / 2;
+            var threshold = ScreenToThreshold(e.mousePosition.x);
             
-            if (e.button == 0) // Left click
+            // Snap to ticks if shift is held
+            if (e.shift)
             {
-                var clickedIndex = GetClipAtPosition(trackRect, lineY, clips, e.mousePosition);
-                if (clickedIndex >= 0)
-                {
-                    SetSelection(clickedIndex);
-                    isDraggingClip = true;
-                    e.Use();
-                }
-                else
-                {
-                    SetSelection(-1);
-                }
+                threshold = Mathf.Round(threshold / TickSpacing) * TickSpacing;
             }
-            else if (e.button == 2 || (e.button == 0 && e.alt))
-            {
-                isPanning = true;
-                e.Use();
-            }
+            
+            // Update threshold via serialized property for undo support
+            var clipsProperty = serializedObject.FindProperty("BlendClips");
+            var clipProperty = clipsProperty.GetArrayElementAtIndex(selectedClipIndex);
+            var thresholdProperty = clipProperty.FindPropertyRelative("Threshold");
+            thresholdProperty.floatValue = threshold;
+            serializedObject.ApplyModifiedProperties();
+            
+            OnClipThresholdChanged?.Invoke(selectedClipIndex, threshold);
         }
 
-        private void HandleMouseDrag(Rect trackRect, ClipWithThreshold[] clips, 
-            SerializedObject serializedObject, Event e)
+        protected override void HandlePan(Event e, Rect rect)
         {
-            if (isDraggingClip && selectedClipIndex >= 0)
-            {
-                var threshold = ScreenToThreshold(e.mousePosition.x, trackRect);
-                
-                // Snap to ticks if shift is held
-                if (e.shift)
-                {
-                    threshold = Mathf.Round(threshold / TickSpacing) * TickSpacing;
-                }
-                
-                // Update threshold via serialized property for undo support
-                var clipsProperty = serializedObject.FindProperty("BlendClips");
-                var clipProperty = clipsProperty.GetArrayElementAtIndex(selectedClipIndex);
-                var thresholdProperty = clipProperty.FindPropertyRelative("Threshold");
-                thresholdProperty.floatValue = threshold;
-                serializedObject.ApplyModifiedProperties();
-                
-                OnClipThresholdChanged?.Invoke(selectedClipIndex, threshold);
-                e.Use();
-            }
-            else if (isPanning)
-            {
-                var delta = e.mousePosition.x - lastMousePos.x;
-                var range = (baseMax - baseMin) / zoom;
-                panOffset.x -= delta / trackRect.width * range;
-                e.Use();
-            }
+            var delta = e.mousePosition.x - lastMousePos.x;
+            var range = (baseMax - baseMin) / zoom;
+            panOffset.x -= delta / trackRect.width * range;
         }
 
-        private void DrawTicks(Rect trackRect, float lineY)
+        #endregion
+
+        #region Private Helpers
+
+        private void UpdateBaseRange(ClipWithThreshold[] clips)
+        {
+            if (clips == null || clips.Length == 0)
+            {
+                baseMin = 0f;
+                baseMax = 1f;
+            }
+            else
+            {
+                baseMin = float.MaxValue;
+                baseMax = float.MinValue;
+                foreach (var clip in clips)
+                {
+                    baseMin = Mathf.Min(baseMin, clip.Threshold);
+                    baseMax = Mathf.Max(baseMax, clip.Threshold);
+                }
+                
+                var range = baseMax - baseMin;
+                if (range < 0.1f)
+                {
+                    var center = (baseMin + baseMax) / 2f;
+                    baseMin = center - 0.5f;
+                    baseMax = center + 0.5f;
+                    range = 1f;
+                }
+                
+                baseMin -= range * DefaultRangePadding;
+                baseMax += range * DefaultRangePadding;
+            }
+            
+            hasInitializedRange = true;
+        }
+
+        private void DrawTicks()
         {
             var range = (baseMax - baseMin) / zoom;
             var visibleMin = baseMin + panOffset.x;
             var visibleMax = visibleMin + range;
             
-            // Determine tick spacing based on zoom
             var tickStep = TickSpacing;
             while (tickStep * trackRect.width / range < 30) tickStep *= 2;
             
@@ -266,7 +261,7 @@ namespace DMotion.Editor
             
             for (var t = startTick; t <= visibleMax + tickStep; t += tickStep)
             {
-                var screenX = ThresholdToScreen(t, trackRect);
+                var screenX = ThresholdToScreen(t);
                 
                 if (screenX < trackRect.x || screenX > trackRect.xMax)
                     continue;
@@ -287,71 +282,7 @@ namespace DMotion.Editor
             }
         }
 
-        private void DrawClips(Rect trackRect, float lineY, ClipWithThreshold[] clips)
-        {
-            // Sort clips by threshold for proper z-ordering
-            var sortedIndices = new int[clips.Length];
-            for (var i = 0; i < clips.Length; i++) sortedIndices[i] = i;
-            Array.Sort(sortedIndices, (a, b) => clips[a].Threshold.CompareTo(clips[b].Threshold));
-            
-            foreach (var i in sortedIndices)
-            {
-                var clip = clips[i];
-                var screenX = ThresholdToScreen(clip.Threshold, trackRect);
-                
-                if (screenX < trackRect.x - ClipCircleRadius || screenX > trackRect.xMax + ClipCircleRadius)
-                    continue;
-                
-                var isSelected = i == selectedClipIndex;
-                var color = GetClipColor(i);
-                var circleCenter = new Vector2(screenX, lineY - 25);
-                
-                // Draw vertical line from track to circle
-                EditorGUI.DrawRect(new Rect(screenX - 1, lineY - 20, 2, 20), color);
-                
-                // Draw selection ring
-                if (isSelected)
-                {
-                    DrawCircle(circleCenter, ClipCircleRadius + 3, SelectionColor);
-                }
-                
-                // Draw clip circle
-                DrawCircle(circleCenter, ClipCircleRadius, color);
-                
-                // Draw clip name
-                var clipName = clip.Clip != null ? clip.Clip.name : $"Clip {i}";
-                var labelRect = GetLabelRectAbove(circleCenter, clipName, 10);
-                DrawLabelWithBackground(labelRect, clipName);
-                
-                // Draw threshold value for selected clip
-                if (isSelected)
-                {
-                    var thresholdText = clip.Threshold.ToString("F2");
-                    var thresholdRect = GetLabelRectBelow(new Vector2(screenX, lineY), thresholdText, 15);
-                    var selectedStyle = new GUIStyle(EditorStyles.miniLabel)
-                    {
-                        normal = { textColor = SelectionColor }
-                    };
-                    GUI.Label(thresholdRect, thresholdText, selectedStyle);
-                }
-            }
-        }
-
-        private int GetClipAtPosition(Rect trackRect, float lineY, ClipWithThreshold[] clips, Vector2 mousePos)
-        {
-            for (var i = clips.Length - 1; i >= 0; i--)
-            {
-                var clip = clips[i];
-                var screenX = ThresholdToScreen(clip.Threshold, trackRect);
-                var circleCenter = new Vector2(screenX, lineY - 25);
-                
-                if (IsPointInCircle(mousePos, circleCenter, ClipCircleRadius))
-                    return i;
-            }
-            return -1;
-        }
-
-        private float ThresholdToScreen(float threshold, Rect trackRect)
+        private float ThresholdToScreen(float threshold)
         {
             var range = (baseMax - baseMin) / zoom;
             var visibleMin = baseMin + panOffset.x;
@@ -359,12 +290,14 @@ namespace DMotion.Editor
             return trackRect.x + normalized * trackRect.width;
         }
 
-        private float ScreenToThreshold(float screenX, Rect trackRect)
+        private float ScreenToThreshold(float screenX)
         {
             var range = (baseMax - baseMin) / zoom;
             var visibleMin = baseMin + panOffset.x;
             var normalized = (screenX - trackRect.x) / trackRect.width;
             return visibleMin + normalized * range;
         }
+
+        #endregion
     }
 }
