@@ -23,9 +23,9 @@ namespace DMotion.Editor
             graphView = view;
         }
 
-        internal void SetCreationPosition(Vector2 screenPosition)
+        internal void SetCreationPosition(Vector2 graphPosition)
         {
-            creationPosition = screenPosition;
+            creationPosition = graphPosition;
         }
 
         public List<SearchTreeEntry> CreateSearchTree(SearchWindowContext context)
@@ -72,20 +72,8 @@ namespace DMotion.Editor
         {
             if (entry.userData is Type stateType)
             {
-                // Convert screen position to graph local position
-                // First convert screen to window coordinates
-                var editorWindow = EditorWindow.focusedWindow;
-                if (editorWindow != null)
-                {
-                    var windowMousePosition = context.screenMousePosition - editorWindow.position.position;
-                    var graphMousePosition = graphView.contentViewContainer.WorldToLocal(windowMousePosition);
-                    graphView.CreateStateAtPosition(stateType, graphMousePosition);
-                }
-                else
-                {
-                    // Fallback: create at center of view
-                    graphView.CreateStateAtPosition(stateType, Vector2.zero);
-                }
+                // Use the position captured when Space was pressed
+                graphView.CreateStateAtPosition(stateType, creationPosition);
                 return true;
             }
             return false;

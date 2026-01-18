@@ -194,8 +194,25 @@ namespace DMotion.Editor
 
         private void OpenStateSearchWindow()
         {
-            // Get mouse position for the search window and state creation
-            var screenMousePosition = GUIUtility.GUIToScreenPoint(Event.current.mousePosition);
+            // Capture mouse position in graph coordinates NOW (before search window opens)
+            var mousePosition = Event.current.mousePosition;
+            var graphPosition = contentViewContainer.WorldToLocal(mousePosition);
+            
+            // Check if mouse is within the graph view bounds
+            var localMousePos = this.WorldToLocal(mousePosition);
+            bool isMouseOverGraph = this.ContainsPoint(localMousePos);
+            
+            if (!isMouseOverGraph)
+            {
+                // Mouse not over graph - use center of visible area
+                graphPosition = contentViewContainer.WorldToLocal(this.worldBound.center);
+            }
+            
+            // Store position for when user selects an entry
+            searchWindowProvider.SetCreationPosition(graphPosition);
+            
+            // Open search window at mouse screen position
+            var screenMousePosition = GUIUtility.GUIToScreenPoint(mousePosition);
             SearchWindow.Open(new SearchWindowContext(screenMousePosition), searchWindowProvider);
         }
 
