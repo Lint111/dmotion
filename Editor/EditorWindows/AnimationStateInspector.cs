@@ -38,10 +38,17 @@ namespace DMotion.Editor
         
         // Visual editor
         private BlendSpace1DVisualEditor blendSpaceEditor;
-        private bool showVisualEditor = true;
         private float visualEditorHeight = 100f;
         private const float MinVisualEditorHeight = 60f;
         private const float MaxVisualEditorHeight = 200f;
+        
+        // Dockable sections
+        private DockablePanelSection parametersSection;
+        private DockablePanelSection blendTrackSection;
+        private DockablePanelSection motionsSection;
+        
+        // Undocked window reference
+        private BlendSpaceEditorWindow undockedWindow;
 
         protected override void OnEnable()
         {
@@ -49,6 +56,7 @@ namespace DMotion.Editor
             if (target == null) return;
             InitializeBlendProperties();
             InitializeVisualEditor();
+            InitializeSections();
         }
 
         private void OnDisable()
@@ -57,6 +65,12 @@ namespace DMotion.Editor
             {
                 blendSpaceEditor.OnClipThresholdChanged -= OnClipThresholdChanged;
                 blendSpaceEditor.OnSelectionChanged -= OnSelectionChanged;
+            }
+            
+            if (undockedWindow != null)
+            {
+                undockedWindow.Close();
+                undockedWindow = null;
             }
         }
         
@@ -69,7 +83,6 @@ namespace DMotion.Editor
             intRangeMinProperty = serializedObject.FindProperty(nameof(LinearBlendStateAsset.IntRangeMin));
             intRangeMaxProperty = serializedObject.FindProperty(nameof(LinearBlendStateAsset.IntRangeMax));
             
-            // Support both Float and Int parameters for blending
             blendParametersSelector = new SubAssetReferencePopupSelector<AnimationParameterAsset>(
                 blendParameterProperty.serializedObject.targetObject,
                 "Add a Float or Int parameter",
@@ -85,6 +98,21 @@ namespace DMotion.Editor
             blendSpaceEditor.OnSelectionChanged += OnSelectionChanged;
         }
 
+        private void InitializeSections()
+        {
+            if (parametersSection != null) return;
+            
+            const string prefsPrefix = "DMotion_1DBlend";
+            
+            parametersSection = new DockablePanelSection("Blend Parameter", prefsPrefix, true);
+            
+            blendTrackSection = new DockablePanelSection("Blend Track Preview", prefsPrefix, true);
+            blendTrackSection.OnUndock += OnBlendTrackUndock;
+            blendTrackSection.OnDock += OnBlendTrackDock;
+            
+            motionsSection = new DockablePanelSection("Motions", prefsPrefix, true);
+        }
+
         private void OnClipThresholdChanged(int index, float newThreshold)
         {
             Repaint();
@@ -95,83 +123,120 @@ namespace DMotion.Editor
             Repaint();
         }
 
+        private void OnBlendTrackUndock(string title)
+        {
+            var blendState = target as LinearBlendStateAsset;
+            if (blendState != null)
+            {
+                blendSpaceEditor.SetTarget(blendState);
+                undockedWindow = BlendSpaceEditorWindow.Open(blendSpaceEditor, () =>
+                {
+                    blendTrackSection.SetDocked();
+                    undockedWindow = null;
+                    Repaint();
+                });
+            }
+        }
+
+        private void OnBlendTrackDock()
+        {
+            if (undockedWindow != null)
+            {
+                undockedWindow.Close();
+                undockedWindow = null;
+            }
+        }
+
         protected override void DrawChildProperties()
         {
             InitializeBlendProperties();
             InitializeVisualEditor();
+            InitializeSections();
             
-            blendParametersSelector.OnGUI(EditorGUILayout.GetControlRect(), blendParameterProperty,
-                GUIContentCache.BlendParameter);
-            
-            // Show Int range settings if using an Int parameter
             var linearBlendAsset = target as LinearBlendStateAsset;
-            if (linearBlendAsset != null && linearBlendAsset.UsesIntParameter)
+            
+            // Parameters Section
+            if (parametersSection.DrawHeader(showDockButton: false))
             {
                 EditorGUI.indentLevel++;
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(intRangeMinProperty, GUIContentCache.Min);
-                EditorGUILayout.PropertyField(intRangeMaxProperty, GUIContentCache.Max);
-                EditorGUILayout.EndHorizontal();
+                blendParametersSelector.OnGUI(EditorGUILayout.GetControlRect(), blendParameterProperty,
+                    GUIContentCache.BlendParameter);
                 
-                // Show normalized range info
-                EditorGUILayout.HelpBox(
-                    StringBuilderCache.FormatIntRange(linearBlendAsset.IntRangeMin, linearBlendAsset.IntRangeMax), 
-                    MessageType.Info);
+                if (linearBlendAsset != null && linearBlendAsset.UsesIntParameter)
+                {
+                    EditorGUILayout.BeginHorizontal();
+                    EditorGUILayout.PropertyField(intRangeMinProperty, GUIContentCache.Min);
+                    EditorGUILayout.PropertyField(intRangeMaxProperty, GUIContentCache.Max);
+                    EditorGUILayout.EndHorizontal();
+                    
+                    EditorGUILayout.HelpBox(
+                        StringBuilderCache.FormatIntRange(linearBlendAsset.IntRangeMin, linearBlendAsset.IntRangeMax), 
+                        MessageType.Info);
+                }
                 EditorGUI.indentLevel--;
+                EditorGUILayout.Space(5);
             }
             
-            EditorGUILayout.Space();
+            // Blend Track Preview Section
+            if (blendTrackSection.DrawHeader(() => DrawBlendTrackToolbar()))
+            {
+                DrawVisualEditorContent(linearBlendAsset);
+                EditorGUILayout.Space(5);
+            }
+            else if (!blendTrackSection.IsDocked)
+            {
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button("Focus Window", GUILayout.Width(100)))
+                {
+                    if (undockedWindow != null)
+                    {
+                        undockedWindow.Focus();
+                    }
+                    else
+                    {
+                        OnBlendTrackUndock("Blend Track Preview");
+                    }
+                }
+                GUILayout.FlexibleSpace();
+                EditorGUILayout.EndHorizontal();
+                EditorGUILayout.Space(5);
+            }
             
-            // Visual Editor section
-            DrawVisualEditorSection(linearBlendAsset);
-            
-            EditorGUILayout.Space();
-            
-            // Motions list
-            EditorGUILayout.PropertyField(clipsProperty);
+            // Motions Section
+            if (motionsSection.DrawHeader(showDockButton: false))
+            {
+                EditorGUI.indentLevel++;
+                EditorGUILayout.PropertyField(clipsProperty, GUIContent.none);
+                EditorGUI.indentLevel--;
+            }
         }
 
-        private void DrawVisualEditorSection(LinearBlendStateAsset blendState)
+        private void DrawBlendTrackToolbar()
         {
-            if (blendState == null) return;
-            
-            // Header with foldout and controls
-            EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
-            showVisualEditor = EditorGUILayout.Foldout(showVisualEditor, "Blend Track Preview", true);
-            
-            GUILayout.FlexibleSpace();
-            
-            if (GUILayout.Button("Reset View", EditorStyles.toolbarButton, GUILayout.Width(70)))
+            if (GUILayout.Button("Reset", EditorStyles.toolbarButton, GUILayout.Width(45)))
             {
                 blendSpaceEditor?.ResetView();
             }
             
-            EditorGUILayout.EndHorizontal();
+            GUILayout.Label("H:", GUILayout.Width(15));
+            visualEditorHeight = GUILayout.HorizontalSlider(visualEditorHeight, MinVisualEditorHeight, MaxVisualEditorHeight, GUILayout.Width(60));
+        }
+
+        private void DrawVisualEditorContent(LinearBlendStateAsset blendState)
+        {
+            if (blendState == null) return;
             
-            if (!showVisualEditor) return;
-            
-            // Height slider
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Height", GUILayout.Width(40));
-            visualEditorHeight = EditorGUILayout.Slider(visualEditorHeight, MinVisualEditorHeight, MaxVisualEditorHeight);
-            EditorGUILayout.EndHorizontal();
-            
-            // Visual editor area
             var visualRect = GUILayoutUtility.GetRect(
                 GUIContent.none, 
                 GUIStyle.none, 
                 GUILayout.Height(visualEditorHeight),
                 GUILayout.ExpandWidth(true));
             
-            if (visualRect.width < 100)
-            {
-                visualRect.width = 100;
-            }
+            if (visualRect.width < 100) visualRect.width = 100;
             
-            // Editor maintains its own stable range internally
             blendSpaceEditor.Draw(visualRect, blendState.BlendClips, serializedObject);
             
-            // Selected clip edit fields
             EditorGUILayout.Space(5);
             if (blendSpaceEditor.DrawSelectedClipFields(blendState.BlendClips, clipsProperty))
             {

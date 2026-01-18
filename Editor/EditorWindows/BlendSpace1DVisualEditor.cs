@@ -11,9 +11,13 @@ namespace DMotion.Editor
     /// </summary>
     internal class BlendSpace1DVisualEditor : BlendSpaceVisualEditorBase
     {
+        // Target state
+        private LinearBlendStateAsset targetState;
+        
         // Current clip data (set during Draw)
         private ClipWithThreshold[] clips;
         private SerializedObject serializedObject;
+        private SerializedProperty clipsProperty;
         private Rect trackRect;
         private float lineY;
         
@@ -34,6 +38,36 @@ namespace DMotion.Editor
         /// Event fired when a clip threshold is changed via dragging.
         /// </summary>
         public event Action<int, float> OnClipThresholdChanged;
+
+        #region Abstract Implementation
+
+        public override string EditorTitle => "Blend Track";
+        public override UnityEngine.Object Target => targetState;
+
+        /// <summary>
+        /// Sets the target state for this editor.
+        /// </summary>
+        public void SetTarget(LinearBlendStateAsset state)
+        {
+            targetState = state;
+        }
+
+        /// <inheritdoc/>
+        public override void Draw(Rect rect, SerializedObject serializedObject)
+        {
+            if (targetState == null) return;
+            Draw(rect, targetState.BlendClips, serializedObject);
+        }
+
+        /// <inheritdoc/>
+        public override bool DrawSelectedClipFields(SerializedObject serializedObject)
+        {
+            if (targetState == null) return false;
+            var clipsProperty = serializedObject.FindProperty("BlendClips");
+            return DrawSelectedClipFields(targetState.BlendClips, clipsProperty);
+        }
+
+        #endregion
 
         #region Public API
 

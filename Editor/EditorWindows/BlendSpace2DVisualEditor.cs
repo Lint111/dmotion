@@ -11,6 +11,9 @@ namespace DMotion.Editor
     /// </summary>
     internal class BlendSpace2DVisualEditor : BlendSpaceVisualEditorBase
     {
+        // Target state
+        private Directional2DBlendStateAsset targetState;
+        
         // Current clip data (set during Draw)
         private Directional2DClipWithPosition[] clips;
         private SerializedObject serializedObject;
@@ -23,6 +26,36 @@ namespace DMotion.Editor
         /// Event fired when a clip position is changed via dragging.
         /// </summary>
         public event Action<int, Vector2> OnClipPositionChanged;
+
+        #region Abstract Implementation
+
+        public override string EditorTitle => "Blend Space 2D";
+        public override UnityEngine.Object Target => targetState;
+
+        /// <summary>
+        /// Sets the target state for this editor.
+        /// </summary>
+        public void SetTarget(Directional2DBlendStateAsset state)
+        {
+            targetState = state;
+        }
+
+        /// <inheritdoc/>
+        public override void Draw(Rect rect, SerializedObject serializedObject)
+        {
+            if (targetState == null) return;
+            Draw(rect, targetState.BlendClips, serializedObject);
+        }
+
+        /// <inheritdoc/>
+        public override bool DrawSelectedClipFields(SerializedObject serializedObject)
+        {
+            if (targetState == null) return false;
+            var clipsProperty = serializedObject.FindProperty("BlendClips");
+            return DrawSelectedClipFields(targetState.BlendClips, clipsProperty);
+        }
+
+        #endregion
 
         #region Public API
 

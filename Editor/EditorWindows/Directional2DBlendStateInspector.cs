@@ -13,10 +13,17 @@ namespace DMotion.Editor
         
         // Visual editor
         private BlendSpace2DVisualEditor blendSpaceEditor;
-        private bool showVisualEditor = true;
         private float visualEditorHeight = 200f;
         private const float MinVisualEditorHeight = 100f;
         private const float MaxVisualEditorHeight = 400f;
+        
+        // Dockable sections
+        private DockablePanelSection parametersSection;
+        private DockablePanelSection blendSpaceSection;
+        private DockablePanelSection motionsSection;
+        
+        // Undocked window reference
+        private BlendSpaceEditorWindow undockedWindow;
 
         protected override void OnEnable()
         {
@@ -24,6 +31,7 @@ namespace DMotion.Editor
             if (target == null) return;
             InitializeBlendProperties();
             InitializeVisualEditor();
+            InitializeSections();
         }
 
         private void OnDisable()
@@ -32,6 +40,13 @@ namespace DMotion.Editor
             {
                 blendSpaceEditor.OnClipPositionChanged -= OnClipPositionChanged;
                 blendSpaceEditor.OnSelectionChanged -= OnSelectionChanged;
+            }
+            
+            // Close undocked window if inspector is disabled
+            if (undockedWindow != null)
+            {
+                undockedWindow.Close();
+                undockedWindow = null;
             }
         }
         
@@ -58,10 +73,23 @@ namespace DMotion.Editor
             blendSpaceEditor.OnSelectionChanged += OnSelectionChanged;
         }
 
+        private void InitializeSections()
+        {
+            if (parametersSection != null) return;
+            
+            const string prefsPrefix = "DMotion_2DBlend";
+            
+            parametersSection = new DockablePanelSection("Blend Parameters", prefsPrefix, true);
+            
+            blendSpaceSection = new DockablePanelSection("Blend Space Preview", prefsPrefix, true);
+            blendSpaceSection.OnUndock += OnBlendSpaceUndock;
+            blendSpaceSection.OnDock += OnBlendSpaceDock;
+            
+            motionsSection = new DockablePanelSection("Motions", prefsPrefix, true);
+        }
+
         private void OnClipPositionChanged(int index, Vector2 newPosition)
         {
-            // Position change is handled by the editor via SerializedProperty
-            // This callback can be used for additional effects if needed
             Repaint();
         }
 
@@ -70,70 +98,110 @@ namespace DMotion.Editor
             Repaint();
         }
 
+        private void OnBlendSpaceUndock(string title)
+        {
+            var blendState = target as Directional2DBlendStateAsset;
+            if (blendState != null)
+            {
+                blendSpaceEditor.SetTarget(blendState);
+                undockedWindow = BlendSpaceEditorWindow.Open(blendSpaceEditor, () =>
+                {
+                    blendSpaceSection.SetDocked();
+                    undockedWindow = null;
+                    Repaint();
+                });
+            }
+        }
+
+        private void OnBlendSpaceDock()
+        {
+            if (undockedWindow != null)
+            {
+                undockedWindow.Close();
+                undockedWindow = null;
+            }
+        }
+
         protected override void DrawChildProperties()
         {
             InitializeBlendProperties();
             InitializeVisualEditor();
+            InitializeSections();
             
-            // Blend Parameters section
-            EditorGUILayout.LabelField("Blend Parameters (Float)", EditorStyles.boldLabel);
-            blendParametersSelector.OnGUI(EditorGUILayout.GetControlRect(), parameterXProperty, new GUIContent("Parameter X"));
-            blendParametersSelector.OnGUI(EditorGUILayout.GetControlRect(), parameterYProperty, new GUIContent("Parameter Y"));
+            var blendState = target as Directional2DBlendStateAsset;
             
-            EditorGUILayout.Space();
+            // Parameters Section
+            if (parametersSection.DrawHeader(showDockButton: false))
+            {
+                EditorGUI.indentLevel++;
+                blendParametersSelector.OnGUI(EditorGUILayout.GetControlRect(), parameterXProperty, new GUIContent("Parameter X"));
+                blendParametersSelector.OnGUI(EditorGUILayout.GetControlRect(), parameterYProperty, new GUIContent("Parameter Y"));
+                EditorGUI.indentLevel--;
+                EditorGUILayout.Space(5);
+            }
             
-            // Visual Editor section
-            DrawVisualEditorSection();
+            // Blend Space Preview Section
+            if (blendSpaceSection.DrawHeader(() => DrawBlendSpaceToolbar()))
+            {
+                DrawVisualEditorContent(blendState);
+                EditorGUILayout.Space(5);
+            }
+            else if (!blendSpaceSection.IsDocked)
+            {
+                // Show "Open Window" button when undocked
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button("Focus Window", GUILayout.Width(100)))
+                {
+                    if (undockedWindow != null)
+                    {
+                        undockedWindow.Focus();
+                    }
+                    else
+                    {
+                        OnBlendSpaceUndock("Blend Space Preview");
+                    }
+                }
+                GUILayout.FlexibleSpace();
+                EditorGUILayout.EndHorizontal();
+                EditorGUILayout.Space(5);
+            }
             
-            EditorGUILayout.Space();
-            
-            // Motions list (collapsible)
-            EditorGUILayout.LabelField("Motions", EditorStyles.boldLabel);
-            EditorGUILayout.PropertyField(clipsProperty);
+            // Motions Section
+            if (motionsSection.DrawHeader(showDockButton: false))
+            {
+                EditorGUI.indentLevel++;
+                EditorGUILayout.PropertyField(clipsProperty, GUIContent.none);
+                EditorGUI.indentLevel--;
+            }
         }
 
-        private void DrawVisualEditorSection()
+        private void DrawBlendSpaceToolbar()
         {
-            // Header with foldout and controls
-            EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
-            showVisualEditor = EditorGUILayout.Foldout(showVisualEditor, "Blend Space Preview", true);
-            
-            GUILayout.FlexibleSpace();
-            
-            if (GUILayout.Button("Reset View", EditorStyles.toolbarButton, GUILayout.Width(70)))
+            if (GUILayout.Button("Reset", EditorStyles.toolbarButton, GUILayout.Width(45)))
             {
                 blendSpaceEditor?.ResetView();
             }
             
-            EditorGUILayout.EndHorizontal();
-            
-            if (!showVisualEditor) return;
-            
-            var blendState = target as Directional2DBlendStateAsset;
+            // Height control
+            GUILayout.Label("H:", GUILayout.Width(15));
+            visualEditorHeight = GUILayout.HorizontalSlider(visualEditorHeight, MinVisualEditorHeight, MaxVisualEditorHeight, GUILayout.Width(60));
+        }
+
+        private void DrawVisualEditorContent(Directional2DBlendStateAsset blendState)
+        {
             if (blendState == null) return;
             
-            // Height slider
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Height", GUILayout.Width(40));
-            visualEditorHeight = EditorGUILayout.Slider(visualEditorHeight, MinVisualEditorHeight, MaxVisualEditorHeight);
-            EditorGUILayout.EndHorizontal();
-            
-            // Visual editor area
             var visualRect = GUILayoutUtility.GetRect(
                 GUIContent.none, 
                 GUIStyle.none, 
                 GUILayout.Height(visualEditorHeight),
                 GUILayout.ExpandWidth(true));
             
-            // Ensure minimum width
-            if (visualRect.width < 100)
-            {
-                visualRect.width = 100;
-            }
+            if (visualRect.width < 100) visualRect.width = 100;
             
             blendSpaceEditor.Draw(visualRect, blendState.BlendClips, serializedObject);
             
-            // Selected clip edit fields
             EditorGUILayout.Space(5);
             if (blendSpaceEditor.DrawSelectedClipFields(blendState.BlendClips, clipsProperty))
             {

@@ -47,6 +47,26 @@ namespace DMotion.Editor
         #region Abstract Methods - Must be implemented by derived classes
 
         /// <summary>
+        /// The title for this editor type (e.g., "Blend Track", "Blend Space 2D").
+        /// </summary>
+        public abstract string EditorTitle { get; }
+
+        /// <summary>
+        /// The target ScriptableObject being edited.
+        /// </summary>
+        public abstract UnityEngine.Object Target { get; }
+
+        /// <summary>
+        /// Draws the editor in the given rect. Called by external windows.
+        /// </summary>
+        public abstract void Draw(Rect rect, SerializedObject serializedObject);
+
+        /// <summary>
+        /// Draws the selected clip edit fields. Returns true if changes were made.
+        /// </summary>
+        public abstract bool DrawSelectedClipFields(SerializedObject serializedObject);
+
+        /// <summary>
         /// Gets the number of clips in the current data.
         /// </summary>
         protected abstract int GetClipCount();
