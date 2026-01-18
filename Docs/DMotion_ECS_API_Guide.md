@@ -315,6 +315,103 @@ partial struct CharacterLocomotionSystem : ISystem
 
 ---
 
+### 2D Blend Tree Parameters
+
+For 2D blend states (Directional 2D Blend), you need to set two float parameters - one for X and one for Y:
+
+```csharp
+using DMotion;
+using Unity.Burst;
+using Unity.Entities;
+using Unity.Mathematics;
+
+[BurstCompile]
+partial struct Locomotion2DSystem : ISystem
+{
+    // Pre-compute hashes for 2D blend parameters
+    private static readonly int MoveXHash =
+        StateMachineParameterUtils.GetHashCode("MoveX");
+    private static readonly int MoveYHash =
+        StateMachineParameterUtils.GetHashCode("MoveY");
+
+    [BurstCompile]
+    public void OnUpdate(ref SystemState state)
+    {
+        foreach (var (input, floatParams) in
+                 SystemAPI.Query<RefRO<MovementInput>,
+                                 DynamicBuffer<FloatParameter>>())
+        {
+            // Get movement input (-1 to 1 range)
+            float2 moveInput = input.ValueRO.Direction;
+
+            // Apply deadzone
+            float magnitude = math.length(moveInput);
+            if (magnitude < 0.1f)
+            {
+                moveInput = float2.zero;
+            }
+            else
+            {
+                // Normalize for consistent direction blending
+                moveInput = math.normalize(moveInput);
+            }
+
+            // Set 2D blend parameters
+            floatParams.SetValue(MoveXHash, moveInput.x);
+            floatParams.SetValue(MoveYHash, moveInput.y);
+        }
+    }
+}
+```
+
+**Key Points for 2D Blends:**
+- Both X and Y parameters must be set each frame
+- Normalized input (-1 to 1) works best for directional movement
+- Apply deadzone handling to get clean idle states at (0, 0)
+- Parameter names must match those defined in the Directional2DBlendStateAsset
+
+**Input Smoothing for Better Blending:**
+
+```csharp
+[BurstCompile]
+partial struct SmoothedLocomotion2DSystem : ISystem
+{
+    private static readonly int MoveXHash =
+        StateMachineParameterUtils.GetHashCode("MoveX");
+    private static readonly int MoveYHash =
+        StateMachineParameterUtils.GetHashCode("MoveY");
+
+    [BurstCompile]
+    public void OnUpdate(ref SystemState state)
+    {
+        float dt = SystemAPI.Time.DeltaTime;
+        float smoothSpeed = 10f;
+
+        foreach (var (input, smoothed, floatParams) in
+                 SystemAPI.Query<RefRO<MovementInput>,
+                                 RefRW<SmoothedMovement>,
+                                 DynamicBuffer<FloatParameter>>())
+        {
+            // Smooth the input to avoid animation snapping
+            float2 target = input.ValueRO.Direction;
+            smoothed.ValueRW.Value = math.lerp(
+                smoothed.ValueRO.Value,
+                target,
+                smoothSpeed * dt
+            );
+
+            // Set smoothed parameters
+            floatParams.SetValue(MoveXHash, smoothed.ValueRO.Value.x);
+            floatParams.SetValue(MoveYHash, smoothed.ValueRO.Value.y);
+        }
+    }
+}
+```
+
+See [2D Blend Trees Guide](2DBlendTrees_GUIDE.md) for complete documentation on creating and configuring 2D blend states.
+
+---
+
 ## Querying Animation State
 
 ### Getting Current State Name (Debug Only)
