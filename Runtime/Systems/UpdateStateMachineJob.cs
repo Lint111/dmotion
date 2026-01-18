@@ -34,6 +34,7 @@ namespace DMotion
             ref AnimationStateTransitionRequest animationStateTransitionRequest,
             ref DynamicBuffer<SingleClipState> singleClipStates,
             ref DynamicBuffer<LinearBlendStateMachineState> linearBlendStates,
+            ref DynamicBuffer<Directional2DBlendStateMachineState> directional2DBlendStates,
             ref DynamicBuffer<ClipSampler> clipSamplers,
             ref DynamicBuffer<AnimationState> animationStates,
             in AnimationCurrentState animationCurrentState,
@@ -57,7 +58,8 @@ namespace DMotion
                 AnimationStates = animationStates,
                 ClipSamplers = clipSamplers,
                 SingleClipStates = singleClipStates,
-                LinearBlendStates = linearBlendStates
+                LinearBlendStates = linearBlendStates,
+                Directional2DBlendStates = directional2DBlendStates
             };
             var parameters = new TransitionParameters(boolParameters, intParameters);
 
@@ -227,6 +229,18 @@ namespace DMotion
                         ref buffers.ClipSamplers,
                         finalSpeed);
                     animationStateId = linearClipState.AnimationStateId;
+                    break;
+                case StateType.Directional2DBlend:
+                    var directional2DState = Directional2DBlendStateUtils.NewForStateMachine(
+                        (byte)stateIndex,
+                        stateMachine.StateMachineBlob,
+                        stateMachine.ClipsBlob,
+                        stateMachine.ClipEventsBlob,
+                        ref buffers.Directional2DBlendStates,
+                        ref buffers.AnimationStates,
+                        ref buffers.ClipSamplers,
+                        finalSpeed);
+                    animationStateId = directional2DState.AnimationStateId;
                     break;
                 default:
                     throw new ArgumentOutOfRangeException();

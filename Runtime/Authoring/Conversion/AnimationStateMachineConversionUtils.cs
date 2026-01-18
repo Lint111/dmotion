@@ -113,12 +113,14 @@ namespace DMotion.Authoring
             // Count state types
             int singleCount = flattenedStates.Count(s => s.Asset is SingleClipStateAsset);
             int linearCount = flattenedStates.Count(s => s.Asset is LinearBlendStateAsset);
+            int directional2DCount = flattenedStates.Count(s => s.Asset is Directional2DBlendStateAsset);
 
             converter.States = new UnsafeList<AnimationStateConversionData>(flattenedStates.Count, allocator);
             converter.States.Resize(flattenedStates.Count);
 
             converter.SingleClipStates = new UnsafeList<SingleClipStateBlob>(singleCount, allocator);
             converter.LinearBlendStates = new UnsafeList<LinearBlendStateConversionData>(linearCount, allocator);
+            converter.Directional2DBlendStates = new UnsafeList<Directional2DBlendStateBlob>(directional2DCount, allocator);
 
             // Track clip index as we build states
             ushort runningClipIndex = 0;
@@ -189,6 +191,41 @@ namespace DMotion.Authoring
                         }
 
                         converter.LinearBlendStates.Add(linearBlendData);
+                        break;
+                    
+                    case Directional2DBlendStateAsset directional2DAsset:
+                        stateImplIndex = converter.Directional2DBlendStates.Length;
+
+                        var blendParamIndexX = ResolveParameterIndex<FloatParameterAsset>(
+                            rootMachine, directional2DAsset.BlendParameterX, flatState);
+                        var blendParamIndexY = ResolveParameterIndex<FloatParameterAsset>(
+                            rootMachine, directional2DAsset.BlendParameterY, flatState);
+
+                        Assert.IsTrue(blendParamIndexX >= 0,
+                            $"({rootMachine.name}) Couldn't find Float blend parameter X for state {stateAsset.name}");
+                        Assert.IsTrue(blendParamIndexY >= 0,
+                            $"({rootMachine.name}) Couldn't find Float blend parameter Y for state {stateAsset.name}");
+
+                        var dir2DConvData = new Directional2DBlendStateConversionData
+                        {
+                            BlendParameterIndexX = (ushort)blendParamIndexX,
+                            BlendParameterIndexY = (ushort)blendParamIndexY,
+                            ClipData = new UnsafeList<Directional2DClipData>(directional2DAsset.clips.Count, allocator)
+                        };
+                        dir2DConvData.ClipData.Resize(directional2DAsset.clips.Count);
+
+                        for (int i = 0; i < directional2DAsset.clips.Count; i++)
+                        {
+                            dir2DConvData.ClipData[i] = new Directional2DClipData
+                            {
+                                ClipIndex = runningClipIndex,
+                                Position = directional2DAsset.clips[i].position,
+                                Speed = directional2DAsset.clips[i].speedMultiplier
+                            };
+                            runningClipIndex++;
+                        }
+                        
+                        converter.Directional2DBlendStates.Add(dir2DConvData);
                         break;
 
                     default:
@@ -504,6 +541,7 @@ namespace DMotion.Authoring
             dstManager.AddComponent(entity, stateMachine);
             dstManager.AddBuffer<SingleClipState>(entity);
             dstManager.AddBuffer<LinearBlendStateMachineState>(entity);
+            dstManager.AddBuffer<Directional2DBlendStateMachineState>(entity);
 
             AddStateMachineParameters(dstManager, entity, stateMachineAsset);
         }
@@ -524,6 +562,7 @@ namespace DMotion.Authoring
             dstManager.AddComponent(entity, stateMachine);
             dstManager.AddBuffer<SingleClipState>(entity);
             dstManager.AddBuffer<LinearBlendStateMachineState>(entity);
+            dstManager.AddBuffer<Directional2DBlendStateMachineState>(entity);
         }
 
         public static void AddSingleClipStateComponents(EntityCommands dstManager, Entity ownerEntity, Entity entity,

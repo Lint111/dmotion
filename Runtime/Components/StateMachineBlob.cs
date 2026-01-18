@@ -12,6 +12,7 @@ namespace DMotion
         internal BlobArray<AnimationStateBlob> States;
         internal BlobArray<SingleClipStateBlob> SingleClipStates;
         internal BlobArray<LinearBlendStateBlob> LinearBlendStates;
+        internal BlobArray<Directional2DBlendStateBlob> Directional2DBlendStates;
 
         /// <summary>
         /// Global transitions that can be taken from any state.

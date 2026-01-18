@@ -15,6 +15,7 @@ namespace DMotion
         public DynamicBuffer<ClipSampler> ClipSamplers;
         public DynamicBuffer<SingleClipState> SingleClipStates;
         public DynamicBuffer<LinearBlendStateMachineState> LinearBlendStates;
+        public DynamicBuffer<Directional2DBlendStateMachineState> Directional2DBlendStates;
     }
 
     /// <summary>

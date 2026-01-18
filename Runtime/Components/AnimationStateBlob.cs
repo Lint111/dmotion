@@ -1,4 +1,5 @@
 using Unity.Entities;
+using Unity.Mathematics;
 
 namespace DMotion
 {
@@ -11,12 +12,13 @@ namespace DMotion
     {
         Single = 0,
         LinearBlend = 1,
+        Directional2DBlend = 2,
     }
 
     internal struct AnimationStateBlob
     {
         internal StateType Type;
-        internal ushort StateIndex; // Index into SingleClipStates, LinearBlendStates, or SubStateMachines
+        internal ushort StateIndex; // Index into SingleClipStates, LinearBlendStates, Directional2DBlendStates, or SubStateMachines
         internal bool Loop;
         internal float Speed;
         internal ushort SpeedParameterIndex; // Parameter index for speed multiplier (ushort.MaxValue = no parameter)
@@ -57,5 +59,14 @@ namespace DMotion
         /// For Int parameters: maximum value (maps to 1.0 blend ratio).
         /// </summary>
         internal int IntRangeMax;
+    }
+
+    internal struct Directional2DBlendStateBlob
+    {
+        internal BlobArray<int> ClipIndexes;
+        internal BlobArray<float2> ClipPositions;
+        internal BlobArray<float> ClipSpeeds;
+        internal ushort BlendParameterIndexX;
+        internal ushort BlendParameterIndexY;
     }
 }

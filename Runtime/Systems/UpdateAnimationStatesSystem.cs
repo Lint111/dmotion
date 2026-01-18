@@ -60,7 +60,15 @@ namespace DMotion
                 DeltaTime = SystemAPI.Time.DeltaTime,
             }.ScheduleParallel(handle);
 
-            state.Dependency = new CleanLinearBlendStatesJob().ScheduleParallel(handle);
+            handle = new CleanLinearBlendStatesJob().ScheduleParallel(handle);
+
+            // Directional2DBlend jobs
+            handle = new UpdateDirectional2DBlendStateMachineStatesJob
+            {
+                DeltaTime = SystemAPI.Time.DeltaTime,
+            }.ScheduleParallel(handle);
+
+            state.Dependency = new CleanDirectional2DBlendStatesJob().ScheduleParallel(handle);
         }
 
         /// <summary>
@@ -85,7 +93,15 @@ namespace DMotion
                 DeltaTime = SystemAPI.Time.DeltaTime,
             }.ScheduleParallel(handle);
 
-            state.Dependency = new CleanLinearBlendStatesJob().ScheduleParallel(handle);
+            handle = new CleanLinearBlendStatesJob().ScheduleParallel(handle);
+            
+            // Directional2DBlend jobs
+            handle = new UpdateDirectional2DBlendStateMachineStatesJob
+            {
+                DeltaTime = SystemAPI.Time.DeltaTime,
+            }.ScheduleParallel(handle);
+
+            state.Dependency = new CleanDirectional2DBlendStatesJob().ScheduleParallel(handle);
         }
     }
 }

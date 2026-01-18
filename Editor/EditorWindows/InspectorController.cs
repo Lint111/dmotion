@@ -74,6 +74,10 @@ namespace DMotion.Editor
                     inspectorView.SetInspector<LinearBlendStateInspector, AnimationStateInspectorModel>(
                         state, inspectorModel);
                     break;
+                case Directional2DBlendStateNodeView:
+                    inspectorView.SetInspector<Directional2DBlendStateInspector, AnimationStateInspectorModel>(
+                        state, inspectorModel);
+                    break;
                 case SubStateMachineStateNodeView:
                     inspectorView.SetInspector<SubStateMachineInspector, AnimationStateInspectorModel>(
                         state, inspectorModel);

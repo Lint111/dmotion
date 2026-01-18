@@ -4,6 +4,7 @@ using Latios.Unsafe;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
+using Unity.Mathematics;
 
 namespace DMotion.Authoring
 {
@@ -29,6 +30,13 @@ namespace DMotion.Authoring
         internal float Speed;
     }
     
+    internal struct Directional2DClipData
+    {
+        internal int ClipIndex;
+        internal float2 Position;
+        internal float Speed;
+    }
+    
     internal struct LinearBlendStateConversionData
     {
         internal UnsafeList<ClipIndexWithThreshold> ClipsWithThresholds;
@@ -36,6 +44,13 @@ namespace DMotion.Authoring
         internal bool UsesIntParameter;
         internal int IntRangeMin;
         internal int IntRangeMax;
+    }
+    
+    internal struct Directional2DBlendStateConversionData
+    {
+        internal UnsafeList<Directional2DClipData> ClipData;
+        internal ushort BlendParameterIndexX;
+        internal ushort BlendParameterIndexY;
     }
 
     internal struct StateOutTransitionConversionData
@@ -47,6 +62,7 @@ namespace DMotion.Authoring
         internal UnsafeList<IntTransition> IntTransitions;
         internal bool CanTransitionToSelf;
     }
+
 
     /// <summary>
     /// Conversion data for an exit transition group (one per SubStateMachine with exit states).
@@ -75,6 +91,7 @@ namespace DMotion.Authoring
         internal UnsafeList<AnimationStateConversionData> States;
         internal UnsafeList<SingleClipStateBlob> SingleClipStates;
         internal UnsafeList<LinearBlendStateConversionData> LinearBlendStates;
+        internal UnsafeList<Directional2DBlendStateConversionData> Directional2DBlendStates;
 
         /// <summary>
         /// Any State transitions (global transitions from any state).
@@ -178,6 +195,33 @@ namespace DMotion.Authoring
                         sortedIndexes[clipIndex] = clip.ClipIndex;
                         sortedThresholds[clipIndex] = clip.Threshold;
                         sortedSpeeds[clipIndex] = clip.Speed;
+                    }
+                }
+            }
+
+            // Directional 2D Blend state
+            {
+                var directional2DStates = builder.Allocate(ref root.Directional2DBlendStates, Directional2DBlendStates.Length);
+                for (ushort i = 0; i < directional2DStates.Length; i++)
+                {
+                    var data = Directional2DBlendStates[i];
+                    directional2DStates[i] = new Directional2DBlendStateBlob
+                    {
+                        BlendParameterIndexX = data.BlendParameterIndexX,
+                        BlendParameterIndexY = data.BlendParameterIndexY
+                    };
+                    
+                    var count = data.ClipData.Length;
+                    var clipIndexes = builder.Allocate(ref directional2DStates[i].ClipIndexes, count);
+                    var clipPositions = builder.Allocate(ref directional2DStates[i].ClipPositions, count);
+                    var clipSpeeds = builder.Allocate(ref directional2DStates[i].ClipSpeeds, count);
+                    
+                    for (int j = 0; j < count; j++)
+                    {
+                        var clip = data.ClipData[j];
+                        clipIndexes[j] = clip.ClipIndex;
+                        clipPositions[j] = clip.Position;
+                        clipSpeeds[j] = clip.Speed;
                     }
                 }
             }
@@ -304,6 +348,18 @@ namespace DMotion.Authoring
                         linearBlend.ClipsWithThresholds.Dispose();
                 }
                 LinearBlendStates.Dispose();
+            }
+
+            // Dispose nested lists in Directional2DBlendStates
+            if (Directional2DBlendStates.IsCreated)
+            {
+                for (int i = 0; i < Directional2DBlendStates.Length; i++)
+                {
+                    ref var dir2D = ref Directional2DBlendStates.ElementAt(i);
+                    if (dir2D.ClipData.IsCreated)
+                        dir2D.ClipData.Dispose();
+                }
+                Directional2DBlendStates.Dispose();
             }
 
             // Dispose Any State transitions
