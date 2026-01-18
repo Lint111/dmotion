@@ -20,9 +20,6 @@ namespace DMotion.Editor
         internal StateMachineAsset StateMachineAsset;
         internal EntitySelectionProxyWrapper SelectedEntity;
         internal VisualTreeAsset StateNodeXml;
-        internal StateMachineInspectorView InspectorView;
-        internal StateMachineInspectorView ParametersInspectorView;
-        internal StateMachineInspectorView DependenciesInspectorView;
     }
 
     internal class AnimationStateMachineEditorWindow : EditorWindow
@@ -39,7 +36,12 @@ namespace DMotion.Editor
         private StateMachineInspectorView parametersInspectorView;
         private StateMachineInspectorView dependenciesInspectorView;
         private BreadcrumbBar breadcrumbBar;
+        
+        // Event-driven panel controllers
         private InspectorController inspectorController;
+        private ParametersPanelController parametersPanelController;
+        private DependenciesPanelController dependenciesPanelController;
+        
         private bool hasRestoredAfterDomainReload;
 
         [MenuItem(ToolMenuConstants.DMotionPath + "/State Machine Editor")]
@@ -59,8 +61,10 @@ namespace DMotion.Editor
         {
             EditorApplication.playModeStateChanged -= OnPlaymodeStateChanged;
             
-            // Unsubscribe inspector controller
+            // Unsubscribe all panel controllers
             inspectorController?.Unsubscribe();
+            parametersPanelController?.Unsubscribe();
+            dependenciesPanelController?.Unsubscribe();
             
             // Clear all event subscriptions to prevent memory leaks
             StateMachineEditorEvents.ClearAllSubscriptions();
@@ -108,11 +112,26 @@ namespace DMotion.Editor
                     stateMachineEditorView.OnEnterSubStateMachine += OnEnterSubStateMachine;
                 }
                 
-                // Create inspector controller and subscribe to selection events
-                if (inspectorView != null && stateMachineEditorView != null)
+                // Create panel controllers and subscribe to events
+                if (stateMachineEditorView != null)
                 {
-                    inspectorController = new InspectorController(inspectorView, stateMachineEditorView);
-                    inspectorController.Subscribe();
+                    if (inspectorView != null)
+                    {
+                        inspectorController = new InspectorController(inspectorView, stateMachineEditorView);
+                        inspectorController.Subscribe();
+                    }
+                    
+                    if (parametersInspectorView != null)
+                    {
+                        parametersPanelController = new ParametersPanelController(parametersInspectorView);
+                        parametersPanelController.Subscribe();
+                    }
+                    
+                    if (dependenciesInspectorView != null)
+                    {
+                        dependenciesPanelController = new DependenciesPanelController(dependenciesInspectorView);
+                        dependenciesPanelController.Subscribe();
+                    }
                 }
             }
             
@@ -162,14 +181,15 @@ namespace DMotion.Editor
                 var savedPosition = new Vector3(translate.x, translate.y, 0f);
                 var savedScale = new Vector3(scale.value.x, scale.value.y, 1f);
                 
-                // Repopulate without framing
+                // Refresh panel controllers (they will re-render with updated data)
+                parametersPanelController?.SetContext(lastEditedStateMachine);
+                dependenciesPanelController?.SetContext(lastEditedStateMachine);
+                
+                // Repopulate graph without framing
                 stateMachineEditorView.PopulateView(new StateMachineEditorViewModel
                 {
                     StateMachineAsset = lastEditedStateMachine,
-                    StateNodeXml = StateNodeXml,
-                    InspectorView = inspectorView,
-                    ParametersInspectorView = parametersInspectorView,
-                    DependenciesInspectorView = dependenciesInspectorView
+                    StateNodeXml = StateNodeXml
                 });
                 
                 // Restore view transform
@@ -237,16 +257,15 @@ namespace DMotion.Editor
                 lastEditedAssetGuid = AssetDatabase.AssetPathToGUID(assetPath);
             }
             
-            // Update inspector controller context
+            // Update all panel controllers with new context
             inspectorController?.SetContext(stateMachineAsset);
+            parametersPanelController?.SetContext(stateMachineAsset);
+            dependenciesPanelController?.SetContext(stateMachineAsset);
             
             stateMachineEditorView.PopulateView(new StateMachineEditorViewModel
             {
                 StateMachineAsset = stateMachineAsset,
-                StateNodeXml = StateNodeXml,
-                InspectorView = inspectorView,
-                ParametersInspectorView = parametersInspectorView,
-                DependenciesInspectorView = dependenciesInspectorView
+                StateNodeXml = StateNodeXml
             });
             WaitAndFrameAll();
         }
@@ -296,14 +315,16 @@ namespace DMotion.Editor
                             lastEditedAssetGuid = AssetDatabase.AssetPathToGUID(assetPath);
                         }
                         
+                        // Update panel controllers
+                        inspectorController?.SetContext(stateMachineDebug.StateMachineAsset);
+                        parametersPanelController?.SetContext(stateMachineDebug.StateMachineAsset);
+                        dependenciesPanelController?.SetContext(stateMachineDebug.StateMachineAsset);
+                        
                         stateMachineEditorView.PopulateView(new StateMachineEditorViewModel
                         {
                             StateMachineAsset = stateMachineDebug.StateMachineAsset,
                             SelectedEntity = entitySelectionProxy,
-                            StateNodeXml = StateNodeXml,
-                            InspectorView = inspectorView,
-                            ParametersInspectorView = parametersInspectorView,
-                            DependenciesInspectorView = dependenciesInspectorView
+                            StateNodeXml = StateNodeXml
                         });
                         WaitAndFrameAll();
                     }

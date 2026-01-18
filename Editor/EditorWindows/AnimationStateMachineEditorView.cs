@@ -278,8 +278,6 @@ namespace DMotion.Editor
 
         private void DeleteState(AnimationStateAsset state)
         {
-            var wasSubMachine = state is SubStateMachineStateAsset;
-            
             // Clean up visual dictionaries before deleting data
             stateToView.Remove(state);
             
@@ -302,14 +300,8 @@ namespace DMotion.Editor
             // Delete from data model
             model.StateMachineAsset.DeleteState(state);
             
-            // Raise event for other panels
+            // Raise event - DependenciesPanelController handles refresh for SubMachines
             StateMachineEditorEvents.RaiseStateRemoved(model.StateMachineAsset, state);
-            
-            // Refresh dependencies panel if a SubMachine was deleted
-            if (wasSubMachine)
-            {
-                RefreshDependenciesPanel();
-            }
         }
 
         private void DeleteAllOutTransitions(AnimationStateAsset fromState, AnimationStateAsset toState)
@@ -348,35 +340,9 @@ namespace DMotion.Editor
             if (subState == null) return;
             
             InstantiateStateView(subState);
-            RefreshDependenciesPanel();
             
-            // Raise event for other panels
+            // Raise event - DependenciesPanelController handles panel refresh
             StateMachineEditorEvents.RaiseStateAdded(model.StateMachineAsset, subState);
-        }
-
-        /// <summary>
-        /// Refreshes the dependencies panel visibility based on current SubMachines.
-        /// </summary>
-        internal void RefreshDependenciesPanel()
-        {
-            if (model.DependenciesInspectorView == null) return;
-            
-            var hasSubMachines = HasAnySubStateMachine(model.StateMachineAsset);
-            
-            if (hasSubMachines)
-            {
-                model.DependenciesInspectorView.style.display = DisplayStyle.Flex;
-                model.DependenciesInspectorView.SetInspector<DependencyInspector, DependencyInspectorModel>(
-                    model.StateMachineAsset, new DependencyInspectorModel()
-                    {
-                        StateMachine = model.StateMachineAsset
-                    });
-            }
-            else
-            {
-                model.DependenciesInspectorView.style.display = DisplayStyle.None;
-                model.DependenciesInspectorView.Clear();
-            }
         }
 
         private void CreateOutTransition(AnimationStateAsset fromState, AnimationStateAsset toState)
@@ -495,33 +461,8 @@ namespace DMotion.Editor
             {
                 InstantiateExitStateEdge(exitState);
             }
-
-            model.ParametersInspectorView.SetInspector<ParametersInspector, ParameterInspectorModel>(
-                model.StateMachineAsset, new ParameterInspectorModel()
-                {
-                    StateMachine = model.StateMachineAsset
-                });
-
-            // Set up dependencies inspector - only show if there are SubStateMachines
-            if (model.DependenciesInspectorView != null)
-            {
-                var hasSubMachines = HasAnySubStateMachine(model.StateMachineAsset);
-                
-                if (hasSubMachines)
-                {
-                    model.DependenciesInspectorView.style.display = DisplayStyle.Flex;
-                    model.DependenciesInspectorView.SetInspector<DependencyInspector, DependencyInspectorModel>(
-                        model.StateMachineAsset, new DependencyInspectorModel()
-                        {
-                            StateMachine = model.StateMachineAsset
-                        });
-                }
-                else
-                {
-                    model.DependenciesInspectorView.style.display = DisplayStyle.None;
-                    model.DependenciesInspectorView.Clear();
-                }
-            }
+            
+            // Panel controllers handle Parameters and Dependencies panels via events
         }
 
         internal StateNodeView GetViewForState(AnimationStateAsset state)
