@@ -477,8 +477,8 @@ namespace DMotion.Tests
         /// </summary>
         private struct Test2DBlend : System.IDisposable
         {
-            public NativeArray<float2> Positions { get; private set; }
-            public NativeArray<float> Weights { get; private set; }
+            public NativeArray<float2> Positions;
+            public NativeArray<float> Weights;
 
             public Test2DBlend(int clipCount)
             {
