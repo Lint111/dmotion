@@ -186,6 +186,7 @@ namespace DMotion.Editor
                     : DropdownMenuAction.Status.Normal;
                 evt.menu.AppendAction("New State", a => CreateState(a, typeof(SingleClipStateAsset)), status);
                 evt.menu.AppendAction("New Blend Tree 1D", a => CreateState(a, typeof(LinearBlendStateAsset)), status);
+                evt.menu.AppendAction("New Blend Tree 2D", a => CreateState(a, typeof(Directional2DBlendStateAsset)), status);
                 evt.menu.AppendAction("New Sub-State Machine", a => CreateState(a, typeof(SubStateMachineStateAsset)), status);
             }
 
