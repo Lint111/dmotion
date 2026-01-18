@@ -1,6 +1,5 @@
 using System;
 using DMotion.Authoring;
-using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
 
@@ -44,7 +43,7 @@ namespace DMotion.Editor
         /// <summary>
         /// Event fired when a clip position is changed via dragging.
         /// </summary>
-        public event Action<int, float2> OnClipPositionChanged;
+        public event Action<int, Vector2> OnClipPositionChanged;
         
         /// <summary>
         /// Event fired when selection changes.
@@ -341,7 +340,7 @@ namespace DMotion.Editor
             for (var i = 0; i < clips.Length; i++)
             {
                 var clip = clips[i];
-                var screenPos = BlendSpaceToScreen(clip.Position, rect);
+                var screenPos = BlendSpaceToScreen(new Vector2(clip.Position.x, clip.Position.y), rect);
                 
                 if (!rect.Contains(screenPos))
                     continue;
@@ -429,7 +428,7 @@ namespace DMotion.Editor
             for (var i = clips.Length - 1; i >= 0; i--) // Reverse order for correct z-ordering
             {
                 var clip = clips[i];
-                var screenPos = BlendSpaceToScreen(clip.Position, rect);
+                var screenPos = BlendSpaceToScreen(new Vector2(clip.Position.x, clip.Position.y), rect);
                 var distance = Vector2.Distance(mousePos, screenPos);
                 
                 if (distance <= ClipCircleRadius)
@@ -445,7 +444,7 @@ namespace DMotion.Editor
                 rect.center.y + panOffset.y * 100f * zoom);
         }
 
-        private Vector2 BlendSpaceToScreen(float2 blendPos, Rect rect)
+        private Vector2 BlendSpaceToScreen(Vector2 blendPos, Rect rect)
         {
             var center = GetBlendSpaceCenter(rect);
             return new Vector2(
@@ -453,10 +452,10 @@ namespace DMotion.Editor
                 center.y - blendPos.y * 100f * zoom); // Y is inverted
         }
 
-        private float2 ScreenToBlendSpace(Vector2 screenPos, Rect rect)
+        private Vector2 ScreenToBlendSpace(Vector2 screenPos, Rect rect)
         {
             var center = GetBlendSpaceCenter(rect);
-            return new float2(
+            return new Vector2(
                 (screenPos.x - center.x) / (100f * zoom),
                 -(screenPos.y - center.y) / (100f * zoom)); // Y is inverted
         }

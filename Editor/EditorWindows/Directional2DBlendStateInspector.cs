@@ -58,7 +58,7 @@ namespace DMotion.Editor
             blendSpaceEditor.OnSelectionChanged += OnSelectionChanged;
         }
 
-        private void OnClipPositionChanged(int index, Unity.Mathematics.float2 newPosition)
+        private void OnClipPositionChanged(int index, Vector2 newPosition)
         {
             // Position change is handled by the editor via SerializedProperty
             // This callback can be used for additional effects if needed
