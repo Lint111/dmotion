@@ -81,8 +81,12 @@ namespace DMotion.Editor
                 return;
             }
 
-            // Notify the graph view to navigate into the nested state machine
-            GraphView?.OnEnterSubStateMachine?.Invoke(subState.NestedStateMachine);
+            // Raise navigation event - BreadcrumbController handles the actual navigation
+            var parentMachine = GraphView?.StateMachine;
+            if (parentMachine != null)
+            {
+                StateMachineEditorEvents.RaiseSubStateMachineEntered(parentMachine, subState.NestedStateMachine);
+            }
         }
     }
 

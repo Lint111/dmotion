@@ -75,11 +75,6 @@ namespace DMotion.Editor
 
         internal StateMachineAsset StateMachine => model.StateMachineAsset;
         internal VisualTreeAsset StateNodeXml => model.StateNodeXml;
-        
-        /// <summary>
-        /// Event fired when user double-clicks a SubStateMachine node to navigate into it.
-        /// </summary>
-        internal Action<StateMachineAsset> OnEnterSubStateMachine;
 
         public AnimationStateMachineEditorView()
         {

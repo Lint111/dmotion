@@ -41,6 +41,7 @@ namespace DMotion.Editor
         private InspectorController inspectorController;
         private ParametersPanelController parametersPanelController;
         private DependenciesPanelController dependenciesPanelController;
+        private BreadcrumbController breadcrumbController;
         
         private bool hasRestoredAfterDomainReload;
 
@@ -65,6 +66,7 @@ namespace DMotion.Editor
             inspectorController?.Unsubscribe();
             parametersPanelController?.Unsubscribe();
             dependenciesPanelController?.Unsubscribe();
+            breadcrumbController?.Unsubscribe();
             
             // Clear all event subscriptions to prevent memory leaks
             StateMachineEditorEvents.ClearAllSubscriptions();
@@ -100,18 +102,6 @@ namespace DMotion.Editor
                 dependenciesInspectorView = root.Q<StateMachineInspectorView>("dependencies-inspector");
                 breadcrumbBar = root.Q<BreadcrumbBar>("breadcrumb-bar");
                 
-                // Wire up breadcrumb navigation
-                if (breadcrumbBar != null)
-                {
-                    breadcrumbBar.OnNavigate += OnBreadcrumbNavigate;
-                }
-                
-                // Wire up graph view to notify when entering a sub-state machine
-                if (stateMachineEditorView != null)
-                {
-                    stateMachineEditorView.OnEnterSubStateMachine += OnEnterSubStateMachine;
-                }
-                
                 // Create panel controllers and subscribe to events
                 if (stateMachineEditorView != null)
                 {
@@ -132,6 +122,13 @@ namespace DMotion.Editor
                         dependenciesPanelController = new DependenciesPanelController(dependenciesInspectorView);
                         dependenciesPanelController.Subscribe();
                     }
+                    
+                    if (breadcrumbBar != null)
+                    {
+                        breadcrumbController = new BreadcrumbController(breadcrumbBar);
+                        breadcrumbController.OnNavigationRequested += OnNavigationRequested;
+                        breadcrumbController.Subscribe();
+                    }
                 }
             }
             
@@ -139,20 +136,13 @@ namespace DMotion.Editor
             RestoreAfterDomainReload();
         }
         
-        private void OnBreadcrumbNavigate(int index)
+        /// <summary>
+        /// Called by BreadcrumbController when navigation is requested (via events or clicks).
+        /// </summary>
+        private void OnNavigationRequested(StateMachineAsset targetMachine)
         {
-            var target = breadcrumbBar?.NavigationStack[index];
-            if (target != null)
-            {
-                LoadStateMachineInternal(target, updateBreadcrumb: false);
-            }
-        }
-        
-        private void OnEnterSubStateMachine(StateMachineAsset nestedMachine)
-        {
-            if (nestedMachine == null) return;
-            breadcrumbBar?.Push(nestedMachine);
-            LoadStateMachineInternal(nestedMachine, updateBreadcrumb: false);
+            if (targetMachine == null) return;
+            LoadStateMachineInternal(targetMachine, updateBreadcrumb: false);
         }
         
         private void OnEnable()
@@ -235,8 +225,8 @@ namespace DMotion.Editor
         {
             if (stateMachineAsset == null) return;
             
-            // Reset breadcrumb to new root
-            breadcrumbBar?.SetRoot(stateMachineAsset);
+            // Reset breadcrumb to new root via controller
+            breadcrumbController?.SetRoot(stateMachineAsset);
             
             LoadStateMachineInternal(stateMachineAsset, updateBreadcrumb: false);
         }

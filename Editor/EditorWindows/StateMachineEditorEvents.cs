@@ -5,9 +5,56 @@ namespace DMotion.Editor
 {
     /// <summary>
     /// Centralized event system for the State Machine Editor.
-    /// All panels subscribe to these events to stay synchronized.
-    /// This decouples editor components and provides a clean public API for extensions.
+    /// Provides a public API for extensions and tools to react to editor changes.
     /// </summary>
+    /// <remarks>
+    /// <para><b>Architecture:</b> All editor panels subscribe to these events to stay synchronized.
+    /// The GraphView raises events, and controllers/panels respond independently.</para>
+    /// 
+    /// <para><b>Event Categories:</b></para>
+    /// <list type="bullet">
+    ///   <item><b>State Events</b> - State added/removed, default state changes</item>
+    ///   <item><b>Parameter Events</b> - Parameter added/removed/changed</item>
+    ///   <item><b>Transition Events</b> - Transitions and Any State transitions</item>
+    ///   <item><b>Exit State Events</b> - Exit states and Any State exit transition</item>
+    ///   <item><b>Link Events</b> - Parameter links for SubStateMachine dependencies</item>
+    ///   <item><b>Selection Events</b> - Graph selection changes</item>
+    ///   <item><b>Navigation Events</b> - SubStateMachine navigation</item>
+    ///   <item><b>General Events</b> - Catch-all and repopulate requests</item>
+    /// </list>
+    /// 
+    /// <para><b>Usage Example - Custom Extension:</b></para>
+    /// <code>
+    /// public class MyStateMachineAnalyzer
+    /// {
+    ///     public void Initialize()
+    ///     {
+    ///         StateMachineEditorEvents.OnStateAdded += OnStateAdded;
+    ///         StateMachineEditorEvents.OnTransitionAdded += OnTransitionAdded;
+    ///     }
+    ///     
+    ///     public void Cleanup()
+    ///     {
+    ///         StateMachineEditorEvents.OnStateAdded -= OnStateAdded;
+    ///         StateMachineEditorEvents.OnTransitionAdded -= OnTransitionAdded;
+    ///     }
+    ///     
+    ///     private void OnStateAdded(StateMachineAsset machine, AnimationStateAsset state)
+    ///     {
+    ///         Debug.Log($"State '{state.name}' added to '{machine.name}'");
+    ///     }
+    ///     
+    ///     private void OnTransitionAdded(StateMachineAsset machine, 
+    ///         AnimationStateAsset from, AnimationStateAsset to)
+    ///     {
+    ///         Debug.Log($"Transition: {from.name} -> {to.name}");
+    ///     }
+    /// }
+    /// </code>
+    /// 
+    /// <para><b>Important:</b> Always unsubscribe when your extension is disposed to prevent memory leaks.
+    /// The editor window calls <see cref="ClearAllSubscriptions"/> on close as a safety net.</para>
+    /// </remarks>
     public static class StateMachineEditorEvents
     {
         #region State Events
@@ -179,22 +226,33 @@ namespace DMotion.Editor
         /// </summary>
         public static event Action<StateMachineAsset> OnSubStateMachineExited;
 
+        /// <summary>
+        /// Fired when user requests navigation to a specific level via breadcrumb.
+        /// Args: (targetMachine, stackIndex)
+        /// </summary>
+        public static event Action<StateMachineAsset, int> OnBreadcrumbNavigationRequested;
+
         #endregion
 
         #region Raise Methods - States
+        // These methods are called by editor components to fire events.
+        // External code should subscribe to events, not call Raise methods directly.
 
+        /// <summary>Raises <see cref="OnStateAdded"/> and <see cref="OnStateMachineChanged"/>.</summary>
         public static void RaiseStateAdded(StateMachineAsset machine, AnimationStateAsset state)
         {
             OnStateAdded?.Invoke(machine, state);
             OnStateMachineChanged?.Invoke(machine);
         }
 
+        /// <summary>Raises <see cref="OnStateRemoved"/> and <see cref="OnStateMachineChanged"/>.</summary>
         public static void RaiseStateRemoved(StateMachineAsset machine, AnimationStateAsset state)
         {
             OnStateRemoved?.Invoke(machine, state);
             OnStateMachineChanged?.Invoke(machine);
         }
 
+        /// <summary>Raises <see cref="OnDefaultStateChanged"/> and <see cref="OnStateMachineChanged"/>.</summary>
         public static void RaiseDefaultStateChanged(StateMachineAsset machine, AnimationStateAsset newDefault, AnimationStateAsset previous)
         {
             OnDefaultStateChanged?.Invoke(machine, newDefault, previous);
@@ -205,18 +263,21 @@ namespace DMotion.Editor
 
         #region Raise Methods - Parameters
 
+        /// <summary>Raises <see cref="OnParameterAdded"/> and <see cref="OnStateMachineChanged"/>.</summary>
         public static void RaiseParameterAdded(StateMachineAsset machine, AnimationParameterAsset param)
         {
             OnParameterAdded?.Invoke(machine, param);
             OnStateMachineChanged?.Invoke(machine);
         }
 
+        /// <summary>Raises <see cref="OnParameterRemoved"/> and <see cref="OnStateMachineChanged"/>.</summary>
         public static void RaiseParameterRemoved(StateMachineAsset machine, AnimationParameterAsset param)
         {
             OnParameterRemoved?.Invoke(machine, param);
             OnStateMachineChanged?.Invoke(machine);
         }
 
+        /// <summary>Raises <see cref="OnParameterChanged"/> only (no general change event).</summary>
         public static void RaiseParameterChanged(StateMachineAsset machine, AnimationParameterAsset param)
         {
             OnParameterChanged?.Invoke(machine, param);
@@ -226,24 +287,28 @@ namespace DMotion.Editor
 
         #region Raise Methods - Transitions
 
+        /// <summary>Raises <see cref="OnTransitionAdded"/> and <see cref="OnStateMachineChanged"/>.</summary>
         public static void RaiseTransitionAdded(StateMachineAsset machine, AnimationStateAsset fromState, AnimationStateAsset toState)
         {
             OnTransitionAdded?.Invoke(machine, fromState, toState);
             OnStateMachineChanged?.Invoke(machine);
         }
 
+        /// <summary>Raises <see cref="OnTransitionRemoved"/> and <see cref="OnStateMachineChanged"/>.</summary>
         public static void RaiseTransitionRemoved(StateMachineAsset machine, AnimationStateAsset fromState, AnimationStateAsset toState)
         {
             OnTransitionRemoved?.Invoke(machine, fromState, toState);
             OnStateMachineChanged?.Invoke(machine);
         }
 
+        /// <summary>Raises <see cref="OnAnyStateTransitionAdded"/> and <see cref="OnStateMachineChanged"/>.</summary>
         public static void RaiseAnyStateTransitionAdded(StateMachineAsset machine, AnimationStateAsset toState)
         {
             OnAnyStateTransitionAdded?.Invoke(machine, toState);
             OnStateMachineChanged?.Invoke(machine);
         }
 
+        /// <summary>Raises <see cref="OnAnyStateTransitionRemoved"/> and <see cref="OnStateMachineChanged"/>.</summary>
         public static void RaiseAnyStateTransitionRemoved(StateMachineAsset machine, AnimationStateAsset toState)
         {
             OnAnyStateTransitionRemoved?.Invoke(machine, toState);
@@ -254,18 +319,21 @@ namespace DMotion.Editor
 
         #region Raise Methods - Exit States
 
+        /// <summary>Raises <see cref="OnExitStateAdded"/> and <see cref="OnStateMachineChanged"/>.</summary>
         public static void RaiseExitStateAdded(StateMachineAsset machine, AnimationStateAsset state)
         {
             OnExitStateAdded?.Invoke(machine, state);
             OnStateMachineChanged?.Invoke(machine);
         }
 
+        /// <summary>Raises <see cref="OnExitStateRemoved"/> and <see cref="OnStateMachineChanged"/>.</summary>
         public static void RaiseExitStateRemoved(StateMachineAsset machine, AnimationStateAsset state)
         {
             OnExitStateRemoved?.Invoke(machine, state);
             OnStateMachineChanged?.Invoke(machine);
         }
 
+        /// <summary>Raises <see cref="OnAnyStateExitTransitionChanged"/> and <see cref="OnStateMachineChanged"/>.</summary>
         public static void RaiseAnyStateExitTransitionChanged(StateMachineAsset machine, bool hasExitTransition)
         {
             OnAnyStateExitTransitionChanged?.Invoke(machine, hasExitTransition);
@@ -276,18 +344,21 @@ namespace DMotion.Editor
 
         #region Raise Methods - Links
 
+        /// <summary>Raises <see cref="OnLinkAdded"/> and <see cref="OnStateMachineChanged"/>.</summary>
         public static void RaiseLinkAdded(StateMachineAsset machine, ParameterLink link)
         {
             OnLinkAdded?.Invoke(machine, link);
             OnStateMachineChanged?.Invoke(machine);
         }
 
+        /// <summary>Raises <see cref="OnLinkRemoved"/> and <see cref="OnStateMachineChanged"/>.</summary>
         public static void RaiseLinkRemoved(StateMachineAsset machine, ParameterLink link)
         {
             OnLinkRemoved?.Invoke(machine, link);
             OnStateMachineChanged?.Invoke(machine);
         }
 
+        /// <summary>Raises <see cref="OnDependenciesResolved"/> and <see cref="OnStateMachineChanged"/>.</summary>
         public static void RaiseDependenciesResolved(StateMachineAsset machine, SubStateMachineStateAsset subMachine, int resolvedCount)
         {
             OnDependenciesResolved?.Invoke(machine, subMachine, resolvedCount);
@@ -297,32 +368,39 @@ namespace DMotion.Editor
         #endregion
 
         #region Raise Methods - Selection
+        // Selection events do NOT trigger OnStateMachineChanged (selection is transient).
 
+        /// <summary>Raises <see cref="OnStateSelected"/>.</summary>
         public static void RaiseStateSelected(StateMachineAsset machine, AnimationStateAsset state)
         {
             OnStateSelected?.Invoke(machine, state);
         }
 
+        /// <summary>Raises <see cref="OnTransitionSelected"/>.</summary>
         public static void RaiseTransitionSelected(StateMachineAsset machine, AnimationStateAsset fromState, AnimationStateAsset toState)
         {
             OnTransitionSelected?.Invoke(machine, fromState, toState);
         }
 
+        /// <summary>Raises <see cref="OnAnyStateSelected"/>.</summary>
         public static void RaiseAnyStateSelected(StateMachineAsset machine)
         {
             OnAnyStateSelected?.Invoke(machine);
         }
 
+        /// <summary>Raises <see cref="OnAnyStateTransitionSelected"/>.</summary>
         public static void RaiseAnyStateTransitionSelected(StateMachineAsset machine, AnimationStateAsset toState)
         {
             OnAnyStateTransitionSelected?.Invoke(machine, toState);
         }
 
+        /// <summary>Raises <see cref="OnExitNodeSelected"/>.</summary>
         public static void RaiseExitNodeSelected(StateMachineAsset machine)
         {
             OnExitNodeSelected?.Invoke(machine);
         }
 
+        /// <summary>Raises <see cref="OnSelectionCleared"/>.</summary>
         public static void RaiseSelectionCleared(StateMachineAsset machine)
         {
             OnSelectionCleared?.Invoke(machine);
@@ -331,25 +409,36 @@ namespace DMotion.Editor
         #endregion
 
         #region Raise Methods - General
+        // Navigation events do NOT trigger OnStateMachineChanged (navigation is view-only).
 
+        /// <summary>Raises <see cref="OnStateMachineChanged"/>. Use sparingly.</summary>
         public static void RaiseStateMachineChanged(StateMachineAsset machine)
         {
             OnStateMachineChanged?.Invoke(machine);
         }
 
+        /// <summary>Raises <see cref="OnGraphNeedsRepopulate"/>. Used after undo/redo.</summary>
         public static void RaiseGraphNeedsRepopulate(StateMachineAsset machine)
         {
             OnGraphNeedsRepopulate?.Invoke(machine);
         }
 
+        /// <summary>Raises <see cref="OnSubStateMachineEntered"/>.</summary>
         public static void RaiseSubStateMachineEntered(StateMachineAsset parent, StateMachineAsset entered)
         {
             OnSubStateMachineEntered?.Invoke(parent, entered);
         }
 
+        /// <summary>Raises <see cref="OnSubStateMachineExited"/>.</summary>
         public static void RaiseSubStateMachineExited(StateMachineAsset returnedTo)
         {
             OnSubStateMachineExited?.Invoke(returnedTo);
+        }
+
+        /// <summary>Raises <see cref="OnBreadcrumbNavigationRequested"/>.</summary>
+        public static void RaiseBreadcrumbNavigationRequested(StateMachineAsset target, int stackIndex)
+        {
+            OnBreadcrumbNavigationRequested?.Invoke(target, stackIndex);
         }
 
         #endregion
@@ -387,6 +476,7 @@ namespace DMotion.Editor
             OnGraphNeedsRepopulate = null;
             OnSubStateMachineEntered = null;
             OnSubStateMachineExited = null;
+            OnBreadcrumbNavigationRequested = null;
         }
 
         #endregion

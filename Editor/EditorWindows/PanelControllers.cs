@@ -1,7 +1,84 @@
+using System;
 using DMotion.Authoring;
 
 namespace DMotion.Editor
 {
+    /// <summary>
+    /// Manages breadcrumb bar navigation by subscribing to navigation events.
+    /// Decouples breadcrumb UI from GraphView and EditorWindow.
+    /// </summary>
+    internal class BreadcrumbController
+    {
+        private readonly BreadcrumbBar breadcrumbBar;
+        // Retained for domain reload state consistency
+        private StateMachineAsset rootMachine;
+
+        /// <summary>
+        /// Fired when navigation should load a different state machine.
+        /// The EditorWindow subscribes to this to actually load the machine.
+        /// </summary>
+        internal Action<StateMachineAsset> OnNavigationRequested;
+
+        public BreadcrumbController(BreadcrumbBar breadcrumbBar)
+        {
+            this.breadcrumbBar = breadcrumbBar;
+        }
+
+        public void Subscribe()
+        {
+            StateMachineEditorEvents.OnSubStateMachineEntered += OnSubStateMachineEntered;
+            StateMachineEditorEvents.OnSubStateMachineExited += OnSubStateMachineExited;
+            
+            // Wire up breadcrumb's internal navigation to raise events
+            if (breadcrumbBar != null)
+            {
+                breadcrumbBar.OnNavigate += OnBreadcrumbClicked;
+            }
+        }
+
+        public void Unsubscribe()
+        {
+            StateMachineEditorEvents.OnSubStateMachineEntered -= OnSubStateMachineEntered;
+            StateMachineEditorEvents.OnSubStateMachineExited -= OnSubStateMachineExited;
+            
+            if (breadcrumbBar != null)
+            {
+                breadcrumbBar.OnNavigate -= OnBreadcrumbClicked;
+            }
+        }
+
+        public void SetRoot(StateMachineAsset machine)
+        {
+            rootMachine = machine;
+            breadcrumbBar?.SetRoot(machine);
+        }
+
+        private void OnSubStateMachineEntered(StateMachineAsset parent, StateMachineAsset entered)
+        {
+            breadcrumbBar?.Push(entered);
+            OnNavigationRequested?.Invoke(entered);
+        }
+
+        private void OnSubStateMachineExited(StateMachineAsset returnedTo)
+        {
+            // Breadcrumb already handles its internal state via NavigateTo/NavigateBack
+            // Just request the navigation
+            OnNavigationRequested?.Invoke(returnedTo);
+        }
+
+        private void OnBreadcrumbClicked(int index)
+        {
+            var target = breadcrumbBar?.NavigationStack[index];
+            if (target != null)
+            {
+                // Raise the global event for other listeners
+                StateMachineEditorEvents.RaiseBreadcrumbNavigationRequested(target, index);
+                // Request navigation
+                OnNavigationRequested?.Invoke(target);
+            }
+        }
+    }
+
     /// <summary>
     /// Manages the parameters panel by subscribing to state machine events.
     /// </summary>
