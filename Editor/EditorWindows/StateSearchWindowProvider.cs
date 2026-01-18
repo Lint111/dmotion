@@ -72,11 +72,19 @@ namespace DMotion.Editor
             if (entry.userData is Type stateType)
             {
                 // Convert screen position to graph local position
-                var windowRoot = graphView.parent;
-                var windowMousePosition = windowRoot.WorldToLocal(context.screenMousePosition);
-                var graphMousePosition = graphView.contentViewContainer.WorldToLocal(windowMousePosition);
-                
-                graphView.CreateStateAtPosition(stateType, graphMousePosition);
+                // First convert screen to window coordinates
+                var editorWindow = EditorWindow.focusedWindow;
+                if (editorWindow != null)
+                {
+                    var windowMousePosition = context.screenMousePosition - editorWindow.position.position;
+                    var graphMousePosition = graphView.contentViewContainer.WorldToLocal(windowMousePosition);
+                    graphView.CreateStateAtPosition(stateType, graphMousePosition);
+                }
+                else
+                {
+                    // Fallback: create at center of view
+                    graphView.CreateStateAtPosition(stateType, Vector2.zero);
+                }
                 return true;
             }
             return false;
