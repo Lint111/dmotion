@@ -22,6 +22,7 @@ Complete guide to using the DMotion State Machine visual editor.
 
 - **Single Clip State**: Single animation clip
 - **Linear Blend State**: 1D blend tree with multiple clips
+- **Directional 2D Blend State**: 2D blend tree for directional movement
 - **SubStateMachine**: Contains nested state machine
 
 ---
@@ -31,9 +32,10 @@ Complete guide to using the DMotion State Machine visual editor.
 ### Single Clip / Blend States
 
 1. Right-click empty space in graph
-2. Select **"New State"** or **"New Blend Tree 1D"**
-3. State appears at cursor position
-4. Select state and configure in Inspector
+2. Select **"New State"**, **"New Blend Tree 1D"**, or **"New Blend Tree 2D"**
+3. Or press **Space** to open searchable state menu
+4. State appears at cursor position
+5. Select state and configure in Inspector
 
 ### SubStateMachine
 
