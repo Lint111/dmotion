@@ -475,7 +475,7 @@ namespace DMotion.Tests
         /// Test helper - manages allocation/deallocation for each individual test.
         /// Allocates exactly the required array sizes, properly disposes after use.
         /// </summary>
-        private struct Test2DBlend : System.IDisposable
+        private class Test2DBlend : System.IDisposable
         {
             public NativeArray<float2> Positions;
             public NativeArray<float> Weights;
