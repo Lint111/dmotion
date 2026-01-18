@@ -156,27 +156,6 @@ namespace DMotion.Editor
             visualEditorHeight = EditorGUILayout.Slider(visualEditorHeight, MinVisualEditorHeight, MaxVisualEditorHeight);
             EditorGUILayout.EndHorizontal();
             
-            // Determine threshold range
-            float minThreshold = 0f;
-            float maxThreshold = 1f;
-            
-            // Auto-detect range from clips if available
-            if (blendState.BlendClips != null && blendState.BlendClips.Length > 0)
-            {
-                minThreshold = float.MaxValue;
-                maxThreshold = float.MinValue;
-                foreach (var clip in blendState.BlendClips)
-                {
-                    minThreshold = Mathf.Min(minThreshold, clip.Threshold);
-                    maxThreshold = Mathf.Max(maxThreshold, clip.Threshold);
-                }
-                // Add some padding
-                var range = maxThreshold - minThreshold;
-                if (range < 0.1f) range = 1f;
-                minThreshold -= range * 0.1f;
-                maxThreshold += range * 0.1f;
-            }
-            
             // Visual editor area
             var visualRect = GUILayoutUtility.GetRect(
                 GUIContent.none, 
@@ -189,7 +168,8 @@ namespace DMotion.Editor
                 visualRect.width = 100;
             }
             
-            blendSpaceEditor.Draw(visualRect, blendState.BlendClips, serializedObject, minThreshold, maxThreshold);
+            // Editor maintains its own stable range internally
+            blendSpaceEditor.Draw(visualRect, blendState.BlendClips, serializedObject);
             
             // Selected clip edit fields
             EditorGUILayout.Space(5);

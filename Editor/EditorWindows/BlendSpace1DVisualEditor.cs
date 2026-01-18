@@ -19,6 +19,11 @@ namespace DMotion.Editor
         private bool isPanning;
         private Vector2 lastMousePos;
         
+        // Stable base range (doesn't change during drag)
+        private float baseMin;
+        private float baseMax;
+        private bool hasInitializedRange;
+        
         // Visual settings
         private const float MinZoom = 0.5f;
         private const float MaxZoom = 3f;
@@ -26,6 +31,7 @@ namespace DMotion.Editor
         private const float ClipCircleRadius = 10f;
         private const float TrackHeight = 60f;
         private const float TrackPadding = 40f;
+        private const float DefaultRangePadding = 0.2f;
         
         // Colors
         private static readonly Color TrackColor = new Color(0.25f, 0.25f, 0.25f, 1f);
@@ -58,12 +64,15 @@ namespace DMotion.Editor
         /// <param name="rect">The rect to draw in</param>
         /// <param name="clips">The clips to display</param>
         /// <param name="serializedObject">SerializedObject for undo support</param>
-        /// <param name="minThreshold">Minimum visible threshold (for Int parameter range)</param>
-        /// <param name="maxThreshold">Maximum visible threshold (for Int parameter range)</param>
-        public void Draw(Rect rect, ClipWithThreshold[] clips, SerializedObject serializedObject,
-            float minThreshold = 0f, float maxThreshold = 1f)
+        public void Draw(Rect rect, ClipWithThreshold[] clips, SerializedObject serializedObject)
         {
             if (clips == null) return;
+            
+            // Initialize or update base range only when not dragging
+            if (!hasInitializedRange || (!isDraggingClip && !isPanning))
+            {
+                UpdateBaseRange(clips);
+            }
             
             // Draw background
             EditorGUI.DrawRect(rect, BackgroundColor);
@@ -76,20 +85,59 @@ namespace DMotion.Editor
                 TrackHeight);
             
             // Handle input
-            HandleInput(rect, trackRect, clips, serializedObject, minThreshold, maxThreshold);
+            HandleInput(rect, trackRect, clips, serializedObject);
             
             // Draw track background
             var lineY = trackRect.y + trackRect.height / 2;
             EditorGUI.DrawRect(new Rect(trackRect.x, lineY - 2, trackRect.width, 4), TrackColor);
             
             // Draw ticks and labels
-            DrawTicks(trackRect, lineY, minThreshold, maxThreshold);
+            DrawTicks(trackRect, lineY);
             
             // Draw clips
-            DrawClips(trackRect, lineY, clips, minThreshold, maxThreshold);
+            DrawClips(trackRect, lineY, clips);
             
             // Draw zoom indicator
             DrawZoomIndicator(rect);
+        }
+
+        /// <summary>
+        /// Updates the base range from clip positions.
+        /// Called automatically when not dragging, or manually via ResetView.
+        /// </summary>
+        private void UpdateBaseRange(ClipWithThreshold[] clips)
+        {
+            if (clips == null || clips.Length == 0)
+            {
+                baseMin = 0f;
+                baseMax = 1f;
+            }
+            else
+            {
+                baseMin = float.MaxValue;
+                baseMax = float.MinValue;
+                foreach (var clip in clips)
+                {
+                    baseMin = Mathf.Min(baseMin, clip.Threshold);
+                    baseMax = Mathf.Max(baseMax, clip.Threshold);
+                }
+                
+                // Ensure minimum range
+                var range = baseMax - baseMin;
+                if (range < 0.1f)
+                {
+                    var center = (baseMin + baseMax) / 2f;
+                    baseMin = center - 0.5f;
+                    baseMax = center + 0.5f;
+                    range = 1f;
+                }
+                
+                // Add padding
+                baseMin -= range * DefaultRangePadding;
+                baseMax += range * DefaultRangePadding;
+            }
+            
+            hasInitializedRange = true;
         }
 
         /// <summary>
@@ -133,12 +181,13 @@ namespace DMotion.Editor
         }
 
         /// <summary>
-        /// Resets the view to default zoom and pan.
+        /// Resets the view to default zoom and pan, and recalculates the base range.
         /// </summary>
         public void ResetView()
         {
             zoom = 1f;
             panOffset = 0f;
+            hasInitializedRange = false; // Force recalculation on next draw
         }
 
         /// <summary>
@@ -154,7 +203,7 @@ namespace DMotion.Editor
         }
 
         private void HandleInput(Rect rect, Rect trackRect, ClipWithThreshold[] clips, 
-            SerializedObject serializedObject, float minThreshold, float maxThreshold)
+            SerializedObject serializedObject)
         {
             var e = Event.current;
             var mousePos = e.mousePosition;
@@ -165,15 +214,15 @@ namespace DMotion.Editor
             switch (e.type)
             {
                 case EventType.ScrollWheel:
-                    HandleZoom(trackRect, e, minThreshold, maxThreshold);
+                    HandleZoom(trackRect, e);
                     break;
                     
                 case EventType.MouseDown:
-                    HandleMouseDown(trackRect, clips, e, minThreshold, maxThreshold);
+                    HandleMouseDown(trackRect, clips, e);
                     break;
                     
                 case EventType.MouseDrag:
-                    HandleMouseDrag(trackRect, clips, serializedObject, e, minThreshold, maxThreshold);
+                    HandleMouseDrag(trackRect, clips, serializedObject, e);
                     break;
                     
                 case EventType.MouseUp:
@@ -184,29 +233,28 @@ namespace DMotion.Editor
             lastMousePos = mousePos;
         }
 
-        private void HandleZoom(Rect trackRect, Event e, float minThreshold, float maxThreshold)
+        private void HandleZoom(Rect trackRect, Event e)
         {
             var zoomDelta = -e.delta.y * 0.05f;
             var newZoom = Mathf.Clamp(zoom + zoomDelta, MinZoom, MaxZoom);
             
             // Zoom toward mouse position
-            var mouseThreshold = ScreenToThreshold(e.mousePosition.x, trackRect, minThreshold, maxThreshold);
+            var mouseThreshold = ScreenToThreshold(e.mousePosition.x, trackRect);
             zoom = newZoom;
-            var newMouseThreshold = ScreenToThreshold(e.mousePosition.x, trackRect, minThreshold, maxThreshold);
+            var newMouseThreshold = ScreenToThreshold(e.mousePosition.x, trackRect);
             panOffset += (mouseThreshold - newMouseThreshold);
             
             e.Use();
         }
 
-        private void HandleMouseDown(Rect trackRect, ClipWithThreshold[] clips, Event e,
-            float minThreshold, float maxThreshold)
+        private void HandleMouseDown(Rect trackRect, ClipWithThreshold[] clips, Event e)
         {
             var lineY = trackRect.y + trackRect.height / 2;
             
             if (e.button == 0) // Left click
             {
                 // Check for clip selection
-                var clickedIndex = GetClipAtPosition(trackRect, lineY, clips, e.mousePosition, minThreshold, maxThreshold);
+                var clickedIndex = GetClipAtPosition(trackRect, lineY, clips, e.mousePosition);
                 if (clickedIndex >= 0)
                 {
                     selectedClipIndex = clickedIndex;
@@ -232,11 +280,11 @@ namespace DMotion.Editor
         }
 
         private void HandleMouseDrag(Rect trackRect, ClipWithThreshold[] clips, 
-            SerializedObject serializedObject, Event e, float minThreshold, float maxThreshold)
+            SerializedObject serializedObject, Event e)
         {
             if (isDraggingClip && selectedClipIndex >= 0)
             {
-                var threshold = ScreenToThreshold(e.mousePosition.x, trackRect, minThreshold, maxThreshold);
+                var threshold = ScreenToThreshold(e.mousePosition.x, trackRect);
                 
                 // Snap to ticks if shift is held
                 if (e.shift)
@@ -257,7 +305,7 @@ namespace DMotion.Editor
             else if (isPanning)
             {
                 var delta = e.mousePosition.x - lastMousePos.x;
-                var range = (maxThreshold - minThreshold) * zoom;
+                var range = (baseMax - baseMin) * zoom;
                 panOffset -= delta / trackRect.width * range;
                 e.Use();
             }
@@ -269,10 +317,10 @@ namespace DMotion.Editor
             isPanning = false;
         }
 
-        private void DrawTicks(Rect trackRect, float lineY, float minThreshold, float maxThreshold)
+        private void DrawTicks(Rect trackRect, float lineY)
         {
-            var range = (maxThreshold - minThreshold) * zoom;
-            var visibleMin = minThreshold + panOffset;
+            var range = (baseMax - baseMin) * zoom;
+            var visibleMin = baseMin + panOffset;
             var visibleMax = visibleMin + range;
             
             // Determine tick spacing based on zoom
@@ -283,7 +331,7 @@ namespace DMotion.Editor
             
             for (var t = startTick; t <= visibleMax + tickStep; t += tickStep)
             {
-                var screenX = ThresholdToScreen(t, trackRect, minThreshold, maxThreshold);
+                var screenX = ThresholdToScreen(t, trackRect);
                 
                 if (screenX < trackRect.x || screenX > trackRect.xMax)
                     continue;
@@ -306,8 +354,7 @@ namespace DMotion.Editor
             }
         }
 
-        private void DrawClips(Rect trackRect, float lineY, ClipWithThreshold[] clips,
-            float minThreshold, float maxThreshold)
+        private void DrawClips(Rect trackRect, float lineY, ClipWithThreshold[] clips)
         {
             // Sort clips by threshold for proper z-ordering (draw back to front)
             var sortedIndices = new int[clips.Length];
@@ -317,7 +364,7 @@ namespace DMotion.Editor
             foreach (var i in sortedIndices)
             {
                 var clip = clips[i];
-                var screenX = ThresholdToScreen(clip.Threshold, trackRect, minThreshold, maxThreshold);
+                var screenX = ThresholdToScreen(clip.Threshold, trackRect);
                 var screenPos = new Vector2(screenX, lineY);
                 
                 // Skip if outside visible area (with some margin for the circle)
@@ -397,14 +444,13 @@ namespace DMotion.Editor
             Handles.EndGUI();
         }
 
-        private int GetClipAtPosition(Rect trackRect, float lineY, ClipWithThreshold[] clips, 
-            Vector2 mousePos, float minThreshold, float maxThreshold)
+        private int GetClipAtPosition(Rect trackRect, float lineY, ClipWithThreshold[] clips, Vector2 mousePos)
         {
             // Check in reverse order for correct z-ordering
             for (var i = clips.Length - 1; i >= 0; i--)
             {
                 var clip = clips[i];
-                var screenX = ThresholdToScreen(clip.Threshold, trackRect, minThreshold, maxThreshold);
+                var screenX = ThresholdToScreen(clip.Threshold, trackRect);
                 var circleCenter = new Vector2(screenX, lineY - 25);
                 var distance = Vector2.Distance(mousePos, circleCenter);
                 
@@ -414,18 +460,18 @@ namespace DMotion.Editor
             return -1;
         }
 
-        private float ThresholdToScreen(float threshold, Rect trackRect, float minThreshold, float maxThreshold)
+        private float ThresholdToScreen(float threshold, Rect trackRect)
         {
-            var range = (maxThreshold - minThreshold) * zoom;
-            var visibleMin = minThreshold + panOffset;
+            var range = (baseMax - baseMin) * zoom;
+            var visibleMin = baseMin + panOffset;
             var normalized = (threshold - visibleMin) / range;
             return trackRect.x + normalized * trackRect.width;
         }
 
-        private float ScreenToThreshold(float screenX, Rect trackRect, float minThreshold, float maxThreshold)
+        private float ScreenToThreshold(float screenX, Rect trackRect)
         {
-            var range = (maxThreshold - minThreshold) * zoom;
-            var visibleMin = minThreshold + panOffset;
+            var range = (baseMax - baseMin) * zoom;
+            var visibleMin = baseMin + panOffset;
             var normalized = (screenX - trackRect.x) / trackRect.width;
             return visibleMin + normalized * range;
         }
