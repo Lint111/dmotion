@@ -17,6 +17,13 @@ namespace DMotion.Editor
         }
     }
 
+    internal class Directional2DBlendStateNodeView : StateNodeView<Directional2DBlendStateAsset>
+    {
+        public Directional2DBlendStateNodeView(VisualTreeAsset asset) : base(asset)
+        {
+        }
+    }
+
     internal class SingleClipStateNodeView : StateNodeView<SingleClipStateAsset>
     {
         public SingleClipStateNodeView(VisualTreeAsset asset) : base(asset)
@@ -184,6 +191,7 @@ namespace DMotion.Editor
             {
                 SingleClipStateAsset _ => new SingleClipStateNodeView(model.ParentView.StateNodeXml),
                 LinearBlendStateAsset _ => new LinearBlendStateNodeView(model.ParentView.StateNodeXml),
+                Directional2DBlendStateAsset _ => new Directional2DBlendStateNodeView(model.ParentView.StateNodeXml),
                 SubStateMachineStateAsset _ => new SubStateMachineStateNodeView(model.ParentView.StateNodeXml),
                 _ => throw new NotImplementedException()
             };
