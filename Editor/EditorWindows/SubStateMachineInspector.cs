@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using DMotion.Authoring;
 using UnityEditor;
 using UnityEngine;
@@ -20,16 +19,32 @@ namespace DMotion.Editor
         // Performance caching
         private StateMachineAsset cachedNestedMachine;
         private AnimationStateAsset[] cachedAvailableStates;
+        
+        // Cached labels
+        private static readonly GUIContent AutoResolveLabel = new GUIContent("Auto-Resolve");
+        private static readonly string[] NoStatesAvailable = { "No states available" };
+        
+        // Cached state names array (resized as needed)
+        private string[] _cachedStateNames;
 
         protected override void OnEnable()
         {
             base.OnEnable();
+            if (target == null) return;
+            InitializeSubMachineProperties();
+        }
+        
+        private void InitializeSubMachineProperties()
+        {
+            if (nestedStateMachineProperty != null) return;
+            
             nestedStateMachineProperty = serializedObject.FindProperty(nameof(SubStateMachineStateAsset.NestedStateMachine));
             entryStateProperty = serializedObject.FindProperty(nameof(SubStateMachineStateAsset.EntryState));
         }
 
         protected override void DrawChildProperties()
         {
+            InitializeSubMachineProperties();
             EditorGUILayout.Space();
             DrawNestedStateMachineSection();
         }
@@ -45,7 +60,7 @@ namespace DMotion.Editor
             EditorGUILayout.BeginHorizontal();
             
             EditorGUI.BeginChangeCheck();
-            EditorGUILayout.PropertyField(nestedStateMachineProperty, new GUIContent("Nested Machine"));
+            EditorGUILayout.PropertyField(nestedStateMachineProperty, GUIContentCache.NestedMachine);
             if (EditorGUI.EndChangeCheck())
             {
                 // Validate the assigned value
@@ -67,6 +82,9 @@ namespace DMotion.Editor
             if (subMachine.NestedStateMachine != null)
             {
                 DrawEntryStatePicker(subMachine);
+                
+                EditorGUILayout.Space(4);
+                DrawParameterDependencies(subMachine, parentStateMachine);
             }
 
             // Validation messages
@@ -80,6 +98,100 @@ namespace DMotion.Editor
             }
         }
 
+        private void DrawParameterDependencies(SubStateMachineStateAsset subMachine, StateMachineAsset parentMachine)
+        {
+            if (parentMachine == null) return;
+
+            var requirements = ParameterDependencyAnalyzer.AnalyzeRequiredParameters(subMachine);
+            if (requirements.Count == 0) return;
+
+            EditorGUILayout.LabelField("Parameter Dependencies", EditorStyles.boldLabel);
+
+            // Analyze resolution status
+            var resolved = 0;
+            var missing = 0;
+            foreach (var req in requirements)
+            {
+                var existing = ParameterDependencyAnalyzer.FindCompatibleParameter(parentMachine, req.Parameter);
+                if (existing != null)
+                    resolved++;
+                else
+                    missing++;
+            }
+
+            // Summary line
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                var statusIcon = missing > 0 ? IconCache.WarnIcon : IconCache.CheckmarkIcon;
+                GUILayout.Label(statusIcon, GUILayout.Width(18));
+                
+                EditorGUILayout.LabelField(StringBuilderCache.FormatParametersResolved(resolved, requirements.Count), EditorStyles.miniLabel);
+
+                if (missing > 0)
+                {
+                    if (GUILayout.Button(AutoResolveLabel, EditorStyles.miniButton, GUILayout.Width(80)))
+                    {
+                        AutoResolveParameters(subMachine, parentMachine);
+                    }
+                }
+            }
+
+            // Show missing parameters
+            if (missing > 0)
+            {
+                EditorGUI.indentLevel++;
+                for (int i = 0; i < requirements.Count; i++)
+                {
+                    var req = requirements[i];
+                    var existing = ParameterDependencyAnalyzer.FindCompatibleParameter(parentMachine, req.Parameter);
+                    if (existing == null)
+                    {
+                        using (new EditorGUILayout.HorizontalScope())
+                        {
+                            GUILayout.Label(IconCache.WarnIcon, GUILayout.Width(16));
+                            EditorGUILayout.LabelField(StringBuilderCache.FormatNameWithType(req.Parameter.name, req.Parameter.ParameterTypeName), 
+                                EditorStyles.miniLabel);
+                        }
+                    }
+                }
+                EditorGUI.indentLevel--;
+            }
+        }
+
+        private void AutoResolveParameters(SubStateMachineStateAsset subMachine, StateMachineAsset parentMachine)
+        {
+            Undo.RecordObject(parentMachine, "Auto-Resolve Parameters");
+
+            var result = ParameterDependencyAnalyzer.ResolveParameterDependencies(parentMachine, subMachine);
+
+            // Register links
+            if (result.HasLinks)
+            {
+                parentMachine.AddParameterLinks(result.ParameterLinks);
+            }
+
+            // Create missing parameters
+            if (result.HasMissingParameters)
+            {
+                var assetPath = AssetDatabase.GetAssetPath(parentMachine);
+                var created = ParameterDependencyAnalyzer.CreateMissingParameters(
+                    parentMachine, subMachine, result.MissingParameters, assetPath);
+
+                if (created.Count > 0)
+                {
+                    var sb = StringBuilderCache.Get();
+                    for (int i = 0; i < created.Count; i++)
+                    {
+                        if (i > 0) sb.Append(", ");
+                        sb.Append(created[i].name);
+                    }
+                    Debug.Log($"[DMotion] Created {created.Count} parameter(s) for '{subMachine.name}': {sb}");
+                }
+            }
+
+            EditorUtility.SetDirty(parentMachine);
+        }
+
         private StateMachineAsset GetParentStateMachine()
         {
             // The SubStateMachineStateAsset is a sub-asset of its parent StateMachineAsset
@@ -88,6 +200,9 @@ namespace DMotion.Editor
                 return null;
             return AssetDatabase.LoadMainAssetAtPath(path) as StateMachineAsset;
         }
+
+        // Cached HashSet for circular reference checks
+        private HashSet<StateMachineAsset> _circularCheckVisited;
 
         private bool WouldCreateCircularReference(StateMachineAsset candidate, StateMachineAsset parent)
         {
@@ -99,7 +214,12 @@ namespace DMotion.Editor
                 return true;
             
             // Check if candidate contains parent (would create cycle)
-            return ContainsStateMachine(candidate, parent, new HashSet<StateMachineAsset>());
+            if (_circularCheckVisited == null)
+                _circularCheckVisited = new HashSet<StateMachineAsset>();
+            else
+                _circularCheckVisited.Clear();
+            
+            return ContainsStateMachine(candidate, parent, _circularCheckVisited);
         }
 
         private static bool ContainsStateMachine(StateMachineAsset machine, StateMachineAsset target, HashSet<StateMachineAsset> visited)
@@ -135,12 +255,21 @@ namespace DMotion.Editor
 
             if (availableStates.Length > 0)
             {
-                var stateNames = availableStates.Select(s => s != null ? s.name : "None").ToArray();
+                // Build state names without LINQ allocation
+                if (_cachedStateNames == null || _cachedStateNames.Length < availableStates.Length)
+                {
+                    _cachedStateNames = new string[availableStates.Length];
+                }
+                for (int i = 0; i < availableStates.Length; i++)
+                {
+                    _cachedStateNames[i] = availableStates[i] != null ? availableStates[i].name : "None";
+                }
+                
                 var currentIndex = System.Array.IndexOf(availableStates, subMachine.EntryState);
                 if (currentIndex == -1) currentIndex = 0;
 
                 EditorGUI.BeginChangeCheck();
-                var newIndex = EditorGUILayout.Popup(currentIndex, stateNames);
+                var newIndex = EditorGUILayout.Popup(currentIndex, _cachedStateNames, GUILayout.ExpandWidth(true));
                 if (EditorGUI.EndChangeCheck() && newIndex >= 0 && newIndex < availableStates.Length)
                 {
                     entryStateProperty.objectReferenceValue = availableStates[newIndex];
@@ -150,7 +279,7 @@ namespace DMotion.Editor
             {
                 using (new EditorGUI.DisabledScope(true))
                 {
-                    EditorGUILayout.Popup(0, new[] { "No states available" });
+                    EditorGUILayout.Popup(0, NoStatesAvailable);
                 }
             }
 
@@ -206,15 +335,28 @@ namespace DMotion.Editor
             return cachedAvailableStates;
         }
 
+        // Cached HashSet for leaf state collection
+        private HashSet<StateMachineAsset> _leafCollectionVisited;
+
         private void CollectLeafStatesRecursive(StateMachineAsset machine, List<AnimationStateAsset> leafStates,
             HashSet<StateMachineAsset> visited = null)
         {
-            if (visited == null) visited = new HashSet<StateMachineAsset>();
+            if (visited == null)
+            {
+                if (_leafCollectionVisited == null)
+                    _leafCollectionVisited = new HashSet<StateMachineAsset>();
+                else
+                    _leafCollectionVisited.Clear();
+                visited = _leafCollectionVisited;
+            }
+            
             if (visited.Contains(machine)) return;
             visited.Add(machine);
 
-            foreach (var state in machine.States)
+            var states = machine.States;
+            for (int i = 0; i < states.Count; i++)
             {
+                var state = states[i];
                 if (state is SubStateMachineStateAsset subState && subState.NestedStateMachine != null)
                 {
                     CollectLeafStatesRecursive(subState.NestedStateMachine, leafStates, visited);

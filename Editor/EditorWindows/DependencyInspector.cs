@@ -1,0 +1,632 @@
+using System.Collections.Generic;
+using DMotion.Authoring;
+using UnityEditor;
+using UnityEngine;
+
+namespace DMotion.Editor
+{
+    internal struct DependencyInspectorModel
+    {
+        internal StateMachineAsset StateMachine;
+    }
+
+    /// <summary>
+    /// Inspector for SubMachine parameter dependencies.
+    /// Shows which parameters from nested state machines need to be satisfied by the parent.
+    /// </summary>
+    internal class DependencyInspector : StateMachineInspector<DependencyInspectorModel>
+    {
+        private Dictionary<SubStateMachineStateAsset, bool> _subMachineFoldouts = new();
+        private List<SubMachineDependencyInfo> _subMachineDependencies = new();
+        private bool _needsRefresh = true;
+
+        private void OnEnable()
+        {
+            StateMachineEditorEvents.OnStateMachineChanged += OnStateMachineChanged;
+            StateMachineEditorEvents.OnParameterRemoved += OnParameterRemoved;
+        }
+
+        private void OnDisable()
+        {
+            StateMachineEditorEvents.OnStateMachineChanged -= OnStateMachineChanged;
+            StateMachineEditorEvents.OnParameterRemoved -= OnParameterRemoved;
+        }
+
+        private void OnStateMachineChanged(StateMachineAsset machine)
+        {
+            if (machine == model.StateMachine)
+            {
+                _needsRefresh = true;
+                Repaint();
+            }
+        }
+
+        private void OnParameterRemoved(StateMachineAsset machine, AnimationParameterAsset param)
+        {
+            if (machine == model.StateMachine)
+            {
+                _needsRefresh = true;
+                Repaint();
+            }
+        }
+
+        public override void OnInspectorGUI()
+        {
+            if (model.StateMachine == null) return;
+
+            if (_needsRefresh)
+            {
+                RefreshAnalysis();
+                _needsRefresh = false;
+            }
+
+            // Show panel as long as there are SubMachines (even with no params)
+            if (_subMachineDependencies == null || _subMachineDependencies.Count == 0)
+            {
+                return;
+            }
+
+            DrawDependenciesSection();
+        }
+
+        private void RefreshAnalysis()
+        {
+            _subMachineDependencies = AnalyzeAllSubMachines();
+        }
+
+        private void ForceRefresh()
+        {
+            _needsRefresh = true;
+            RefreshAnalysis();
+            Repaint();
+        }
+
+        private void DrawDependenciesSection()
+        {
+            // Calculate totals without LINQ
+            int totalRequired = 0;
+            int totalResolved = 0;
+            for (int i = 0; i < _subMachineDependencies.Count; i++)
+            {
+                totalRequired += _subMachineDependencies[i].TotalRequired;
+                totalResolved += _subMachineDependencies[i].ResolvedCount;
+            }
+            var totalMissing = totalRequired - totalResolved;
+
+            // Header with summary
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            {
+                var statusIcon = totalMissing > 0 ? IconCache.WarnIcon : IconCache.CheckmarkIcon;
+
+                GUILayout.Label(statusIcon, GUILayout.Width(18));
+                EditorGUILayout.LabelField(GUIContentCache.Dependencies, EditorStyles.boldLabel);
+
+                GUILayout.FlexibleSpace();
+
+                EditorGUILayout.LabelField(StringBuilderCache.FormatRatio(totalResolved, totalRequired), GUILayout.Width(45));
+
+                if (totalMissing > 0 && GUILayout.Button(GUIContentCache.ResolveAllButton, EditorStyles.miniButton, GUILayout.Width(75)))
+                {
+                    ResolveAllDependencies();
+                }
+            }
+
+            // Draw each SubMachine's dependencies
+            for (int i = 0; i < _subMachineDependencies.Count; i++)
+            {
+                DrawSubMachineDependencies(_subMachineDependencies[i]);
+            }
+        }
+
+        // Cached tooltip strings
+        private const string TooltipNoParams = "No parameters defined in nested machine";
+        private const string TooltipMissingDeps = "Missing parameter dependencies";
+        private const string TooltipAllResolved = "All dependencies resolved";
+        private const string TooltipExplicitLink = "Explicit link";
+        private const string TooltipAutoMatched = "Auto-matched by name";
+        private const string TooltipMissing = "Missing - no matching parameter in parent";
+
+        // Cached label
+        private static readonly GUIContent NoParamsLabel = new GUIContent("(no params)");
+        private static GUIContent _grayDotIcon;
+        private static GUIContent GrayDotIcon => _grayDotIcon ??= EditorGUIUtility.IconContent("d_winbtn_mac_min");
+
+        private void DrawSubMachineDependencies(SubMachineDependencyInfo info)
+        {
+            var hasMissing = info.MissingCount > 0;
+
+            // Get or create foldout state
+            if (!_subMachineFoldouts.TryGetValue(info.SubMachine, out var isExpanded))
+            {
+                isExpanded = hasMissing; // Auto-expand if has missing
+                _subMachineFoldouts[info.SubMachine] = isExpanded;
+            }
+
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                // SubMachine header row
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    GUIContent statusIcon;
+                    if (info.HasNoParams)
+                    {
+                        statusIcon = IconCache.TempIcon(GrayDotIcon.image, TooltipNoParams);
+                    }
+                    else if (hasMissing)
+                    {
+                        statusIcon = IconCache.WarnIconWithTooltip(TooltipMissingDeps);
+                    }
+                    else
+                    {
+                        statusIcon = IconCache.TempIcon(IconCache.CheckmarkTexture, TooltipAllResolved);
+                    }
+                    GUILayout.Label(statusIcon, GUILayout.Width(18));
+
+                    var newExpanded = EditorGUILayout.Foldout(isExpanded, info.SubMachine.name, true);
+                    if (newExpanded != isExpanded)
+                    {
+                        _subMachineFoldouts[info.SubMachine] = newExpanded;
+                    }
+
+                    GUILayout.FlexibleSpace();
+
+                    if (info.HasNoParams)
+                    {
+                        EditorGUILayout.LabelField(NoParamsLabel, EditorStyles.miniLabel, GUILayout.Width(60));
+                    }
+                    else
+                    {
+                        EditorGUILayout.LabelField(StringBuilderCache.FormatRatio(info.ResolvedCount, info.TotalRequired), 
+                            EditorStyles.miniLabel, GUILayout.Width(40));
+
+                        if (hasMissing && GUILayout.Button(GUIContentCache.ResolveButton, EditorStyles.miniButton, GUILayout.Width(55)))
+                        {
+                            ResolveSubMachineDependencies(info.SubMachine);
+                        }
+                    }
+                }
+
+                // Expanded content
+                if (_subMachineFoldouts[info.SubMachine])
+                {
+                    EditorGUILayout.Space(4);
+
+                    if (info.HasNoParams)
+                    {
+                        EditorGUILayout.HelpBox("No parameters defined in the nested state machine.", MessageType.Info);
+                    }
+                    else
+                    {
+                        // Show missing requirements first (more actionable)
+                        if (info.MissingRequirements.Count > 0)
+                        {
+                            EditorGUILayout.LabelField(StringBuilderCache.FormatMissingCount(info.MissingRequirements.Count), EditorStyles.boldLabel);
+                            for (int i = 0; i < info.MissingRequirements.Count; i++)
+                            {
+                                DrawMissingRequirementRow(info.MissingRequirements[i], info.SubMachine);
+                            }
+                            EditorGUILayout.Space(4);
+                        }
+
+                        // Show resolved dependencies
+                        if (info.ResolvedDependencies.Count > 0)
+                        {
+                            EditorGUILayout.LabelField(StringBuilderCache.FormatResolvedCount(info.ResolvedDependencies.Count), EditorStyles.boldLabel);
+                            for (int i = 0; i < info.ResolvedDependencies.Count; i++)
+                            {
+                                DrawResolvedDependencyRow(info.ResolvedDependencies[i], info.SubMachine);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Cached fallback names
+        private const string DeletedName = "(deleted)";
+        private const string UnknownName = "(unknown)";
+
+        private void DrawResolvedDependencyRow(ResolvedDependency resolved, SubStateMachineStateAsset subMachine)
+        {
+            // If source is null (deleted), this dependency is no longer valid - force refresh
+            if (resolved.SourceParameter == null)
+            {
+                _needsRefresh = true;
+                return;
+            }
+            
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
+            {
+                var icon = resolved.IsExplicitLink 
+                    ? EditorGUIUtility.IconContent("d_Linked")
+                    : EditorGUIUtility.IconContent("d_Valid");
+                icon.tooltip = resolved.IsExplicitLink ? "Explicit link (click X to remove)" : "Auto-matched by name (click X to break)";
+                GUILayout.Label(icon, GUILayout.Width(18), GUILayout.Height(18));
+
+                var targetName = resolved.TargetParameter != null ? resolved.TargetParameter.name : "(unknown)";
+                
+                EditorGUILayout.LabelField(resolved.SourceParameter.name, EditorStyles.boldLabel, GUILayout.MinWidth(60));
+                EditorGUILayout.LabelField("->", GUILayout.Width(20));
+                EditorGUILayout.LabelField(targetName, GUILayout.MinWidth(60));
+                
+                GUILayout.FlexibleSpace();
+
+                // Show X button for ALL resolved links (both explicit and auto-matched)
+                if (GUILayout.Button("X", EditorStyles.miniButton, GUILayout.Width(20)))
+                {
+                    if (resolved.IsExplicitLink)
+                    {
+                        RemoveLink(resolved.SourceParameter, resolved.TargetParameter, subMachine);
+                    }
+                    else
+                    {
+                        // For auto-matched links, create an exclusion to break the auto-match
+                        CreateExclusion(resolved.TargetParameter, subMachine);
+                    }
+                }
+            }
+        }
+
+        private void CreateExclusion(AnimationParameterAsset target, SubStateMachineStateAsset subMachine)
+        {
+            Undo.SetCurrentGroupName("Break Auto-Match");
+            var undoGroup = Undo.GetCurrentGroup();
+            
+            Undo.RecordObject(model.StateMachine, "Break Auto-Match");
+            
+            var exclusion = ParameterLink.Exclusion(target, subMachine);
+            model.StateMachine.AddLink(exclusion);
+            
+            Undo.CollapseUndoOperations(undoGroup);
+            EditorUtility.SetDirty(model.StateMachine);
+            
+            StateMachineEditorEvents.RaiseStateMachineChanged(model.StateMachine);
+            ForceRefresh();
+        }
+
+        // Cached background color for missing rows
+        private static readonly Color MissingRowBgColor = new Color(1f, 0.8f, 0.4f, 0.15f);
+
+        // Cached options array to avoid allocations (resized as needed)
+        private string[] _cachedOptions;
+        private List<AnimationParameterAsset> _cachedCompatibleParams;
+
+        private void DrawMissingRequirementRow(ParameterRequirement req, SubStateMachineStateAsset subMachine)
+        {
+            var rect = EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+            EditorGUI.DrawRect(rect, MissingRowBgColor);
+            
+            GUILayout.Label(IconCache.WarnIconWithTooltip(TooltipMissing), GUILayout.Width(18), GUILayout.Height(18));
+
+            // Dropdown to select/create source parameter
+            GetCompatibleParametersNonAlloc(req.Parameter);
+            
+            // Build options array (reuse if possible)
+            int optionsCount = _cachedCompatibleParams.Count + 1;
+            if (_cachedOptions == null || _cachedOptions.Length < optionsCount)
+            {
+                _cachedOptions = new string[optionsCount];
+            }
+            _cachedOptions[0] = "(Select or Create)";
+            for (int i = 0; i < _cachedCompatibleParams.Count; i++)
+            {
+                _cachedOptions[i + 1] = _cachedCompatibleParams[i].name;
+            }
+
+            var dropdownRect = EditorGUILayout.GetControlRect(GUILayout.MinWidth(80), GUILayout.MaxWidth(120));
+            // Need to pass correctly sized array to Popup
+            if (_cachedOptions.Length > optionsCount)
+            {
+                // Clear extra entries to avoid showing stale data
+                for (int j = optionsCount; j < _cachedOptions.Length; j++)
+                    _cachedOptions[j] = null;
+            }
+            var newIndex = EditorGUI.Popup(dropdownRect, 0, _cachedOptions);
+
+            if (newIndex > 0 && newIndex <= _cachedCompatibleParams.Count)
+            {
+                var selectedParam = _cachedCompatibleParams[newIndex - 1];
+                CreateLink(selectedParam, req.Parameter, subMachine);
+            }
+            
+            EditorGUILayout.LabelField(GUIContentCache.Arrow, GUILayout.Width(20));
+            EditorGUILayout.LabelField(req.Parameter.name, EditorStyles.boldLabel, GUILayout.MinWidth(60));
+            EditorGUILayout.LabelField(StringBuilderCache.FormatTypeName(req.Parameter.ParameterTypeName), EditorStyles.miniLabel, GUILayout.Width(55));
+            
+            GUILayout.FlexibleSpace();
+            
+            if (GUILayout.Button(GUIContentCache.PlusButton, EditorStyles.miniButton, GUILayout.Width(20)))
+            {
+                CreateAndLinkParameter(req, subMachine);
+            }
+
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private void GetCompatibleParametersNonAlloc(AnimationParameterAsset target)
+        {
+            if (_cachedCompatibleParams == null)
+                _cachedCompatibleParams = new List<AnimationParameterAsset>(8);
+            else
+                _cachedCompatibleParams.Clear();
+
+            var targetType = target.GetType();
+            var parameters = model.StateMachine.Parameters;
+            for (int i = 0; i < parameters.Count; i++)
+            {
+                if (parameters[i].GetType() == targetType)
+                {
+                    _cachedCompatibleParams.Add(parameters[i]);
+                }
+            }
+        }
+
+        #region Actions
+
+        private void ResolveAllDependencies()
+        {
+            Undo.SetCurrentGroupName("Resolve All Parameter Dependencies");
+            var undoGroup = Undo.GetCurrentGroup();
+            
+            Undo.RecordObject(model.StateMachine, "Resolve All Parameter Dependencies");
+
+            foreach (var info in _subMachineDependencies)
+            {
+                if (info.MissingCount > 0)
+                {
+                    ResolveSubMachineDependenciesInternal(info.SubMachine);
+                }
+            }
+
+            Undo.CollapseUndoOperations(undoGroup);
+            EditorUtility.SetDirty(model.StateMachine);
+            ForceRefresh();
+        }
+
+        private void ResolveSubMachineDependencies(SubStateMachineStateAsset subMachine)
+        {
+            Undo.SetCurrentGroupName("Resolve Parameter Dependencies");
+            var undoGroup = Undo.GetCurrentGroup();
+            
+            Undo.RecordObject(model.StateMachine, "Resolve Parameter Dependencies");
+            ResolveSubMachineDependenciesInternal(subMachine);
+            
+            Undo.CollapseUndoOperations(undoGroup);
+            EditorUtility.SetDirty(model.StateMachine);
+            AssetDatabase.SaveAssets();
+            ForceRefresh();
+        }
+
+        private void ResolveSubMachineDependenciesInternal(SubStateMachineStateAsset subMachine)
+        {
+            // First, remove any exclusions for this SubMachine so auto-matching works
+            RemoveExclusionsForSubMachine(subMachine);
+            
+            var result = ParameterDependencyAnalyzer.ResolveParameterDependencies(model.StateMachine, subMachine);
+
+            // Add links for parameters that can be matched
+            if (result.HasLinks)
+            {
+                foreach (var link in result.ParameterLinks)
+                {
+                    model.StateMachine.AddLink(link);
+                    StateMachineEditorEvents.RaiseLinkAdded(model.StateMachine, link);
+                }
+            }
+
+            // Create missing parameters (user explicitly clicked Resolve)
+            if (result.HasMissingParameters)
+            {
+                var assetPath = AssetDatabase.GetAssetPath(model.StateMachine);
+                var created = ParameterDependencyAnalyzer.CreateMissingParameters(
+                    model.StateMachine, subMachine, result.MissingParameters, assetPath);
+
+                for (int i = 0; i < created.Count; i++)
+                {
+                    StateMachineEditorEvents.RaiseParameterAdded(model.StateMachine, created[i]);
+                }
+            }
+        }
+
+        private void RemoveExclusionsForSubMachine(SubStateMachineStateAsset subMachine)
+        {
+            model.StateMachine.RemoveExclusionsForSubMachine(subMachine);
+        }
+
+        private void CreateLink(AnimationParameterAsset source, AnimationParameterAsset target, SubStateMachineStateAsset subMachine)
+        {
+            Undo.SetCurrentGroupName("Create Parameter Link");
+            var undoGroup = Undo.GetCurrentGroup();
+            
+            Undo.RecordObject(model.StateMachine, "Create Parameter Link");
+            Undo.RecordObject(source, "Create Parameter Link");
+            
+            // Remove any existing exclusion for this target
+            RemoveLinkInternal(null, target, subMachine);
+            
+            var link = ParameterLink.Direct(source, target, subMachine);
+            model.StateMachine.AddLink(link);
+            source.AddRequiredBy(subMachine);
+            
+            Undo.CollapseUndoOperations(undoGroup);
+            EditorUtility.SetDirty(model.StateMachine);
+            EditorUtility.SetDirty(source);
+            
+            StateMachineEditorEvents.RaiseLinkAdded(model.StateMachine, link);
+            ForceRefresh();
+        }
+
+        // Cached single-item list for CreateAndLinkParameter
+        private readonly List<ParameterRequirement> _singleReqList = new List<ParameterRequirement>(1);
+
+        private void CreateAndLinkParameter(ParameterRequirement req, SubStateMachineStateAsset subMachine)
+        {
+            Undo.SetCurrentGroupName("Create and Link Parameter");
+            var undoGroup = Undo.GetCurrentGroup();
+            
+            Undo.RecordObject(model.StateMachine, "Create and Link Parameter");
+
+            var assetPath = AssetDatabase.GetAssetPath(model.StateMachine);
+            
+            // Reuse single-item list
+            _singleReqList.Clear();
+            _singleReqList.Add(req);
+            
+            var created = ParameterDependencyAnalyzer.CreateMissingParameters(
+                model.StateMachine, subMachine, _singleReqList, assetPath);
+
+            if (created.Count > 0)
+            {
+                var link = ParameterLink.Direct(created[0], req.Parameter, subMachine);
+                model.StateMachine.AddLink(link);
+                
+                Undo.CollapseUndoOperations(undoGroup);
+                EditorUtility.SetDirty(model.StateMachine);
+                
+                StateMachineEditorEvents.RaiseParameterAdded(model.StateMachine, created[0]);
+                StateMachineEditorEvents.RaiseLinkAdded(model.StateMachine, link);
+            }
+            else
+            {
+                Undo.CollapseUndoOperations(undoGroup);
+            }
+        }
+
+        private void RemoveLink(AnimationParameterAsset source, AnimationParameterAsset target, SubStateMachineStateAsset subMachine)
+        {
+            Undo.SetCurrentGroupName("Remove Parameter Link");
+            var undoGroup = Undo.GetCurrentGroup();
+            
+            Undo.RecordObject(model.StateMachine, "Remove Parameter Link");
+            if (source != null)
+            {
+                Undo.RecordObject(source, "Remove Parameter Link");
+                source.RemoveRequiredBy(subMachine);
+            }
+            
+            var link = ParameterLink.Direct(source, target, subMachine);
+            RemoveLinkInternal(source, target, subMachine);
+            
+            // Also add an exclusion to prevent auto-matching
+            // (otherwise a compatible param with same name would immediately auto-match)
+            var exclusion = ParameterLink.Exclusion(target, subMachine);
+            model.StateMachine.AddLink(exclusion);
+            
+            Undo.CollapseUndoOperations(undoGroup);
+            EditorUtility.SetDirty(model.StateMachine);
+            
+            StateMachineEditorEvents.RaiseLinkRemoved(model.StateMachine, link);
+        }
+        
+        private void RemoveLinkInternal(AnimationParameterAsset source, AnimationParameterAsset target, SubStateMachineStateAsset subMachine)
+        {
+            model.StateMachine.RemoveLink(source, target, subMachine);
+        }
+
+        private List<SubMachineDependencyInfo> AnalyzeAllSubMachines()
+        {
+            var result = new List<SubMachineDependencyInfo>();
+            
+            foreach (var subMachine in model.StateMachine.GetAllGroups())
+            {
+                var requirements = ParameterDependencyAnalyzer.AnalyzeRequiredParameters(subMachine);
+                
+                // Include SubMachines even if they have no params (show as "no params")
+                var info = new SubMachineDependencyInfo
+                {
+                    SubMachine = subMachine,
+                    TotalRequired = requirements.Count,
+                    HasNoParams = requirements.Count == 0,
+                    MissingRequirements = new List<ParameterRequirement>(),
+                    ResolvedDependencies = new List<ResolvedDependency>()
+                };
+
+                foreach (var req in requirements)
+                {
+                    ParameterLink? explicitLink = null;
+                    bool hasExclusion = false;
+                    
+                    foreach (var link in model.StateMachine.ParameterLinks)
+                    {
+                        if (link.SubMachine == subMachine && link.TargetParameter == req.Parameter)
+                        {
+                            if (link.IsExclusion)
+                            {
+                                // Exclusion marker - prevents auto-matching
+                                hasExclusion = true;
+                            }
+                            else
+                            {
+                                explicitLink = link;
+                            }
+                            break;
+                        }
+                    }
+
+                    if (explicitLink.HasValue && explicitLink.Value.IsValid)
+                    {
+                        // Valid explicit link
+                        info.ResolvedDependencies.Add(new ResolvedDependency
+                        {
+                            SourceParameter = explicitLink.Value.SourceParameter,
+                            TargetParameter = req.Parameter,
+                            IsExplicitLink = true
+                        });
+                    }
+                    else if (hasExclusion)
+                    {
+                        // Excluded from auto-matching - show as missing
+                        info.MissingRequirements.Add(req);
+                    }
+                    else
+                    {
+                        // Try auto-matching by name/type
+                        var compatibleParam = ParameterDependencyAnalyzer.FindCompatibleParameter(model.StateMachine, req.Parameter);
+                        if (compatibleParam != null)
+                        {
+                            info.ResolvedDependencies.Add(new ResolvedDependency
+                            {
+                                SourceParameter = compatibleParam,
+                                TargetParameter = req.Parameter,
+                                IsExplicitLink = false
+                            });
+                        }
+                        else
+                        {
+                            info.MissingRequirements.Add(req);
+                        }
+                    }
+                }
+
+                info.ResolvedCount = info.ResolvedDependencies.Count;
+                result.Add(info);
+            }
+
+            return result;
+        }
+
+        #endregion
+
+        #region Data Types
+
+        private struct SubMachineDependencyInfo
+        {
+            public SubStateMachineStateAsset SubMachine;
+            public int TotalRequired;
+            public int ResolvedCount;
+            public bool HasNoParams;
+            public List<ParameterRequirement> MissingRequirements;
+            public List<ResolvedDependency> ResolvedDependencies;
+            public int MissingCount => MissingRequirements?.Count ?? 0;
+        }
+
+        private struct ResolvedDependency
+        {
+            public AnimationParameterAsset SourceParameter;
+            public AnimationParameterAsset TargetParameter;
+            public bool IsExplicitLink;
+        }
+
+        #endregion
+    }
+}

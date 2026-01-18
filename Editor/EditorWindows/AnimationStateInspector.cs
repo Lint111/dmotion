@@ -11,11 +11,19 @@ namespace DMotion.Editor
         protected override void OnEnable()
         {
             base.OnEnable();
+            if (target == null) return;
+            InitializeClipProperty();
+        }
+        
+        private void InitializeClipProperty()
+        {
+            if (clipProperty != null) return;
             clipProperty = serializedObject.FindProperty(nameof(SingleClipStateAsset.Clip));
         }
 
         protected override void DrawChildProperties()
         {
+            InitializeClipProperty();
             EditorGUILayout.PropertyField(clipProperty);
         }
     }
@@ -31,6 +39,14 @@ namespace DMotion.Editor
         protected override void OnEnable()
         {
             base.OnEnable();
+            if (target == null) return;
+            InitializeBlendProperties();
+        }
+        
+        private void InitializeBlendProperties()
+        {
+            if (blendParameterProperty != null) return;
+            
             blendParameterProperty = serializedObject.FindProperty(nameof(LinearBlendStateAsset.BlendParameter));
             clipsProperty = serializedObject.FindProperty(nameof(LinearBlendStateAsset.BlendClips));
             intRangeMinProperty = serializedObject.FindProperty(nameof(LinearBlendStateAsset.IntRangeMin));
@@ -45,8 +61,9 @@ namespace DMotion.Editor
 
         protected override void DrawChildProperties()
         {
+            InitializeBlendProperties();
             blendParametersSelector.OnGUI(EditorGUILayout.GetControlRect(), blendParameterProperty,
-                new GUIContent("Blend Parameter"));
+                GUIContentCache.BlendParameter);
             
             // Show Int range settings if using an Int parameter
             var linearBlendAsset = target as LinearBlendStateAsset;
@@ -54,13 +71,13 @@ namespace DMotion.Editor
             {
                 EditorGUI.indentLevel++;
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(intRangeMinProperty, new GUIContent("Min"));
-                EditorGUILayout.PropertyField(intRangeMaxProperty, new GUIContent("Max"));
+                EditorGUILayout.PropertyField(intRangeMinProperty, GUIContentCache.Min);
+                EditorGUILayout.PropertyField(intRangeMaxProperty, GUIContentCache.Max);
                 EditorGUILayout.EndHorizontal();
                 
                 // Show normalized range info
                 EditorGUILayout.HelpBox(
-                    $"Int value {linearBlendAsset.IntRangeMin} = 0.0, {linearBlendAsset.IntRangeMax} = 1.0", 
+                    StringBuilderCache.FormatIntRange(linearBlendAsset.IntRangeMin, linearBlendAsset.IntRangeMax), 
                     MessageType.Info);
                 EditorGUI.indentLevel--;
             }
@@ -83,6 +100,15 @@ namespace DMotion.Editor
 
         protected virtual void OnEnable()
         {
+            // Guard against null target during Editor creation
+            if (target == null) return;
+            InitializeProperties();
+        }
+        
+        private void InitializeProperties()
+        {
+            if (loopProperty != null) return; // Already initialized
+            
             loopProperty = serializedObject.FindProperty(nameof(SingleClipStateAsset.Loop));
             speedProperty = serializedObject.FindProperty(nameof(SingleClipStateAsset.Speed));
             outTransitionsProperty = serializedObject.FindProperty(nameof(SingleClipStateAsset.OutTransitions));
@@ -90,6 +116,17 @@ namespace DMotion.Editor
 
         public override void OnInspectorGUI()
         {
+            if (target == null) return;
+            
+            // Lazy initialization if OnEnable was skipped
+            InitializeProperties();
+            
+            // Header
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            {
+                EditorGUILayout.LabelField(GUIContentCache.StateInspector, EditorStyles.boldLabel);
+            }
+            
             using (new EditorGUI.DisabledScope(Application.isPlaying))
             {
                 DrawName();

@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using DMotion.Authoring;
 using UnityEditor;
 using UnityEditor.Experimental.GraphView;
@@ -19,9 +18,12 @@ namespace DMotion.Editor
         private readonly Node sourceNode;
         private readonly Func<AnimationStateAsset, bool> isValidTarget;
         private readonly Action<AnimationStateAsset> createTransition;
+        private readonly Action onDropOnExitNode; // Optional action for exit node drops
+        private readonly Func<bool> isExitValid; // Optional check if exit drop is valid
         
         private VisualElement dragLine;
         private StateNodeView hoveredNode;
+        private ExitNodeView hoveredExitNode;
         private bool isDragging;
         private bool didDrag;
         private Vector2 startMousePosition;
@@ -44,9 +46,11 @@ namespace DMotion.Editor
                 {
                     // Self-transitions are allowed (e.g., re-trigger attack, reset idle)
                     // Cannot create duplicate transition to the same target
-                    return !node.State.OutTransitions.Any(t => t.ToState == targetState);
+                    return !HasTransitionToState(node.State.OutTransitions, targetState);
                 },
-                targetState => view.CreateTransitionBetweenStates(node.State, targetState)
+                targetState => view.CreateTransitionBetweenStates(node.State, targetState),
+                () => view.AddExitStateFromDrag(node.State), // Exit node drop action
+                () => !view.IsExitState(node.State) // Can't add if already an exit state
             );
         }
 
@@ -61,22 +65,42 @@ namespace DMotion.Editor
                 targetState => 
                 {
                     // Cannot create duplicate Any State transition
-                    return !stateMachine.AnyStateTransitions.Any(t => t.ToState == targetState);
+                    return !HasTransitionToState(stateMachine.AnyStateTransitions, targetState);
                 },
-                targetState => view.CreateAnyStateTransitionTo(targetState)
+                targetState => view.CreateAnyStateTransitionTo(targetState),
+                () => view.CreateAnyStateExitTransition(), // Any State -> Exit for conditional exits
+                () => view.CanCreateAnyStateExitTransition() // Can't add if exit transition already exists
             );
+        }
+        
+        /// <summary>
+        /// Checks if any transition in the list targets the specified state.
+        /// Replaces LINQ .Any() to avoid allocations.
+        /// </summary>
+        private static bool HasTransitionToState(System.Collections.Generic.List<StateOutTransition> transitions, AnimationStateAsset targetState)
+        {
+            for (int i = 0; i < transitions.Count; i++)
+            {
+                if (transitions[i].ToState == targetState)
+                    return true;
+            }
+            return false;
         }
 
         private TransitionDragManipulator(
             Node sourceNode,
             AnimationStateMachineEditorView graphView,
             Func<AnimationStateAsset, bool> isValidTarget,
-            Action<AnimationStateAsset> createTransition)
+            Action<AnimationStateAsset> createTransition,
+            Action onDropOnExitNode,
+            Func<bool> isExitValid)
         {
             this.sourceNode = sourceNode;
             this.graphView = graphView;
             this.isValidTarget = isValidTarget;
             this.createTransition = createTransition;
+            this.onDropOnExitNode = onDropOnExitNode;
+            this.isExitValid = isExitValid;
             activators.Add(new ManipulatorActivationFilter { button = MouseButton.RightMouse });
         }
 
@@ -135,19 +159,28 @@ namespace DMotion.Editor
             UpdateDragLine(evt.mousePosition);
             
             var newHoveredNode = GetStateNodeAtPosition(evt.mousePosition);
+            var newHoveredExit = onDropOnExitNode != null ? GetExitNodeAtPosition(evt.mousePosition) : null;
             
-            if (newHoveredNode != hoveredNode)
+            if (newHoveredNode != hoveredNode || newHoveredExit != hoveredExitNode)
             {
                 ClearHoverHighlight();
                 hoveredNode = newHoveredNode;
+                hoveredExitNode = newHoveredExit;
                 
                 if (hoveredNode != null)
                 {
                     ApplyHoverHighlight(isValidTarget(hoveredNode.State));
                 }
+                else if (hoveredExitNode != null)
+                {
+                    bool exitValid = isExitValid == null || isExitValid();
+                    ApplyExitNodeHighlight(exitValid);
+                }
             }
             
-            UpdateDragLineColor(hoveredNode != null && isValidTarget(hoveredNode.State));
+            bool exitIsValid = hoveredExitNode != null && (isExitValid == null || isExitValid());
+            bool isValidDrop = (hoveredNode != null && isValidTarget(hoveredNode.State)) || exitIsValid;
+            UpdateDragLineColor(isValidDrop);
 
             evt.StopPropagation();
         }
@@ -162,10 +195,15 @@ namespace DMotion.Editor
             if (wasActualDrag)
             {
                 var targetNode = GetStateNodeAtPosition(evt.mousePosition);
+                var targetExit = onDropOnExitNode != null ? GetExitNodeAtPosition(evt.mousePosition) : null;
                 
                 if (targetNode != null && isValidTarget(targetNode.State))
                 {
                     createTransition(targetNode.State);
+                }
+                else if (targetExit != null && (isExitValid == null || isExitValid()))
+                {
+                    onDropOnExitNode();
                 }
             }
 
@@ -227,6 +265,13 @@ namespace DMotion.Editor
                 var targetCenterWorld = graphView.contentViewContainer.LocalToWorld(targetCenterContent);
                 endPos = graphView.WorldToLocal(targetCenterWorld);
             }
+            else if (hoveredExitNode != null)
+            {
+                var targetRect = hoveredExitNode.GetPosition();
+                var targetCenterContent = new Vector2(targetRect.x + targetRect.width / 2, targetRect.y + targetRect.height / 2);
+                var targetCenterWorld = graphView.contentViewContainer.LocalToWorld(targetCenterContent);
+                endPos = graphView.WorldToLocal(targetCenterWorld);
+            }
             
             var direction = endPos - startPos;
             var length = direction.magnitude;
@@ -271,6 +316,25 @@ namespace DMotion.Editor
             
             return null;
         }
+        
+        private ExitNodeView GetExitNodeAtPosition(Vector2 mousePosition)
+        {
+            var localPos = graphView.contentViewContainer.WorldToLocal(mousePosition);
+            
+            foreach (var element in graphView.graphElements)
+            {
+                if (element is ExitNodeView exitView)
+                {
+                    var nodeRect = exitView.GetPosition();
+                    if (nodeRect.Contains(localPos))
+                    {
+                        return exitView;
+                    }
+                }
+            }
+            
+            return null;
+        }
 
         private void ApplyHoverHighlight(bool isValid)
         {
@@ -287,18 +351,46 @@ namespace DMotion.Editor
             hoveredNode.style.borderRightWidth = 2;
         }
 
+        private void ApplyExitNodeHighlight(bool isValid)
+        {
+            if (hoveredExitNode == null) return;
+            
+            var color = isValid ? ValidConnectionColor : InvalidConnectionColor;
+            hoveredExitNode.style.borderBottomColor = color;
+            hoveredExitNode.style.borderTopColor = color;
+            hoveredExitNode.style.borderLeftColor = color;
+            hoveredExitNode.style.borderRightColor = color;
+            hoveredExitNode.style.borderBottomWidth = 2;
+            hoveredExitNode.style.borderTopWidth = 2;
+            hoveredExitNode.style.borderLeftWidth = 2;
+            hoveredExitNode.style.borderRightWidth = 2;
+        }
+
         private void ClearHoverHighlight()
         {
-            if (hoveredNode == null) return;
+            if (hoveredNode != null)
+            {
+                hoveredNode.style.borderBottomColor = StyleKeyword.Null;
+                hoveredNode.style.borderTopColor = StyleKeyword.Null;
+                hoveredNode.style.borderLeftColor = StyleKeyword.Null;
+                hoveredNode.style.borderRightColor = StyleKeyword.Null;
+                hoveredNode.style.borderBottomWidth = StyleKeyword.Null;
+                hoveredNode.style.borderTopWidth = StyleKeyword.Null;
+                hoveredNode.style.borderLeftWidth = StyleKeyword.Null;
+                hoveredNode.style.borderRightWidth = StyleKeyword.Null;
+            }
             
-            hoveredNode.style.borderBottomColor = StyleKeyword.Null;
-            hoveredNode.style.borderTopColor = StyleKeyword.Null;
-            hoveredNode.style.borderLeftColor = StyleKeyword.Null;
-            hoveredNode.style.borderRightColor = StyleKeyword.Null;
-            hoveredNode.style.borderBottomWidth = StyleKeyword.Null;
-            hoveredNode.style.borderTopWidth = StyleKeyword.Null;
-            hoveredNode.style.borderLeftWidth = StyleKeyword.Null;
-            hoveredNode.style.borderRightWidth = StyleKeyword.Null;
+            if (hoveredExitNode != null)
+            {
+                hoveredExitNode.style.borderBottomColor = StyleKeyword.Null;
+                hoveredExitNode.style.borderTopColor = StyleKeyword.Null;
+                hoveredExitNode.style.borderLeftColor = StyleKeyword.Null;
+                hoveredExitNode.style.borderRightColor = StyleKeyword.Null;
+                hoveredExitNode.style.borderBottomWidth = StyleKeyword.Null;
+                hoveredExitNode.style.borderTopWidth = StyleKeyword.Null;
+                hoveredExitNode.style.borderLeftWidth = StyleKeyword.Null;
+                hoveredExitNode.style.borderRightWidth = StyleKeyword.Null;
+            }
         }
 
         private void EndDrag()
@@ -307,6 +399,7 @@ namespace DMotion.Editor
             ClearHoverHighlight();
             RemoveDragLine();
             hoveredNode = null;
+            hoveredExitNode = null;
             
             if (target.HasMouseCapture())
             {

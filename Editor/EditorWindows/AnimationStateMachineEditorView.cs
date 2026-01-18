@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using DMotion.Authoring;
 using UnityEditor;
 using UnityEditor.Experimental.GraphView;
@@ -67,6 +66,9 @@ namespace DMotion.Editor
         private Dictionary<AnimationStateAsset, TransitionEdge> anyStateTransitionEdges =
             new Dictionary<AnimationStateAsset, TransitionEdge>();
 
+        // Exit node for nested state machines
+        private ExitNodeView exitNodeView;
+        
         // Exit transitions from SubStateMachines
         private Dictionary<TransitionPair, TransitionEdge> exitTransitionEdges =
             new Dictionary<TransitionPair, TransitionEdge>();
@@ -92,6 +94,64 @@ namespace DMotion.Editor
             
             // Centralized keyboard handling for all nodes
             RegisterCallback<KeyDownEvent>(OnKeyDown);
+            
+            // Prevent deletion of special nodes (Any State, Exit)
+            deleteSelection = OnDeleteSelection;
+        }
+        
+        private void OnDeleteSelection(string operationName, AskUser askUser)
+        {
+            // Filter selection to exclude non-deletable special nodes
+            var elementsToDelete = new List<GraphElement>();
+            foreach (var item in selection)
+            {
+                if (item is GraphElement element && 
+                    !(element is AnyStateNodeView) && 
+                    !(element is ExitNodeView))
+                {
+                    elementsToDelete.Add(element);
+                    
+                    // Also collect edges connected to deleted nodes
+                    if (element is Node node)
+                    {
+                        CollectConnectedEdges(node, elementsToDelete);
+                    }
+                }
+            }
+            
+            if (elementsToDelete.Count > 0)
+            {
+                DeleteElements(elementsToDelete);
+            }
+        }
+        
+        private void CollectConnectedEdges(Node node, List<GraphElement> elementsToDelete)
+        {
+            // Collect edges from input ports
+            foreach (var port in node.inputContainer.Children())
+            {
+                if (port is Port inputPort)
+                {
+                    foreach (var edge in inputPort.connections)
+                    {
+                        if (!elementsToDelete.Contains(edge))
+                            elementsToDelete.Add(edge);
+                    }
+                }
+            }
+            
+            // Collect edges from output ports
+            foreach (var port in node.outputContainer.Children())
+            {
+                if (port is Port outputPort)
+                {
+                    foreach (var edge in outputPort.connections)
+                    {
+                        if (!elementsToDelete.Contains(edge))
+                            elementsToDelete.Add(edge);
+                    }
+                }
+            }
         }
         
         private void OnKeyDown(KeyDownEvent evt)
@@ -105,7 +165,15 @@ namespace DMotion.Editor
             if (isRenameShortcut)
             {
                 // Find the selected state node and trigger rename
-                var selectedNode = selection.OfType<StateNodeView>().FirstOrDefault();
+                StateNodeView selectedNode = null;
+                foreach (var item in selection)
+                {
+                    if (item is StateNodeView stateNode)
+                    {
+                        selectedNode = stateNode;
+                        break;
+                    }
+                }
                 if (selectedNode != null)
                 {
                     selectedNode.StartRename();
@@ -158,6 +226,19 @@ namespace DMotion.Editor
                         {
                             DeleteAnyStateTransition(toState.State);
                         }
+                        // State → Exit node transition
+                        else if (transition.output.node is StateNodeView exitFromState &&
+                                 transition.input.node is ExitNodeView)
+                        {
+                            RemoveExitState(exitFromState.State);
+                        }
+                        // Any State → Exit node transition
+                        else if (transition.output.node is AnyStateNodeView &&
+                                 transition.input.node is ExitNodeView)
+                        {
+                            RemoveAnyStateExitTransition();
+                            anyStateExitEdge = null;
+                        }
                     }
                 }
             }
@@ -180,6 +261,12 @@ namespace DMotion.Editor
                         {
                             CreateAnyStateTransition(anyStateTarget.State);
                         }
+                        // State → Exit node (marks state as exit state)
+                        else if (edge.output.node is StateNodeView exitFromState &&
+                                 edge.input.node is ExitNodeView)
+                        {
+                            AddExitState(exitFromState.State);
+                        }
                     }
                 }
 
@@ -191,21 +278,103 @@ namespace DMotion.Editor
 
         private void DeleteState(AnimationStateAsset state)
         {
+            var wasSubMachine = state is SubStateMachineStateAsset;
+            
+            // Clean up visual dictionaries before deleting data
+            stateToView.Remove(state);
+            
+            // Remove transition edges involving this state
+            var pairsToRemove = ListPool<TransitionPair>.Get();
+            foreach (var pair in transitionToEdgeView.Keys)
+            {
+                if (pair.FromState == state || pair.ToState == state)
+                    pairsToRemove.Add(pair);
+            }
+            for (int i = 0; i < pairsToRemove.Count; i++)
+            {
+                transitionToEdgeView.Remove(pairsToRemove[i]);
+            }
+            ListPool<TransitionPair>.Return(pairsToRemove);
+            
+            // Remove any state transition edge to this state
+            anyStateTransitionEdges.Remove(state);
+            
+            // Delete from data model
             model.StateMachineAsset.DeleteState(state);
-            UpdateView();
+            
+            // Raise event for other panels
+            StateMachineEditorEvents.RaiseStateRemoved(model.StateMachineAsset, state);
+            
+            // Refresh dependencies panel if a SubMachine was deleted
+            if (wasSubMachine)
+            {
+                RefreshDependenciesPanel();
+            }
         }
 
         private void DeleteAllOutTransitions(AnimationStateAsset fromState, AnimationStateAsset toState)
         {
-            fromState.OutTransitions.RemoveAll(t => t.ToState == toState);
+            for (int i = fromState.OutTransitions.Count - 1; i >= 0; i--)
+            {
+                if (fromState.OutTransitions[i].ToState == toState)
+                    fromState.OutTransitions.RemoveAt(i);
+            }
             transitionToEdgeView.Remove(new TransitionPair(fromState, toState));
         }
 
         private void CreateState(DropdownMenuAction action, Type stateType)
         {
+            var graphPos = contentViewContainer.WorldToLocal(action.eventInfo.mousePosition);
+            
+            // SubStateMachine uses a popup for configuration
+            if (stateType == typeof(SubStateMachineStateAsset))
+            {
+                SubStateMachineCreationPopup.Show(model.StateMachineAsset, graphPos, OnSubStateMachineCreated);
+                return;
+            }
+            
             var state = model.StateMachineAsset.CreateState(stateType);
-            state.StateEditorData.GraphPosition = contentViewContainer.WorldToLocal(action.eventInfo.mousePosition);
+            state.StateEditorData.GraphPosition = graphPos;
             InstantiateStateView(state);
+            
+            // Raise event for other panels
+            StateMachineEditorEvents.RaiseStateAdded(model.StateMachineAsset, state);
+        }
+
+        private void OnSubStateMachineCreated(SubStateMachineStateAsset subState)
+        {
+            if (subState == null) return;
+            
+            InstantiateStateView(subState);
+            RefreshDependenciesPanel();
+            
+            // Raise event for other panels
+            StateMachineEditorEvents.RaiseStateAdded(model.StateMachineAsset, subState);
+        }
+
+        /// <summary>
+        /// Refreshes the dependencies panel visibility based on current SubMachines.
+        /// </summary>
+        internal void RefreshDependenciesPanel()
+        {
+            if (model.DependenciesInspectorView == null) return;
+            
+            var hasSubMachines = HasAnySubStateMachine(model.StateMachineAsset);
+            
+            if (hasSubMachines)
+            {
+                model.DependenciesInspectorView.style.display = DisplayStyle.Flex;
+                model.DependenciesInspectorView.SetInspector<DependencyInspector, DependencyInspectorModel>(
+                    model.StateMachineAsset, new DependencyInspectorModel()
+                    {
+                        StateMachine = model.StateMachineAsset
+                    });
+            }
+            else
+            {
+                model.DependenciesInspectorView.style.display = DisplayStyle.None;
+                model.DependenciesInspectorView.Clear();
+            }
         }
 
         private void CreateOutTransition(AnimationStateAsset fromState, AnimationStateAsset toState)
@@ -228,11 +397,20 @@ namespace DMotion.Editor
             EditorUtility.SetDirty(fromState);
         }
 
+        // Cached list for GetCompatiblePorts to avoid per-call allocations
+        private List<Port> _compatiblePortsCache = new List<Port>();
+        
         public override List<Port> GetCompatiblePorts(Port startPort, NodeAdapter nodeAdapter)
         {
-            return ports.ToList()
-                .Where((nap => nap.direction != startPort.direction &&
-                               nap.node != startPort.node)).ToList();
+            _compatiblePortsCache.Clear();
+            foreach (var port in ports)
+            {
+                if (port.direction != startPort.direction && port.node != startPort.node)
+                {
+                    _compatiblePortsCache.Add(port);
+                }
+            }
+            return _compatiblePortsCache;
         }
 
         internal void UpdateView()
@@ -255,13 +433,24 @@ namespace DMotion.Editor
             transitionToEdgeView.Clear();
             anyStateTransitionEdges.Clear();
             exitTransitionEdges.Clear();
+            anyStateExitEdge = null;
 
             graphViewChanged -= OnGraphViewChanged;
-            DeleteElements(graphElements.ToList());
+            // Collect elements to delete without LINQ
+            var elementsToDelete = ListPool<GraphElement>.Get();
+            foreach (var element in graphElements)
+            {
+                elementsToDelete.Add(element);
+            }
+            DeleteElements(elementsToDelete);
+            ListPool<GraphElement>.Return(elementsToDelete);
             graphViewChanged += OnGraphViewChanged;
 
             // Create Any State node (always present)
             InstantiateAnyStateNode();
+            
+            // Create Exit node (always present - for nested state machine support)
+            InstantiateExitNode();
 
             foreach (var s in model.StateMachineAsset.States)
             {
@@ -281,6 +470,12 @@ namespace DMotion.Editor
             {
                 InstantiateAnyStateTransitionEdge(anyTransition);
             }
+            
+            // Create Any State -> Exit edge if exists
+            if (model.StateMachineAsset.HasAnyStateExitTransition)
+            {
+                InstantiateAnyStateExitEdge();
+            }
 
             // Create exit transition edges for SubStateMachines
             foreach (var state in model.StateMachineAsset.States)
@@ -290,12 +485,39 @@ namespace DMotion.Editor
                     InstantiateSubStateMachineExitTransitions(subState);
                 }
             }
+            
+            // Create exit state edges (states that connect to Exit node)
+            foreach (var exitState in model.StateMachineAsset.ExitStates)
+            {
+                InstantiateExitStateEdge(exitState);
+            }
 
             model.ParametersInspectorView.SetInspector<ParametersInspector, ParameterInspectorModel>(
                 model.StateMachineAsset, new ParameterInspectorModel()
                 {
                     StateMachine = model.StateMachineAsset
                 });
+
+            // Set up dependencies inspector - only show if there are SubStateMachines
+            if (model.DependenciesInspectorView != null)
+            {
+                var hasSubMachines = HasAnySubStateMachine(model.StateMachineAsset);
+                
+                if (hasSubMachines)
+                {
+                    model.DependenciesInspectorView.style.display = DisplayStyle.Flex;
+                    model.DependenciesInspectorView.SetInspector<DependencyInspector, DependencyInspectorModel>(
+                        model.StateMachineAsset, new DependencyInspectorModel()
+                        {
+                            StateMachine = model.StateMachineAsset
+                        });
+                }
+                else
+                {
+                    model.DependenciesInspectorView.style.display = DisplayStyle.None;
+                    model.DependenciesInspectorView.Clear();
+                }
+            }
         }
 
         internal StateNodeView GetViewForState(AnimationStateAsset state)
@@ -366,9 +588,8 @@ namespace DMotion.Editor
                         (inspectorModel.StateAsset, inspectorModel);
                     break;
                 case SubStateMachineStateNodeView _:
-                    // SubStateMachine uses the custom editor defined in SubStateMachineStateAssetEditor
-                    // Just select the asset in the inspector - Unity will use our custom editor
-                    Selection.activeObject = inspectorModel.StateAsset;
+                    model.InspectorView.SetInspector<SubStateMachineInspector, AnimationStateInspectorModel>
+                        (inspectorModel.StateAsset, inspectorModel);
                     break;
                 default:
                     // Fallback: just select the asset
@@ -399,6 +620,19 @@ namespace DMotion.Editor
             // Add right-click drag to create transitions
             anyStateNodeView.AddManipulator(
                 TransitionDragManipulator.ForAnyStateNode(anyStateNodeView, this, model.StateMachineAsset));
+        }
+
+        private void InstantiateExitNode()
+        {
+            exitNodeView = new ExitNodeView(model.StateMachineAsset, this);
+            AddElement(exitNodeView);
+            exitNodeView.ExitSelectedEvent += OnExitNodeSelected;
+        }
+
+        private void OnExitNodeSelected(ExitNodeView obj)
+        {
+            // Clear the inspector or show exit state info
+            model.InspectorView.Clear();
         }
 
         private void InstantiateAnyStateTransitionEdge(StateOutTransition anyTransition)
@@ -445,17 +679,148 @@ namespace DMotion.Editor
 
         private void DeleteAnyStateTransition(AnimationStateAsset toState)
         {
-            model.StateMachineAsset.AnyStateTransitions.RemoveAll(t => t.ToState == toState);
+            var transitions = model.StateMachineAsset.AnyStateTransitions;
+            for (int i = transitions.Count - 1; i >= 0; i--)
+            {
+                if (transitions[i].ToState == toState)
+                    transitions.RemoveAt(i);
+            }
             anyStateTransitionEdges.Remove(toState);
+        }
+
+        private void AddExitState(AnimationStateAsset state)
+        {
+            if (state == null) return;
+            
+            // Check for duplicate
+            if (model.StateMachineAsset.ExitStates.Contains(state))
+                return;
+            
+            Undo.RecordObject(model.StateMachineAsset, "Add Exit State");
+            model.StateMachineAsset.ExitStates.Add(state);
+            EditorUtility.SetDirty(model.StateMachineAsset);
+            
+            // Create visual edge
+            InstantiateExitStateEdge(state);
+        }
+        
+        /// <summary>
+        /// Adds a state as an exit state. Called by TransitionDragManipulator when dropping on Exit node.
+        /// </summary>
+        internal void AddExitStateFromDrag(AnimationStateAsset state)
+        {
+            AddExitState(state);
+        }
+        
+        /// <summary>
+        /// Checks if a state is already an exit state.
+        /// </summary>
+        internal bool IsExitState(AnimationStateAsset state)
+        {
+            return model.StateMachineAsset.ExitStates.Contains(state);
+        }
+
+        private void RemoveExitState(AnimationStateAsset state)
+        {
+            Undo.RecordObject(model.StateMachineAsset, "Remove Exit State");
+            model.StateMachineAsset.ExitStates.Remove(state);
+            EditorUtility.SetDirty(model.StateMachineAsset);
+        }
+
+        private void InstantiateExitStateEdge(AnimationStateAsset state)
+        {
+            var stateView = GetViewForState(state);
+            if (stateView == null || exitNodeView == null)
+                return;
+
+            var edge = stateView.output.ConnectTo<TransitionEdge>(exitNodeView.input);
+            edge.Model = new TransitionEdgeModel()
+            {
+                TransitionCount = 1,
+                StateMachineAsset = model.StateMachineAsset,
+                SelectedEntity = model.SelectedEntity
+            };
+            AddElement(edge);
+        }
+        
+        /// <summary>
+        /// Checks if an Any State exit transition can be created (doesn't exist yet).
+        /// </summary>
+        internal bool CanCreateAnyStateExitTransition()
+        {
+            return !model.StateMachineAsset.HasAnyStateExitTransition;
+        }
+        
+        /// <summary>
+        /// Creates an Any State exit transition. Called by TransitionDragManipulator when dropping on Exit node.
+        /// </summary>
+        internal void CreateAnyStateExitTransition()
+        {
+            // Don't allow duplicate
+            if (!CanCreateAnyStateExitTransition())
+                return;
+            
+            Undo.RecordObject(model.StateMachineAsset, "Create Any State Exit Transition");
+            model.StateMachineAsset.AnyStateExitTransition = new StateOutTransition(null)
+            {
+                Conditions = new System.Collections.Generic.List<TransitionCondition>()
+            };
+            EditorUtility.SetDirty(model.StateMachineAsset);
+            AssetDatabase.SaveAssets();
+            
+            InstantiateAnyStateExitEdge();
+        }
+        
+        private void RemoveAnyStateExitTransition()
+        {
+            Undo.RecordObject(model.StateMachineAsset, "Remove Any State Exit Transition");
+            model.StateMachineAsset.AnyStateExitTransition = null;
+            EditorUtility.SetDirty(model.StateMachineAsset);
+            AssetDatabase.SaveAssets();
+        }
+        
+        private TransitionEdge anyStateExitEdge;
+        
+        private void InstantiateAnyStateExitEdge()
+        {
+            if (anyStateNodeView == null || exitNodeView == null)
+                return;
+            
+            // Don't create duplicate
+            if (anyStateExitEdge != null)
+                return;
+
+            var edge = anyStateNodeView.output.ConnectTo<TransitionEdge>(exitNodeView.input);
+            edge.Model = new TransitionEdgeModel()
+            {
+                TransitionCount = 1,
+                StateMachineAsset = model.StateMachineAsset,
+                SelectedEntity = model.SelectedEntity
+            };
+            AddElement(edge);
+            anyStateExitEdge = edge;
+            
+            edge.TransitionSelectedEvent += OnAnyStateExitTransitionSelected;
+        }
+        
+        private void OnAnyStateExitTransitionSelected(TransitionEdge obj)
+        {
+            // Show Any State exit transition inspector
+            model.InspectorView.SetInspector<AnyStateTransitionsInspector, AnyStateInspectorModel>(
+                model.StateMachineAsset,
+                new AnyStateInspectorModel
+                {
+                    ToState = null, // Will show exit transition when ToState is null and checking for exit
+                });
         }
 
         private void OnAnyStateSelected(AnyStateNodeView obj)
         {
-            // Show list of all Any State transitions in inspector
-            model.InspectorView.SetInspector<ParametersInspector, ParameterInspectorModel>(
-                model.StateMachineAsset, new ParameterInspectorModel()
+            // Show Any State transitions inspector (not parameters - those are in a separate panel)
+            model.InspectorView.SetInspector<AnyStateTransitionsInspector, AnyStateInspectorModel>(
+                model.StateMachineAsset, new AnyStateInspectorModel()
                 {
-                    StateMachine = model.StateMachineAsset
+                    ToState = null // Show all Any State transitions
                 });
         }
 
@@ -526,6 +891,22 @@ namespace DMotion.Editor
                 var subMachineView = GetViewForState(exitEdge.SubStateMachine);
                 subMachineView?.OnSelected();
             }
+        }
+        
+        /// <summary>
+        /// Helper method to check if the state machine has any SubStateMachine states.
+        /// Replaces LINQ Any() to avoid per-call allocations.
+        /// </summary>
+        private static bool HasAnySubStateMachine(StateMachineAsset stateMachine)
+        {
+            if (stateMachine == null) return false;
+            var states = stateMachine.States;
+            for (int i = 0; i < states.Count; i++)
+            {
+                if (states[i] is SubStateMachineStateAsset)
+                    return true;
+            }
+            return false;
         }
     }
 }

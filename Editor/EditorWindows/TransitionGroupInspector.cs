@@ -1,4 +1,4 @@
-﻿using DMotion.Authoring;
+using DMotion.Authoring;
 using UnityEditor;
 using UnityEngine;
 
@@ -14,6 +14,12 @@ namespace DMotion.Editor
     {
         public override void OnInspectorGUI()
         {
+            // Header
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            {
+                EditorGUILayout.LabelField("Transition Inspector", EditorStyles.boldLabel);
+            }
+            
             using (new EditorGUI.DisabledScope(Application.isPlaying))
             {
                 var outTransitionsProperty =
@@ -49,7 +55,7 @@ namespace DMotion.Editor
                             EditorGUILayout.PropertyField(endTimeProperty);
                         }
 
-                        EditorGUILayout.PropertyField(transitionDurationProperty, new GUIContent("Duration (s)"));
+                        EditorGUILayout.PropertyField(transitionDurationProperty, GUIContentCache.Duration);
                         EditorGUILayout.PropertyField(conditionsProperty);
                     }
                 }

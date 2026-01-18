@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using DMotion.Authoring;
 using UnityEditor;
 using UnityEngine;
@@ -75,7 +74,7 @@ namespace DMotion.Editor
             SerializedProperty comparisonValueProperty,
             SerializedProperty comparisonModeProperty)
         {
-            var rects = position.HorizontalLayout(0.7f, 0.3f).ToArray();
+            var rects = position.HorizontalLayout2(0.7f, 0.3f);
             parameterPopupSelector.OnGUI(rects[0], parameterProperty, GUIContent.none);
 
             var enumValue = (BoolConditionComparison)EditorGUI.EnumPopup(rects[1],
@@ -88,7 +87,7 @@ namespace DMotion.Editor
             SerializedProperty comparisonValueProperty,
             SerializedProperty comparisonModeProperty)
         {
-            var rects = position.HorizontalLayout(0.4f, 0.4f, 0.2f).ToArray();
+            var rects = position.HorizontalLayout3(0.4f, 0.4f, 0.2f);
             parameterPopupSelector.OnGUI(rects[0], parameterProperty, GUIContent.none);
 
             var enumValue = (IntConditionComparison)EditorGUI.EnumPopup(rects[1],
@@ -105,7 +104,7 @@ namespace DMotion.Editor
             SerializedProperty comparisonValueProperty,
             SerializedProperty comparisonModeProperty)
         {
-            var rects = position.HorizontalLayout(0.3f, 0.2f, 0.3f).ToArray();
+            var rects = position.HorizontalLayout3(0.3f, 0.2f, 0.3f);
             parameterPopupSelector.OnGUI(rects[0], parameterProperty, GUIContent.none);
 
             var comparisonEnumValue = (IntConditionComparison)EditorGUI.EnumPopup(rects[1],

@@ -33,6 +33,13 @@ namespace DMotion.Authoring
         /// </summary>
         internal short ExitGroupIndex;
 
+        /// <summary>
+        /// The immediate parent SubStateMachine this state came from.
+        /// Null if the state is at the root level.
+        /// Used for parameter link resolution during blob conversion.
+        /// </summary>
+        internal SubStateMachineStateAsset SourceSubMachine;
+
         /// <summary>Whether this state is an exit state for its parent sub-machine.</summary>
         internal bool IsExitState => ExitGroupIndex >= 0;
     }
@@ -254,7 +261,8 @@ namespace DMotion.Authoring
                             GlobalIndex = globalIndex,
                             ClipIndexOffset = stateClipOffset,
                             Path = statePath,
-                            ExitGroupIndex = -1 // Will be assigned in second pass
+                            ExitGroupIndex = -1, // Will be assigned in second pass
+                            SourceSubMachine = parentSubMachine // Track source for parameter linking
                         });
 
                         assetToIndex[state] = globalIndex;

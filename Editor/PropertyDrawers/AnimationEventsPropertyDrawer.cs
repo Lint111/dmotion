@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using DMotion.Authoring;
 using UnityEditor;
 using UnityEngine;
@@ -144,19 +143,26 @@ namespace DMotion.Editor
 
             using (var c = new EditorGUI.ChangeCheckScope())
             {
-                var cachedEvents = ClipEvents.ToList();
+                // Cache events for comparison - use pooled list
+                var cachedEvents = ListPool<Authoring.AnimationClipEvent>.Get();
+                var currentEvents = ClipEvents;
+                for (int i = 0; i < currentEvents.Length; i++)
+                {
+                    cachedEvents.Add(currentEvents[i]);
+                }
                 GUI.color = Color.white;
                 EditorGUILayout.PropertyField(property, GUIContent.none, true);
                 if (c.changed)
                 {
                     ClearSelection();
                     property.ApplyAndUpdate();
-                    if (cachedEvents.Count == ClipEvents.Length)
+                    var newEvents = ClipEvents;
+                    if (cachedEvents.Count == newEvents.Length)
                     {
-                        for (var i = 0; i < ClipEvents.Length; i++)
+                        for (var i = 0; i < newEvents.Length; i++)
                         {
                             var cachedEvent = cachedEvents[i];
-                            var currentEvent = ClipEvents[i];
+                            var currentEvent = newEvents[i];
                             if (!Mathf.Approximately(cachedEvent.NormalizedTime, currentEvent.NormalizedTime))
                             {
                                 eventMarkerDragIndex = i;
@@ -166,6 +172,7 @@ namespace DMotion.Editor
                         }
                     }
                 }
+                ListPool<Authoring.AnimationClipEvent>.Return(cachedEvents);
             }
 
             HandleEvents();
@@ -194,10 +201,17 @@ namespace DMotion.Editor
 
         private void AddEvent(float normalizedTime)
         {
-            ClipEvents = ClipEvents.Append(new Authoring.AnimationClipEvent()
+            var oldEvents = ClipEvents;
+            var newEvents = new Authoring.AnimationClipEvent[oldEvents.Length + 1];
+            for (int i = 0; i < oldEvents.Length; i++)
+            {
+                newEvents[i] = oldEvents[i];
+            }
+            newEvents[oldEvents.Length] = new Authoring.AnimationClipEvent()
             {
                 NormalizedTime = normalizedTime
-            }).ToArray();
+            };
+            ClipEvents = newEvents;
             ClearSelection();
             eventMarkerDragIndex = ClipEvents.Length - 1;
             property.ApplyAndUpdate();
@@ -205,11 +219,19 @@ namespace DMotion.Editor
 
         private void RemoveEvent(int index)
         {
-            if (index >= 0 && index < ClipEvents.Length)
+            var oldEvents = ClipEvents;
+            if (index >= 0 && index < oldEvents.Length)
             {
-                var l = ClipEvents.ToList();
-                l.RemoveAt(index);
-                ClipEvents = l.ToArray();
+                var newEvents = new Authoring.AnimationClipEvent[oldEvents.Length - 1];
+                int destIndex = 0;
+                for (int i = 0; i < oldEvents.Length; i++)
+                {
+                    if (i != index)
+                    {
+                        newEvents[destIndex++] = oldEvents[i];
+                    }
+                }
+                ClipEvents = newEvents;
             }
 
             ClearSelection();

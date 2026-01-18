@@ -51,6 +51,7 @@ namespace DMotion.Editor
         protected override void BuildNodeContextMenu(ContextualMenuPopulateEvent evt, DropdownMenuAction.Status status)
         {
             // Build submenu with all available target states
+            var sb = StringBuilderCache.Get();
             foreach (var targetState in StateMachine.States)
             {
                 var target = targetState; // Capture for closure
@@ -58,7 +59,8 @@ namespace DMotion.Editor
                 bool exists = StateMachine.AnyStateTransitions.Exists(t => t.ToState == target);
                 var itemStatus = exists ? DropdownMenuAction.Status.Disabled : status;
                 
-                evt.menu.AppendAction($"Create Transition/{target.name}",
+                sb.Clear().Append("Create Transition/").Append(target.name);
+                evt.menu.AppendAction(sb.ToString(),
                     _ => GraphView.CreateAnyStateTransitionTo(target), itemStatus);
             }
         }

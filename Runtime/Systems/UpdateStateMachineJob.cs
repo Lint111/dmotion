@@ -87,7 +87,7 @@ namespace DMotion
                 currentStateAnimationState,
                 ref stateMachineBlob,
                 parameters,
-                stateMachine.CurrentState.StateIndex,
+                (short)stateMachine.CurrentState.StateIndex,
                 out var transitionIndex);
 
             // If no Any State transition matched, check regular state transitions

@@ -26,10 +26,28 @@
     padding-right: 10px;
     padding-top: 3px;
     padding-bottom: 10px;
+    border-width: 1px;
+    border-color: rgb(40, 40, 40);
+    margin-bottom: 2px;
 }
 
 #parameters-inspector {
     background-color: rgb(51, 51, 51);
+    border-color: rgb(70, 130, 180);
+    border-top-width: 2px;
+}
+
+#dependencies-inspector {
+    background-color: rgb(55, 50, 50);
+    border-color: rgb(180, 130, 70);
+    border-top-width: 2px;
+}
+
+#inspector {
+    background-color: rgb(48, 48, 48);
+    border-color: rgb(100, 180, 100);
+    border-top-width: 2px;
+    flex-grow: 1;
 }
 
 .edge.transition {

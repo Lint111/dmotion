@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using DMotion.Authoring;
 using UnityEditor;
 using UnityEngine;
@@ -19,7 +18,7 @@ namespace DMotion.Editor
             var state = ScriptableObject.CreateInstance(type) as AnimationStateAsset;
             Assert.IsNotNull(state);
 
-            state.name = $"New State {stateMachineAsset.States.Count + 1}";
+            state.name = StringBuilderCache.FormatNewState(stateMachineAsset.States.Count + 1);
             state.StateEditorData.Guid = GUID.Generate().ToString();
             //TODO: Enable this later. Create editor tool to change this as well
             // state.hideFlags = HideFlags.HideInHierarchy;
@@ -42,26 +41,53 @@ namespace DMotion.Editor
 
         public static void DeleteState(this StateMachineAsset stateMachineAsset, AnimationStateAsset stateAsset)
         {
-            //Remove all transitions that reference this state
+            Undo.SetCurrentGroupName("Delete State");
+            var undoGroup = Undo.GetCurrentGroup();
+            
+            // Record undo for the state machine
+            Undo.RecordObject(stateMachineAsset, "Delete State");
+            
+            // Record undo for all states that might have transitions modified
+            foreach (var state in stateMachineAsset.States)
+            {
+                Undo.RecordObject(state, "Delete State");
+            }
+            
+            // Remove all transitions TO this state from other states
             foreach (var state in stateMachineAsset.States)
             {
                 for (int i = state.OutTransitions.Count - 1; i >= 0; i--)
                 {
-                    var transition = state.OutTransitions[i];
-                    if (transition.ToState == stateAsset)
+                    if (state.OutTransitions[i].ToState == stateAsset)
                     {
                         state.OutTransitions.RemoveAt(i);
                     }
                 }
             }
+            
+            // Remove Any State transitions to this state
+            var anyTransitions = stateMachineAsset.AnyStateTransitions;
+            for (int i = anyTransitions.Count - 1; i >= 0; i--)
+            {
+                if (anyTransitions[i].ToState == stateAsset)
+                {
+                    anyTransitions.RemoveAt(i);
+                }
+            }
+            
+            // Remove from exit states if present
+            stateMachineAsset.ExitStates.Remove(stateAsset);
 
             stateMachineAsset.States.Remove(stateAsset);
             if (stateMachineAsset.DefaultState == stateAsset)
             {
-                stateMachineAsset.DefaultState = stateMachineAsset.States.FirstOrDefault();
+                stateMachineAsset.DefaultState = stateMachineAsset.States.Count > 0 ? stateMachineAsset.States[0] : null;
             }
             
-            AssetDatabase.RemoveObjectFromAsset(stateAsset);
+            // Use Undo.DestroyObjectImmediate for proper undo support
+            Undo.DestroyObjectImmediate(stateAsset);
+            
+            Undo.CollapseUndoOperations(undoGroup);
             AssetDatabase.SaveAssets();
         }
 
@@ -74,15 +100,22 @@ namespace DMotion.Editor
         public static AnimationParameterAsset CreateParameter(this StateMachineAsset stateMachineAsset, Type type)
         {
             Assert.IsTrue(typeof(AnimationParameterAsset).IsAssignableFrom(type));
+            
+            // Record undo for the state machine before modifying
+            Undo.RecordObject(stateMachineAsset, "Create Parameter");
+            
             var parameter = ScriptableObject.CreateInstance(type) as AnimationParameterAsset;
             Assert.IsNotNull(parameter);
 
-            parameter.name = $"New Parameter {stateMachineAsset.Parameters.Count + 1}";
+            parameter.name = StringBuilderCache.FormatNewParameter(stateMachineAsset.Parameters.Count + 1);
             //TODO: Enable this later. Create editor tool to change this as well
             // state.hideFlags = HideFlags.HideInHierarchy;
 
             stateMachineAsset.Parameters.Add(parameter);
             AssetDatabase.AddObjectToAsset(parameter, stateMachineAsset);
+            
+            // Register the created object with Undo so it can be destroyed on undo
+            Undo.RegisterCreatedObjectUndo(parameter, "Create Parameter");
 
             AssetDatabase.SaveAssets();
             return parameter;
@@ -91,18 +124,35 @@ namespace DMotion.Editor
         public static void DeleteParameter(this StateMachineAsset stateMachineAsset,
             AnimationParameterAsset parameterAsset)
         {
-            //Remove all transitions that reference this state
+            // Record undo for the state machine before modifying
+            Undo.RecordObject(stateMachineAsset, "Delete Parameter");
+            
+            // Record undo for all states that might be modified
+            foreach (var state in stateMachineAsset.States)
+            {
+                Undo.RecordObject(state, "Delete Parameter");
+            }
+            
+            //Remove all transitions that reference this parameter
             foreach (var state in stateMachineAsset.States)
             {
                 for (int i = state.OutTransitions.Count - 1; i >= 0; i--)
                 {
                     var transition = state.OutTransitions[i];
-                    transition.Conditions.RemoveAll(c => c.Parameter == parameterAsset);
+                    var conditions = transition.Conditions;
+                    for (int j = conditions.Count - 1; j >= 0; j--)
+                    {
+                        if (conditions[j].Parameter == parameterAsset)
+                            conditions.RemoveAt(j);
+                    }
                 }
             }
 
             stateMachineAsset.Parameters.Remove(parameterAsset);
-            AssetDatabase.RemoveObjectFromAsset(parameterAsset);
+            
+            // Use Undo.DestroyObjectImmediate for proper undo support
+            Undo.DestroyObjectImmediate(parameterAsset);
+            
             AssetDatabase.SaveAssets();
         }
 
@@ -139,10 +189,14 @@ namespace DMotion.Editor
             var labelWidth = Mathf.Min(EditorGUIUtility.labelWidth, 80f);
             using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
             {
-                EditorGUILayout.LabelField($"{fromState.name}", GUILayout.Width(labelWidth));
+                EditorGUILayout.LabelField(fromState.name, GUILayout.Width(labelWidth));
                 EditorGUILayout.LabelField("--->", GUILayout.Width(40f));
-                EditorGUILayout.LabelField($"{toState.name}", GUILayout.Width(labelWidth));
-                EditorGUILayout.LabelField($"({transitionTime}s)", GUILayout.Width(50f));
+                EditorGUILayout.LabelField(toState.name, GUILayout.Width(labelWidth));
+                
+                // Format transition time without string interpolation
+                var sb = StringBuilderCache.Get();
+                sb.Append('(').Append(transitionTime).Append("s)");
+                EditorGUILayout.LabelField(sb.ToString(), GUILayout.Width(50f));
             }
         }
     }

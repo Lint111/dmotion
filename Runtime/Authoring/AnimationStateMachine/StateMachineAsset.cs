@@ -39,11 +39,174 @@ namespace DMotion.Authoring
         [Header("Any State Transitions")]
         [Tooltip("Global transitions that can be taken from any state. Evaluated before regular state transitions.")]
         public List<StateOutTransition> AnyStateTransitions = new();
+        
+        [Tooltip("Optional transition that allows exiting the state machine from any state when conditions are met. " +
+                 "Useful for animation canceling or global interrupts in nested state machines.")]
+        [SerializeField]
+        private StateOutTransition _anyStateExitTransition;
+        
+        /// <summary>
+        /// Gets or sets the Any State exit transition.
+        /// Use HasAnyStateExitTransition to check if one exists (handles Unity serialization quirks).
+        /// </summary>
+        public StateOutTransition AnyStateExitTransition
+        {
+            get => _anyStateExitTransition;
+            set => _anyStateExitTransition = value;
+        }
+        
+        /// <summary>
+        /// Returns true if there is an active Any State exit transition.
+        /// More reliable than checking AnyStateExitTransition == null due to Unity serialization.
+        /// </summary>
+        public bool HasAnyStateExitTransition => _anyStateExitTransition != null && _anyStateExitTransition.Conditions != null;
 
         [Header("Exit States")]
         [Tooltip("States that can trigger an exit when this machine is used as a nested state machine. " +
                  "Draw transitions TO the Exit node in the graph editor to define these.")]
         public List<AnimationStateAsset> ExitStates = new();
+
+        #region Parameter Dependency Tracking
+
+        /// <summary>
+        /// All parameter dependencies for SubStateMachines in this state machine.
+        /// Tracks which parameters are required by which SubStateMachines.
+        /// </summary>
+        [SerializeField, HideInInspector]
+        private List<ParameterDependency> _parameterDependencies = new();
+
+        /// <summary>
+        /// Parameter links/aliases that map parent parameters to child SubStateMachine parameters.
+        /// Used during blob conversion to resolve parameter indices.
+        /// </summary>
+        [SerializeField, HideInInspector]
+        private List<ParameterLink> _parameterLinks = new();
+
+        /// <summary>Gets all parameter dependencies for this state machine.</summary>
+        public IReadOnlyList<ParameterDependency> ParameterDependencies => _parameterDependencies;
+
+        /// <summary>Gets all parameter links/aliases.</summary>
+        public IReadOnlyList<ParameterLink> ParameterLinks => _parameterLinks;
+
+        /// <summary>Adds a parameter dependency.</summary>
+        internal void AddDependency(ParameterDependency dependency)
+        {
+            // Avoid duplicates
+            for (int i = 0; i < _parameterDependencies.Count; i++)
+            {
+                var existing = _parameterDependencies[i];
+                if (existing.RequiredParameter == dependency.RequiredParameter &&
+                    existing.RequiringSubMachine == dependency.RequiringSubMachine &&
+                    existing.UsageType == dependency.UsageType)
+                {
+                    return;
+                }
+            }
+            _parameterDependencies.Add(dependency);
+        }
+
+        /// <summary>Removes all dependencies for a specific SubStateMachine.</summary>
+        internal void RemoveDependenciesForSubMachine(SubStateMachineStateAsset subMachine)
+        {
+            for (int i = _parameterDependencies.Count - 1; i >= 0; i--)
+            {
+                if (_parameterDependencies[i].RequiringSubMachine == subMachine)
+                    _parameterDependencies.RemoveAt(i);
+            }
+        }
+
+        /// <summary>Adds a parameter link.</summary>
+        internal void AddLink(ParameterLink link)
+        {
+            // Avoid duplicates
+            for (int i = 0; i < _parameterLinks.Count; i++)
+            {
+                var existing = _parameterLinks[i];
+                if (existing.SourceParameter == link.SourceParameter &&
+                    existing.TargetParameter == link.TargetParameter &&
+                    existing.SubMachine == link.SubMachine)
+                {
+                    return;
+                }
+            }
+            _parameterLinks.Add(link);
+        }
+
+        /// <summary>Adds multiple parameter links.</summary>
+        internal void AddParameterLinks(IEnumerable<ParameterLink> links)
+        {
+            foreach (var link in links)
+            {
+                AddLink(link);
+            }
+        }
+
+        /// <summary>Removes all links for a specific SubStateMachine.</summary>
+        internal void RemoveLinksForSubMachine(SubStateMachineStateAsset subMachine)
+        {
+            for (int i = _parameterLinks.Count - 1; i >= 0; i--)
+            {
+                if (_parameterLinks[i].SubMachine == subMachine)
+                    _parameterLinks.RemoveAt(i);
+            }
+        }
+
+        /// <summary>Removes all links that reference a specific parameter (as source or target).</summary>
+        internal void RemoveLinksForParameter(AnimationParameterAsset param)
+        {
+            for (int i = _parameterLinks.Count - 1; i >= 0; i--)
+            {
+                var link = _parameterLinks[i];
+                if (link.SourceParameter == param || link.TargetParameter == param)
+                    _parameterLinks.RemoveAt(i);
+            }
+        }
+
+        /// <summary>Removes all exclusion markers for a specific SubStateMachine.</summary>
+        internal void RemoveExclusionsForSubMachine(SubStateMachineStateAsset subMachine)
+        {
+            for (int i = _parameterLinks.Count - 1; i >= 0; i--)
+            {
+                var link = _parameterLinks[i];
+                if (link.SubMachine == subMachine && link.IsExclusion)
+                    _parameterLinks.RemoveAt(i);
+            }
+        }
+
+        /// <summary>Removes a specific link matching source, target, and subMachine.</summary>
+        internal void RemoveLink(AnimationParameterAsset source, AnimationParameterAsset target, SubStateMachineStateAsset subMachine)
+        {
+            for (int i = _parameterLinks.Count - 1; i >= 0; i--)
+            {
+                var link = _parameterLinks[i];
+                if (link.SubMachine == subMachine && 
+                    link.SourceParameter == source && 
+                    link.TargetParameter == target)
+                {
+                    _parameterLinks.RemoveAt(i);
+                }
+            }
+        }
+
+        /// <summary>Finds a parameter link for a target parameter in a SubStateMachine.</summary>
+        public ParameterLink? FindLinkForTarget(AnimationParameterAsset targetParam, SubStateMachineStateAsset subMachine)
+        {
+            foreach (var link in _parameterLinks)
+            {
+                if (link.TargetParameter == targetParam && link.SubMachine == subMachine)
+                    return link;
+            }
+            return null;
+        }
+
+        /// <summary>Clears all dependency and link data.</summary>
+        internal void ClearAllDependencyData()
+        {
+            _parameterDependencies.Clear();
+            _parameterLinks.Clear();
+        }
+
+        #endregion
 
         public IEnumerable<AnimationClipAsset> Clips => States.SelectMany(s => s.Clips);
         public int ClipCount => States.Sum(s => s.ClipCount);

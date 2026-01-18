@@ -262,13 +262,16 @@ namespace DMotion.Editor
         {
             // Build submenu with all available target states for transition creation
             // Self-transitions are allowed (e.g., re-trigger attack, reset idle)
+            var sb = StringBuilderCache.Get();
             foreach (var targetState in StateMachine.States)
             {
                 var target = targetState; // Capture for closure
-                var label = targetState == State 
-                    ? $"Create Transition/{target.name} (Self)" 
-                    : $"Create Transition/{target.name}";
-                evt.menu.AppendAction(label, _ => CreateTransitionTo(target), status);
+                sb.Clear().Append("Create Transition/").Append(target.name);
+                if (targetState == State)
+                {
+                    sb.Append(" (Self)");
+                }
+                evt.menu.AppendAction(sb.ToString(), _ => CreateTransitionTo(target), status);
             }
 
             var setDefaultStateMenuStatus = StateMachine.IsDefaultState(State) || Application.isPlaying

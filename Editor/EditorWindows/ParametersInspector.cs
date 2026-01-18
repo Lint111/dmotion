@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using DMotion.Authoring;
 using UnityEditor;
 using UnityEngine;
@@ -20,49 +21,288 @@ namespace DMotion.Editor
         }
     }
 
+    /// <summary>
+    /// Inspector for root parameters of a StateMachineAsset.
+    /// Shows all parameters with status icons and allows add/delete operations.
+    /// </summary>
     internal class ParametersInspector : StateMachineInspector<ParameterInspectorModel>
     {
+        private List<AnimationParameterAsset> _orphanedParameters = new();
+        private bool _needsRefresh = true;
+
+        private void OnEnable()
+        {
+            StateMachineEditorEvents.OnStateMachineChanged += OnStateMachineChanged;
+        }
+
+        private void OnDisable()
+        {
+            StateMachineEditorEvents.OnStateMachineChanged -= OnStateMachineChanged;
+        }
+
+        private void OnStateMachineChanged(StateMachineAsset machine)
+        {
+            if (machine == model.StateMachine)
+            {
+                _needsRefresh = true;
+                Repaint();
+            }
+        }
+
         public override void OnInspectorGUI()
         {
-            using (new EditorGUILayout.VerticalScope())
+            if (model.StateMachine == null || serializedObject?.targetObject == null)
             {
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    using (new EditorGUI.DisabledScope(Application.isPlaying))
-                    {
-                        EditorGUILayout.LabelField("Parameters", GUILayout.ExpandWidth(true));
+                return;
+            }
 
-                        var rect = EditorGUILayout.GetControlRect(
-                            GUILayout.Width(EditorGUIUtility.singleLineHeight * 2));
-                        if (EditorGUI.DropdownButton(rect, new GUIContent(" +"), FocusType.Passive))
-                        {
-                            var menu = new GenericMenu();
-                            menu.AddItem(new GUIContent("Boolean"), false, CreateParameter<BoolParameterAsset>);
-                            menu.AddItem(new GUIContent("Integer"), false, CreateParameter<IntParameterAsset>);
-                            menu.AddItem(new GUIContent("Float"), false, CreateParameter<FloatParameterAsset>);
-                            menu.AddItem(new GUIContent("Enum"), false, CreateParameter<EnumParameterAsset>);
-                            menu.DropDown(rect);
-                        }
+            if (_needsRefresh)
+            {
+                RefreshAnalysis();
+                _needsRefresh = false;
+            }
+            
+            DrawParametersSection();
+        }
+
+        private void RefreshAnalysis()
+        {
+            _orphanedParameters = ParameterDependencyAnalyzer.FindOrphanedParameters(model.StateMachine);
+        }
+
+        private void ForceRefresh()
+        {
+            _needsRefresh = true;
+            RefreshAnalysis();
+            Repaint();
+        }
+
+        private void DrawParametersSection()
+        {
+            serializedObject.Update();
+            
+            // Header with add button
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            {
+                EditorGUILayout.LabelField(GUIContentCache.Parameters, EditorStyles.boldLabel);
+                GUILayout.FlexibleSpace();
+
+                using (new EditorGUI.DisabledScope(Application.isPlaying))
+                {
+                    var rect = EditorGUILayout.GetControlRect(GUILayout.Width(50));
+                    if (EditorGUI.DropdownButton(rect, GUIContentCache.AddButton, FocusType.Passive, EditorStyles.miniButton))
+                    {
+                        ShowAddParameterMenu(rect);
                     }
                 }
+            }
 
-                var parametersProperty = serializedObject.FindProperty(nameof(StateMachineAsset.Parameters));
-                var it = parametersProperty.GetEnumerator();
-                while (it.MoveNext())
+            var parametersProperty = serializedObject.FindProperty(nameof(StateMachineAsset.Parameters));
+            if (parametersProperty == null) return;
+            
+            if (parametersProperty.arraySize == 0)
+            {
+                EditorGUILayout.HelpBox("No parameters defined. Add parameters to control transitions and blend trees.", MessageType.Info);
+            }
+            else
+            {
+                for (int i = 0; i < parametersProperty.arraySize; i++)
                 {
-                    using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
-                    {
-                        EditorGUILayout.PropertyField(it.Current as SerializedProperty, GUIContent.none);
-                    }
+                    DrawParameterRow(parametersProperty, i);
+                }
+
+                DrawOrphanCleanup();
+            }
+        }
+
+        private void DrawParameterRow(SerializedProperty parametersProperty, int index)
+        {
+            var paramProp = parametersProperty.GetArrayElementAtIndex(index);
+            var param = paramProp.objectReferenceValue as AnimationParameterAsset;
+            if (param == null) return;
+
+            var isOrphaned = _orphanedParameters?.Contains(param) ?? false;
+            var isAutoGenerated = param.IsAutoGenerated;
+            var isLinked = IsParameterLinked(param);
+
+            // Background color for special states
+            var bgColor = isOrphaned ? new Color(1f, 0.9f, 0.5f, 0.3f) :
+                          isAutoGenerated ? new Color(0.5f, 0.8f, 1f, 0.2f) :
+                          Color.clear;
+
+            var rect = EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+            if (bgColor != Color.clear)
+            {
+                EditorGUI.DrawRect(rect, bgColor);
+            }
+
+            // Status icon
+            DrawParameterStatusIcon(param, isOrphaned, isAutoGenerated, isLinked);
+
+            // Parameter field
+            EditorGUILayout.PropertyField(paramProp, GUIContent.none);
+
+            // Delete button
+            using (new EditorGUI.DisabledScope(Application.isPlaying))
+            {
+                if (GUILayout.Button("X", GUILayout.Width(20)))
+                {
+                    DeleteParameter(index);
+                }
+            }
+
+            EditorGUILayout.EndHorizontal();
+        }
+
+        // Cached tooltip strings to avoid allocations
+        private const string TooltipOrphanedAutoGen = "Orphaned - auto-generated, safe to remove";
+        private const string TooltipOrphanedManual = "Orphaned - not used by any state or transition";
+        private const string TooltipLinked = "Linked to SubStateMachine parameter(s)";
+        private const string TooltipAutoGenerated = "Auto-generated parameter";
+
+        private void DrawParameterStatusIcon(AnimationParameterAsset param, bool isOrphaned, bool isAutoGenerated, bool isLinked)
+        {
+            GUIContent icon;
+            
+            if (isOrphaned)
+            {
+                icon = IconCache.WarnIconWithTooltip(isAutoGenerated ? TooltipOrphanedAutoGen : TooltipOrphanedManual);
+            }
+            else if (isLinked)
+            {
+                icon = IconCache.LinkedIconWithTooltip(TooltipLinked);
+            }
+            else if (isAutoGenerated)
+            {
+                icon = IconCache.TempIcon(IconCache.PrefabTexture, TooltipAutoGenerated);
+            }
+            else
+            {
+                icon = IconCache.TempIcon(GetParameterTypeIcon(param), param.ParameterTypeName);
+            }
+
+            GUILayout.Label(icon, GUILayout.Width(18), GUILayout.Height(18));
+        }
+
+        private Texture GetParameterTypeIcon(AnimationParameterAsset param)
+        {
+            if (param is EnumParameterAsset)
+                return IconCache.FilterByTypeTexture;
+            if (param is BoolParameterAsset)
+                return IconCache.ToggleTexture;
+            if (param is IntParameterAsset)
+                return IconCache.GridTexture;
+            if (param is FloatParameterAsset)
+                return IconCache.BlendTreeTexture;
+            
+            return IconCache.ScriptableObjectTexture;
+        }
+
+        private void DrawOrphanCleanup()
+        {
+            if (_orphanedParameters == null || _orphanedParameters.Count == 0) return;
+
+            int autoGenOrphans = 0;
+            for (int i = 0; i < _orphanedParameters.Count; i++)
+            {
+                if (_orphanedParameters[i].IsAutoGenerated)
+                    autoGenOrphans++;
+            }
+            
+            EditorGUILayout.Space(2);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                GUILayout.Label(IconCache.WarnIcon, GUILayout.Width(18));
+
+                var msg = autoGenOrphans > 0
+                    ? StringBuilderCache.FormatOrphanedWithAutoGen(_orphanedParameters.Count, autoGenOrphans)
+                    : StringBuilderCache.FormatOrphaned(_orphanedParameters.Count);
+                EditorGUILayout.LabelField(msg, EditorStyles.miniLabel);
+
+                GUILayout.FlexibleSpace();
+
+                if (autoGenOrphans > 0 && GUILayout.Button(GUIContentCache.CleanUpButton, EditorStyles.miniButton, GUILayout.Width(60)))
+                {
+                    CleanupOrphanedParameters();
                 }
             }
         }
 
-        private void CreateParameter<T>()
-            where T : AnimationParameterAsset
+        #region Actions
+
+        // Cached menu items - these only allocate once
+        private static readonly GUIContent MenuBoolean = new GUIContent("Boolean");
+        private static readonly GUIContent MenuInteger = new GUIContent("Integer");
+        private static readonly GUIContent MenuFloat = new GUIContent("Float");
+        private static readonly GUIContent MenuEnum = new GUIContent("Enum");
+
+        private void ShowAddParameterMenu(Rect rect)
         {
-            model.StateMachine.CreateParameter<T>();
+            var menu = new GenericMenu();
+            menu.AddItem(MenuBoolean, false, CreateParameter<BoolParameterAsset>);
+            menu.AddItem(MenuInteger, false, CreateParameter<IntParameterAsset>);
+            menu.AddItem(MenuFloat, false, CreateParameter<FloatParameterAsset>);
+            menu.AddItem(MenuEnum, false, CreateParameter<EnumParameterAsset>);
+            menu.DropDown(rect);
+        }
+
+        private void CreateParameter<T>() where T : AnimationParameterAsset
+        {
+            var param = model.StateMachine.CreateParameter<T>();
+            StateMachineEditorEvents.RaiseParameterAdded(model.StateMachine, param);
             serializedObject.ApplyAndUpdate();
         }
+
+        private void DeleteParameter(int index)
+        {
+            var param = model.StateMachine.Parameters[index];
+            
+            Undo.SetCurrentGroupName("Delete Parameter");
+            var undoGroup = Undo.GetCurrentGroup();
+            
+            Undo.RecordObject(model.StateMachine, "Delete Parameter");
+            RemoveLinksForParameter(param);
+            model.StateMachine.DeleteParameter(param);
+            
+            Undo.CollapseUndoOperations(undoGroup);
+            
+            StateMachineEditorEvents.RaiseParameterRemoved(model.StateMachine, param);
+            serializedObject.Update();
+        }
+        
+        private bool IsParameterLinked(AnimationParameterAsset param)
+        {
+            var links = model.StateMachine.ParameterLinks;
+            for (int i = 0; i < links.Count; i++)
+            {
+                if (links[i].SourceParameter == param)
+                    return true;
+            }
+            return false;
+        }
+
+        private void RemoveLinksForParameter(AnimationParameterAsset param)
+        {
+            model.StateMachine.RemoveLinksForParameter(param);
+        }
+
+        private void CleanupOrphanedParameters()
+        {
+            Undo.SetCurrentGroupName("Cleanup Orphaned Parameters");
+            var undoGroup = Undo.GetCurrentGroup();
+            
+            Undo.RecordObject(model.StateMachine, "Cleanup Orphaned Parameters");
+            var removed = ParameterDependencyAnalyzer.CleanupOrphanedParameters(model.StateMachine, onlyAutoGenerated: true);
+            
+            Undo.CollapseUndoOperations(undoGroup);
+            
+            if (removed.Count > 0)
+            {
+                ForceRefresh();
+                serializedObject.Update();
+            }
+        }
+
+        #endregion
     }
 }

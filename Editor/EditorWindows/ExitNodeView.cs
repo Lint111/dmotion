@@ -63,11 +63,13 @@ namespace DMotion.Editor
             if (StateMachine != null && StateMachine.ExitStates.Count > 0)
             {
                 evt.menu.AppendAction("Exit States:", _ => { }, DropdownMenuAction.Status.Disabled);
+                var sb = StringBuilderCache.Get();
                 foreach (var exitState in StateMachine.ExitStates)
                 {
                     if (exitState != null)
                     {
-                        evt.menu.AppendAction($"  - {exitState.name}", 
+                        sb.Clear().Append("  - ").Append(exitState.name);
+                        evt.menu.AppendAction(sb.ToString(), 
                             _ => { }, DropdownMenuAction.Status.Normal);
                     }
                 }

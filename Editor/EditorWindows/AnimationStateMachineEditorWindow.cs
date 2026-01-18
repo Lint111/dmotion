@@ -22,6 +22,7 @@ namespace DMotion.Editor
         internal VisualTreeAsset StateNodeXml;
         internal StateMachineInspectorView InspectorView;
         internal StateMachineInspectorView ParametersInspectorView;
+        internal StateMachineInspectorView DependenciesInspectorView;
     }
 
     internal class AnimationStateMachineEditorWindow : EditorWindow
@@ -36,6 +37,7 @@ namespace DMotion.Editor
         private AnimationStateMachineEditorView stateMachineEditorView;
         private StateMachineInspectorView inspectorView;
         private StateMachineInspectorView parametersInspectorView;
+        private StateMachineInspectorView dependenciesInspectorView;
         private BreadcrumbBar breadcrumbBar;
         private bool hasRestoredAfterDomainReload;
 
@@ -84,6 +86,7 @@ namespace DMotion.Editor
                 stateMachineEditorView = root.Q<AnimationStateMachineEditorView>();
                 inspectorView = root.Q<StateMachineInspectorView>("inspector");
                 parametersInspectorView = root.Q<StateMachineInspectorView>("parameters-inspector");
+                dependenciesInspectorView = root.Q<StateMachineInspectorView>("dependencies-inspector");
                 breadcrumbBar = root.Q<BreadcrumbBar>("breadcrumb-bar");
                 
                 // Wire up breadcrumb navigation
@@ -123,6 +126,41 @@ namespace DMotion.Editor
         {
             // Reset the restore flag when window is enabled
             hasRestoredAfterDomainReload = false;
+            
+            // Register for Undo/Redo to refresh the view
+            Undo.undoRedoPerformed += OnUndoRedoPerformed;
+        }
+        
+        private void OnDisable()
+        {
+            Undo.undoRedoPerformed -= OnUndoRedoPerformed;
+        }
+        
+        private void OnUndoRedoPerformed()
+        {
+            // Refresh the view after undo/redo to show correct state
+            if (lastEditedStateMachine != null && stateMachineEditorView != null)
+            {
+                // Save current view transform using resolvedStyle (non-deprecated API)
+                var container = stateMachineEditorView.contentViewContainer;
+                var translate = container.resolvedStyle.translate;
+                var scale = container.resolvedStyle.scale;
+                var savedPosition = new Vector3(translate.x, translate.y, 0f);
+                var savedScale = new Vector3(scale.value.x, scale.value.y, 1f);
+                
+                // Repopulate without framing
+                stateMachineEditorView.PopulateView(new StateMachineEditorViewModel
+                {
+                    StateMachineAsset = lastEditedStateMachine,
+                    StateNodeXml = StateNodeXml,
+                    InspectorView = inspectorView,
+                    ParametersInspectorView = parametersInspectorView,
+                    DependenciesInspectorView = dependenciesInspectorView
+                });
+                
+                // Restore view transform
+                stateMachineEditorView.UpdateViewTransform(savedPosition, savedScale);
+            }
         }
         
         /// <summary>
@@ -190,7 +228,8 @@ namespace DMotion.Editor
                 StateMachineAsset = stateMachineAsset,
                 StateNodeXml = StateNodeXml,
                 InspectorView = inspectorView,
-                ParametersInspectorView = parametersInspectorView
+                ParametersInspectorView = parametersInspectorView,
+                DependenciesInspectorView = dependenciesInspectorView
             });
             WaitAndFrameAll();
         }
@@ -246,7 +285,8 @@ namespace DMotion.Editor
                             SelectedEntity = entitySelectionProxy,
                             StateNodeXml = StateNodeXml,
                             InspectorView = inspectorView,
-                            ParametersInspectorView = parametersInspectorView
+                            ParametersInspectorView = parametersInspectorView,
+                            DependenciesInspectorView = dependenciesInspectorView
                         });
                         WaitAndFrameAll();
                     }

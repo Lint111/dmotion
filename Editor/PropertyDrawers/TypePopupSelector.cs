@@ -1,5 +1,4 @@
-﻿using System;
-using System.Linq;
+using System;
 using UnityEditor;
 using UnityEngine;
 
@@ -16,6 +15,11 @@ namespace DMotion.Editor
     internal class TypePopupSelector
     {
         private Type filterType;
+        
+        // Cached GUIContent to avoid per-frame allocations
+        private static readonly GUIContent _tempButtonContent = new GUIContent();
+        private static readonly GUIContent NoneContent = new GUIContent("NONE");
+        
         protected virtual bool TypeFilter(Type t)
         {
             return filterType.IsAssignableFrom(t);
@@ -34,8 +38,20 @@ namespace DMotion.Editor
                 position.xMax = prevXMax;
             }
 
-            var selectedName = selected != null ? selected.Name : "NONE";
-            if (EditorGUI.DropdownButton(position, new GUIContent(selectedName), FocusType.Passive))
+            GUIContent buttonContent;
+            if (selected != null)
+            {
+                _tempButtonContent.text = selected.Name;
+                _tempButtonContent.tooltip = null;
+                _tempButtonContent.image = null;
+                buttonContent = _tempButtonContent;
+            }
+            else
+            {
+                buttonContent = NoneContent;
+            }
+            
+            if (EditorGUI.DropdownButton(position, buttonContent, FocusType.Passive))
             {
                 var rect = position;
                 rect.height = 400;

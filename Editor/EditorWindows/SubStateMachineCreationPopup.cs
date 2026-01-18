@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using DMotion.Authoring;
 using UnityEditor;
 using UnityEngine;
@@ -27,13 +26,27 @@ namespace DMotion.Editor
         private const float WindowWidth = 300;
         private const float WindowHeight = 350;
 
+        // Cached title content (only created once per window instance)
+        private static readonly GUIContent WindowTitle = new GUIContent("Select State Machine");
+        
+        // Cached colors
+        private static readonly Color SeparatorColor = new Color(0.5f, 0.5f, 0.5f, 0.5f);
+        private static readonly Color SelectionColor = new Color(0.24f, 0.48f, 0.9f, 0.5f);
+        
+        // Cached for circular reference check
+        private HashSet<StateMachineAsset> _circularCheckVisited;
+        
+        // Cached filtered results
+        private List<StateMachineAsset> _filteredMachinesCache;
+        private string _lastSearchFilter;
+
         public static void Show(StateMachineAsset parent, Vector2 graphPos, Action<SubStateMachineStateAsset> callback)
         {
             var window = CreateInstance<SubStateMachineCreationPopup>();
             window.parentStateMachine = parent;
             window.graphPosition = graphPos;
             window.onCreated = callback;
-            window.titleContent = new GUIContent("Select State Machine");
+            window.titleContent = WindowTitle;
             
             // Position near mouse (use screen center as fallback if Event.current is null)
             Vector2 screenPos;
@@ -60,15 +73,40 @@ namespace DMotion.Editor
 
         private void RefreshStateMachineList()
         {
-            // Find all StateMachineAssets in the project
+            // Find all StateMachineAssets in the project (no LINQ to avoid allocations)
             var guids = AssetDatabase.FindAssets("t:StateMachineAsset");
-            availableStateMachines = guids
-                .Select(g => AssetDatabase.LoadAssetAtPath<StateMachineAsset>(AssetDatabase.GUIDToAssetPath(g)))
-                .Where(sm => sm != null && !WouldCreateCircularReference(sm))
-                .OrderBy(sm => sm.name)
-                .ToArray();
             
-            stateMachineNames = availableStateMachines.Select(sm => sm.name).ToArray();
+            // Use pooled list for intermediate results
+            var tempList = ListPool<StateMachineAsset>.Get();
+            try
+            {
+                for (int i = 0; i < guids.Length; i++)
+                {
+                    var path = AssetDatabase.GUIDToAssetPath(guids[i]);
+                    var sm = AssetDatabase.LoadAssetAtPath<StateMachineAsset>(path);
+                    if (sm != null && !WouldCreateCircularReference(sm))
+                    {
+                        tempList.Add(sm);
+                    }
+                }
+                
+                // Sort by name
+                tempList.Sort((a, b) => string.Compare(a.name, b.name, StringComparison.Ordinal));
+                
+                // Convert to array
+                availableStateMachines = tempList.ToArray();
+                
+                // Build names array
+                stateMachineNames = new string[availableStateMachines.Length];
+                for (int i = 0; i < availableStateMachines.Length; i++)
+                {
+                    stateMachineNames[i] = availableStateMachines[i].name;
+                }
+            }
+            finally
+            {
+                ListPool<StateMachineAsset>.Return(tempList);
+            }
         }
 
         /// <summary>
@@ -82,7 +120,12 @@ namespace DMotion.Editor
                 return true;
             
             // Check if candidate already contains parentStateMachine (directly or nested)
-            return ContainsStateMachine(candidate, parentStateMachine, new HashSet<StateMachineAsset>());
+            if (_circularCheckVisited == null)
+                _circularCheckVisited = new HashSet<StateMachineAsset>();
+            else
+                _circularCheckVisited.Clear();
+            
+            return ContainsStateMachine(candidate, parentStateMachine, _circularCheckVisited);
         }
 
         /// <summary>
@@ -141,7 +184,7 @@ namespace DMotion.Editor
             
             // Separator
             var rect = EditorGUILayout.GetControlRect(false, 1);
-            EditorGUI.DrawRect(rect, new Color(0.5f, 0.5f, 0.5f, 0.5f));
+            EditorGUI.DrawRect(rect, SeparatorColor);
             
             EditorGUILayout.Space(5);
             
@@ -157,11 +200,34 @@ namespace DMotion.Editor
 
             EditorGUILayout.Space(3);
 
-            // Filtered list
-            var filteredMachines = string.IsNullOrEmpty(searchFilter)
-                ? availableStateMachines
-                : availableStateMachines.Where(sm => 
-                    sm.name.IndexOf(searchFilter, StringComparison.OrdinalIgnoreCase) >= 0).ToArray();
+            // Filtered list (cached to avoid per-frame allocations)
+            StateMachineAsset[] filteredMachines;
+            if (string.IsNullOrEmpty(searchFilter))
+            {
+                filteredMachines = availableStateMachines;
+            }
+            else
+            {
+                // Only rebuild filter if search changed
+                if (_filteredMachinesCache == null || _lastSearchFilter != searchFilter)
+                {
+                    if (_filteredMachinesCache == null)
+                        _filteredMachinesCache = new List<StateMachineAsset>();
+                    else
+                        _filteredMachinesCache.Clear();
+                    
+                    for (int i = 0; i < availableStateMachines.Length; i++)
+                    {
+                        var sm = availableStateMachines[i];
+                        if (sm.name.IndexOf(searchFilter, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            _filteredMachinesCache.Add(sm);
+                        }
+                    }
+                    _lastSearchFilter = searchFilter;
+                }
+                filteredMachines = _filteredMachinesCache.Count > 0 ? _filteredMachinesCache.ToArray() : Array.Empty<StateMachineAsset>();
+            }
 
             if (filteredMachines.Length == 0)
             {
@@ -188,7 +254,7 @@ namespace DMotion.Editor
                     
                     if (isSelected)
                     {
-                        EditorGUI.DrawRect(rowRect, new Color(0.24f, 0.48f, 0.9f, 0.5f));
+                        EditorGUI.DrawRect(rowRect, SelectionColor);
                     }
                     
                     // Clickable row
@@ -211,7 +277,7 @@ namespace DMotion.Editor
                     
                     // Show state count as info
                     var stateCount = sm.States?.Count ?? 0;
-                    GUILayout.Label($"({stateCount})", EditorStyles.miniLabel, GUILayout.Width(35));
+                    GUILayout.Label(StringBuilderCache.FormatCount(stateCount), EditorStyles.miniLabel, GUILayout.Width(35));
                     GUILayout.Space(4);
                     
                     EditorGUILayout.EndHorizontal();
@@ -298,10 +364,48 @@ namespace DMotion.Editor
             // Name the node after the nested machine
             state.name = nestedMachine.name;
             
+            // Auto-resolve parameter dependencies
+            ResolveParameterDependencies(state);
+            
             EditorUtility.SetDirty(state);
             EditorUtility.SetDirty(parentStateMachine);
             
             onCreated?.Invoke(state);
+        }
+
+        private void ResolveParameterDependencies(SubStateMachineStateAsset subMachine)
+        {
+            var result = ParameterDependencyAnalyzer.ResolveParameterDependencies(parentStateMachine, subMachine);
+            
+            // Only auto-link parameters that have 1:1 name/type matches
+            // Don't auto-create parameters - user should do this manually via Dependencies panel
+            if (result.HasLinks)
+            {
+                parentStateMachine.AddParameterLinks(result.ParameterLinks);
+                
+                // Build names string without LINQ
+                var sb = StringBuilderCache.Get();
+                var links = result.ParameterLinks;
+                for (int i = 0; i < links.Count; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    sb.Append(links[i].SourceParameter.name);
+                }
+                Debug.Log($"[DMotion] Auto-linked {links.Count} parameter(s) for '{subMachine.name}': {sb}");
+            }
+            
+            // Log missing parameters so user knows to create them
+            if (result.HasMissingParameters)
+            {
+                var sb = StringBuilderCache.Get();
+                var missing = result.MissingParameters;
+                for (int i = 0; i < missing.Count; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    sb.Append(missing[i].Parameter.name);
+                }
+                Debug.Log($"[DMotion] Missing parameters for '{subMachine.name}' - create via Dependencies panel: {sb}");
+            }
         }
 
         private void OnLostFocus()

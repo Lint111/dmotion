@@ -1,5 +1,5 @@
 using System;
-using System.Linq;
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -40,15 +40,32 @@ namespace DMotion.Editor
         
         protected override T[] CollectOptions()
         {
-            var childs = AssetDatabase.LoadAllAssetRepresentationsAtPath(AssetDatabase.GetAssetPath(target))
-                .OfType<T>();
-
-            if (filterTypes != null && filterTypes.Length > 0)
+            var allRepresentations = AssetDatabase.LoadAllAssetRepresentationsAtPath(AssetDatabase.GetAssetPath(target));
+            var result = new List<T>();
+            
+            for (int i = 0; i < allRepresentations.Length; i++)
             {
-                childs = childs.Where(t => filterTypes.Any(f => f.IsInstanceOfType(t)));
+                if (allRepresentations[i] is T typed)
+                {
+                    // Check filter types if specified
+                    if (filterTypes != null && filterTypes.Length > 0)
+                    {
+                        bool passesFilter = false;
+                        for (int j = 0; j < filterTypes.Length; j++)
+                        {
+                            if (filterTypes[j].IsInstanceOfType(typed))
+                            {
+                                passesFilter = true;
+                                break;
+                            }
+                        }
+                        if (!passesFilter) continue;
+                    }
+                    result.Add(typed);
+                }
             }
-
-            return childs.ToArray();
+            
+            return result.ToArray();
         }
     }
 
@@ -61,6 +78,9 @@ namespace DMotion.Editor
     {
         private T[] allAssets;
         private string[] allAssetNameOptions;
+        
+        // Cached single-element array for "no options" popup
+        private string[] _noOptionsArray;
         
         internal bool HasOptions => Assets != null && Assets.Length > 0;
         
@@ -83,19 +103,39 @@ namespace DMotion.Editor
             {
                 if (allAssetNameOptions == null || IsDirty)
                 {
-                    allAssetNameOptions = Assets.Select(e => e.name).ToArray();
+                    var assets = Assets;
+                    allAssetNameOptions = new string[assets.Length];
+                    for (int i = 0; i < assets.Length; i++)
+                    {
+                        allAssetNameOptions[i] = assets[i].name;
+                    }
                 }
                 return allAssetNameOptions;
             }
         }
         
+        // Cached type filter string to avoid per-call allocation
+        private string _typeFilterString;
+        
         protected virtual T[] CollectOptions()
         {
             AssetDatabase.Refresh();
-            var guids = AssetDatabase.FindAssets($"t:{typeof(T).Name}");
-            return guids.Select(g =>
-                    AssetDatabase.LoadAssetAtPath<T>(AssetDatabase.GUIDToAssetPath(g)))
-                .ToArray();
+            
+            // Cache the type filter string
+            if (_typeFilterString == null)
+            {
+                var sb = StringBuilderCache.Get();
+                sb.Append("t:").Append(typeof(T).Name);
+                _typeFilterString = sb.ToString();
+            }
+            
+            var guids = AssetDatabase.FindAssets(_typeFilterString);
+            var result = new T[guids.Length];
+            for (int i = 0; i < guids.Length; i++)
+            {
+                result[i] = AssetDatabase.LoadAssetAtPath<T>(AssetDatabase.GUIDToAssetPath(guids[i]));
+            }
+            return result;
         }
 
         /// <summary>
@@ -119,9 +159,14 @@ namespace DMotion.Editor
             // Show helpful message when no options are available
             if (!HasOptions)
             {
+                // Cache the no-options array to avoid per-frame allocation
+                if (_noOptionsArray == null || _noOptionsArray[0] != NoOptionsMessage)
+                {
+                    _noOptionsArray = new[] { NoOptionsMessage };
+                }
                 using (new EditorGUI.DisabledScope(true))
                 {
-                    EditorGUI.Popup(position, 0, new[] { NoOptionsMessage });
+                    EditorGUI.Popup(position, 0, _noOptionsArray);
                 }
                 IsDirty = false;
                 return;

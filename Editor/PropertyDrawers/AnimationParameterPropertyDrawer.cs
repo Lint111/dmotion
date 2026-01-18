@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using DMotion.Authoring;
 using Unity.Entities;
 using Unity.Entities.Editor;
@@ -50,7 +49,7 @@ namespace DMotion.Editor
             if (!EntitySelectionProxyUtils.TryExtractEntitySelectionProxy(out var selectedEntity))
                 return;
 
-            var label = new GUIContent(parameterAsset.name);
+            var label = GUIContentCache.Temp(parameterAsset.name);
             switch (parameterAsset)
             {
                 case BoolParameterAsset boolAsset:
@@ -110,7 +109,25 @@ namespace DMotion.Editor
             where TAsset : AnimationParameterAsset
             where TBuffer : unmanaged, IBufferElementData
         {
-            var index = stateMachine.Parameters.OfType<TAsset>().FindIndex(p => p == asset);
+            // Find index without LINQ allocation
+            int index = -1;
+            int typeIndex = 0;
+            var parameters = stateMachine.Parameters;
+            for (int i = 0; i < parameters.Count; i++)
+            {
+                if (parameters[i] is TAsset)
+                {
+                    if (parameters[i] == asset)
+                    {
+                        index = typeIndex;
+                        break;
+                    }
+                    typeIndex++;
+                }
+            }
+            
+            if (index < 0) return;
+            
             var buffer = entity.GetBuffer<TBuffer>();
             var param = buffer[index];
             buffer[index] = drawField(position, label, param);
@@ -136,7 +153,7 @@ namespace DMotion.Editor
                 var labelWidth = EditorGUIUtility.labelWidth;
                 var deleteButtonWidth = EditorGUIUtility.singleLineHeight;
                 var typeWidth = position.width - labelWidth - deleteButtonWidth;
-                var rects = position.HorizontalLayout(labelWidth, typeWidth, deleteButtonWidth).ToArray();
+                var rects = position.HorizontalLayout3(labelWidth, typeWidth, deleteButtonWidth);
 
                 //label
                 {
@@ -166,13 +183,13 @@ namespace DMotion.Editor
                     }
                     else
                     {
-                        EditorGUI.LabelField(rects[1], $"({parameterAsset.ParameterTypeName})");
+                        EditorGUI.LabelField(rects[1], StringBuilderCache.FormatTypeName(parameterAsset.ParameterTypeName));
                     }
                 }
 
                 //delete
                 {
-                    if (GUI.Button(rects[2], "-"))
+                    if (GUI.Button(rects[2], GUIContentCache.MinusButton))
                     {
                         stateMachine.DeleteParameter(parameterAsset);
                         property.ApplyAndUpdate();

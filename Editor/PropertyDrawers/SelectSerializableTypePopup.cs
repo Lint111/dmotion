@@ -1,7 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Reflection;
 using UnityEditor;
 using UnityEditor.Search;
@@ -47,14 +46,21 @@ namespace DMotion.Editor
         [UnityEditor.Callbacks.DidReloadScripts]
         private static void RefreshInvalidAssemblies()
         {
-            invalidAssemblies = AppDomain.CurrentDomain
-                .GetAssemblies()
-                .Where(a =>
-                    a.FullName.StartsWith("System.", true, CultureInfo.CurrentCulture) ||
-                    a.FullName.StartsWith("Unity.", true, CultureInfo.CurrentCulture) ||
-                    a.FullName.StartsWith("com.unity", true, CultureInfo.CurrentCulture) ||
-                    a.FullName.StartsWith("Microsoft") ||
-                    a.FullName.StartsWith("Mono")).ToHashSet();
+            invalidAssemblies = new HashSet<Assembly>();
+            var allAssemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (int i = 0; i < allAssemblies.Length; i++)
+            {
+                var a = allAssemblies[i];
+                var fullName = a.FullName;
+                if (fullName.StartsWith("System.", true, CultureInfo.CurrentCulture) ||
+                    fullName.StartsWith("Unity.", true, CultureInfo.CurrentCulture) ||
+                    fullName.StartsWith("com.unity", true, CultureInfo.CurrentCulture) ||
+                    fullName.StartsWith("Microsoft") ||
+                    fullName.StartsWith("Mono"))
+                {
+                    invalidAssemblies.Add(a);
+                }
+            }
         }
 
         private void OnGUI()
@@ -98,14 +104,30 @@ namespace DMotion.Editor
             }
         }
 
+        // Reusable list for collecting filtered types
+        private List<Type> _filteredTypes = new List<Type>();
+        
         private void UpdateTypes()
         {
-            types = TypeCache.GetTypesDerivedFrom(baseType)
-                .Where(t => IsValidType(t) && MatchesSearch(t))
-                .OrderBy(t => t.FullName)
-                .ToArray();
-
-            typeNames = types.Select(t => new GUIContent(t.Name)).ToArray();
+            _filteredTypes.Clear();
+            var allTypes = TypeCache.GetTypesDerivedFrom(baseType);
+            foreach (var t in allTypes)
+            {
+                if (IsValidType(t) && MatchesSearch(t))
+                {
+                    _filteredTypes.Add(t);
+                }
+            }
+            
+            // Sort by FullName
+            _filteredTypes.Sort((a, b) => string.Compare(a.FullName, b.FullName, StringComparison.Ordinal));
+            
+            types = _filteredTypes.ToArray();
+            typeNames = new GUIContent[types.Length];
+            for (int i = 0; i < types.Length; i++)
+            {
+                typeNames[i] = new GUIContent(types[i].Name);
+            }
         }
 
         private bool IsValidType(Type t)

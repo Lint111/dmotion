@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 using DMotion.Authoring;
 using UnityEditor;
 using UnityEngine;
@@ -24,6 +23,11 @@ namespace DMotion.Editor
         // Performance caching
         private StateMachineAsset cachedNestedMachine;
         private AnimationStateAsset[] cachedAvailableStates;
+        private string[] cachedStateNames;
+        
+        // Cached popup options to avoid per-frame allocations
+        private static readonly string[] NoStatesInNestedMachineOptions = { "No states in nested machine" };
+        private static readonly string[] NoNestedMachineOptions = { "No nested machine" };
 
         private void OnEnable()
         {
@@ -112,7 +116,8 @@ namespace DMotion.Editor
                 var availableStates = GetAvailableStatesFromNestedMachine(subMachine.NestedStateMachine);
                 if (availableStates.Length > 0)
                 {
-                    var stateNames = availableStates.Select(s => s != null ? s.name : "None").ToArray();
+                    // Build state names array without LINQ
+                    var stateNames = GetStateNamesArray(availableStates);
                     var currentIndex = System.Array.IndexOf(availableStates, subMachine.EntryState);
                     
                     if (currentIndex == -1) currentIndex = 0;
@@ -127,7 +132,7 @@ namespace DMotion.Editor
                 {
                     using (new EditorGUI.DisabledScope(true))
                     {
-                        EditorGUILayout.Popup(0, new[] { "No states in nested machine" });
+                        EditorGUILayout.Popup(0, NoStatesInNestedMachineOptions);
                     }
                 }
             }
@@ -135,7 +140,7 @@ namespace DMotion.Editor
             {
                 using (new EditorGUI.DisabledScope(true))
                 {
-                    EditorGUILayout.Popup(0, new[] { "No nested machine" });
+                    EditorGUILayout.Popup(0, NoNestedMachineOptions);
                 }
             }
             
@@ -168,7 +173,7 @@ namespace DMotion.Editor
 
         private AnimationStateAsset[] GetAvailableStatesFromNestedMachine(StateMachineAsset nestedMachine)
         {
-            if (nestedMachine == null) return new AnimationStateAsset[0];
+            if (nestedMachine == null) return System.Array.Empty<AnimationStateAsset>();
             
             if (cachedNestedMachine != nestedMachine || cachedAvailableStates == null)
             {
@@ -176,9 +181,24 @@ namespace DMotion.Editor
                 var leafStates = new List<AnimationStateAsset>();
                 CollectLeafStatesRecursive(nestedMachine, leafStates);
                 cachedAvailableStates = leafStates.ToArray();
+                cachedStateNames = null; // Invalidate state names cache
             }
             
             return cachedAvailableStates;
+        }
+        
+        private string[] GetStateNamesArray(AnimationStateAsset[] states)
+        {
+            // Rebuild names array if states changed
+            if (cachedStateNames == null || cachedStateNames.Length != states.Length)
+            {
+                cachedStateNames = new string[states.Length];
+                for (int i = 0; i < states.Length; i++)
+                {
+                    cachedStateNames[i] = states[i] != null ? states[i].name : "None";
+                }
+            }
+            return cachedStateNames;
         }
 
         private void CollectLeafStatesRecursive(StateMachineAsset machine, List<AnimationStateAsset> leafStates, HashSet<StateMachineAsset> visited = null)
