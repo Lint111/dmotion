@@ -22,7 +22,7 @@ namespace DMotion.Editor
         {
             if (clipsProperty != null) return;
             
-            clipsProperty = serializedObject.FindProperty(nameof(Directional2DBlendStateAsset.clips));
+            clipsProperty = serializedObject.FindProperty(nameof(Directional2DBlendStateAsset.BlendClips));
             parameterXProperty = serializedObject.FindProperty(nameof(Directional2DBlendStateAsset.BlendParameterX));
             parameterYProperty = serializedObject.FindProperty(nameof(Directional2DBlendStateAsset.BlendParameterY));
             

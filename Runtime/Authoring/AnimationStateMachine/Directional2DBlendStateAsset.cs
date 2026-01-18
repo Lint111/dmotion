@@ -1,37 +1,47 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Unity.Mathematics;
 using UnityEngine;
 
 namespace DMotion.Authoring
 {
-    [CreateAssetMenu(fileName = "New Directional 2D Blend State", menuName = "DMotion/Directional 2D Blend State")]
+    [Serializable]
+    public struct Directional2DClipWithPosition
+    {
+        public AnimationClipAsset Clip;
+        public float2 Position;
+        public float Speed;
+    }
+    
     public class Directional2DBlendStateAsset : AnimationStateAsset
     {
-        [Serializable]
-        public struct BlendClipData
-        {
-            public AnimationClip clip;
-            public float2 position;
-            public float speedMultiplier;
-        }
-
+        [Tooltip("The X-axis parameter used to control horizontal blending.")]
         public FloatParameterAsset BlendParameterX;
+        
+        [Tooltip("The Y-axis parameter used to control vertical blending.")]
         public FloatParameterAsset BlendParameterY;
-        public List<BlendClipData> clips = new List<BlendClipData>();
+        
+        public Directional2DClipWithPosition[] BlendClips = Array.Empty<Directional2DClipWithPosition>();
 
+        public override StateType Type => StateType.Directional2DBlend;
+        public override int ClipCount => BlendClips.Length;
+        public override IEnumerable<AnimationClipAsset> Clips => BlendClips.Select(b => b.Clip);
+
+#if UNITY_EDITOR
         private void OnValidate()
         {
             // Ensure speed is never 0 or negative
-            for (int i = 0; i < clips.Count; i++)
+            for (int i = 0; i < BlendClips.Length; i++)
             {
-                var data = clips[i];
-                if (data.speedMultiplier <= 0)
+                var data = BlendClips[i];
+                if (data.Speed <= 0)
                 {
-                    data.speedMultiplier = 1f;
-                    clips[i] = data;
+                    data.Speed = 1f;
+                    BlendClips[i] = data;
                 }
             }
         }
+#endif
     }
 }

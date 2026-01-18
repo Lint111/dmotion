@@ -210,17 +210,17 @@ namespace DMotion.Authoring
                         {
                             BlendParameterIndexX = (ushort)blendParamIndexX,
                             BlendParameterIndexY = (ushort)blendParamIndexY,
-                            ClipData = new UnsafeList<Directional2DClipData>(directional2DAsset.clips.Count, allocator)
+                            ClipData = new UnsafeList<Directional2DClipData>(directional2DAsset.BlendClips.Length, allocator)
                         };
-                        dir2DConvData.ClipData.Resize(directional2DAsset.clips.Count);
+                        dir2DConvData.ClipData.Resize(directional2DAsset.BlendClips.Length);
 
-                        for (int i = 0; i < directional2DAsset.clips.Count; i++)
+                        for (int i = 0; i < directional2DAsset.BlendClips.Length; i++)
                         {
                             dir2DConvData.ClipData[i] = new Directional2DClipData
                             {
                                 ClipIndex = runningClipIndex,
-                                Position = directional2DAsset.clips[i].position,
-                                Speed = directional2DAsset.clips[i].speedMultiplier
+                                Position = directional2DAsset.BlendClips[i].Position,
+                                Speed = directional2DAsset.BlendClips[i].Speed
                             };
                             runningClipIndex++;
                         }
