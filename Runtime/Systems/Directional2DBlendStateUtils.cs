@@ -9,8 +9,8 @@ namespace DMotion
 {
     internal static class Directional2DBlendStateUtils
     {
-        internal static AnimationState NewForStateMachine(
-            byte stateIndex,
+        internal static Directional2DBlendStateMachineState NewForStateMachine(
+            short stateIndex,
             BlobAssetReference<StateMachineBlob> stateMachineBlob,
             BlobAssetReference<SkeletonClipSetBlob> clips,
             BlobAssetReference<ClipEventsBlob> clipEvents,
@@ -19,57 +19,58 @@ namespace DMotion
             ref DynamicBuffer<ClipSampler> samplers,
             float finalSpeed)
         {
-            ref var stateBlob = ref stateMachineBlob.Value.Directional2DBlendStates[stateMachineBlob.Value.States[stateIndex].StateIndex];
-            
-            var startSampleIndex = samplers.Length;
-            var sampleCount = stateBlob.ClipIndexes.Length;
-            
-            for (int i = 0; i < sampleCount; i++)
+            var directional2DState = new Directional2DBlendStateMachineState
             {
-                samplers.Add(new ClipSampler
+                StateMachineBlob = stateMachineBlob,
+                StateIndex = stateIndex
+            };
+
+            ref var directional2DBlob = ref directional2DState.Directional2DBlob;
+            var clipCount = (byte)directional2DBlob.ClipIndexes.Length;
+
+            var newSamplers =
+                new NativeArray<ClipSampler>(clipCount, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+            for (var i = 0; i < clipCount; i++)
+            {
+                var clipIndex = (ushort)directional2DBlob.ClipIndexes[i];
+                newSamplers[i] = new ClipSampler
                 {
-                    ClipIndex = (short)stateBlob.ClipIndexes[i],
+                    ClipIndex = clipIndex,
                     Clips = clips,
                     ClipEventsBlob = clipEvents,
                     PreviousTime = 0,
                     Time = 0,
-                    Weight = 0,
-                    MixerIndex = -1
-                });
+                    Weight = 0
+                };
             }
 
-            var animationStateIndex = AnimationState.New(ref animationStates, ref samplers, startSampleIndex, sampleCount,
+            var animationStateIndex = AnimationState.New(ref animationStates, ref samplers, newSamplers,
                 finalSpeed,
-                stateMachineBlob.Value.States[stateIndex].Loop);
+                directional2DState.StateBlob.Loop);
 
-            if (animationStateIndex < 0) return default;
-
-            var state = new Directional2DBlendStateMachineState
+            if (animationStateIndex < 0)
             {
-                AnimationStateId = animationStates[animationStateIndex].Id,
-                StartSampleIndex = startSampleIndex,
-                SampleCount = sampleCount,
-                BlendParameterIndexX = stateBlob.BlendParameterIndexX,
-                BlendParameterIndexY = stateBlob.BlendParameterIndexY,
-                BlobIndex = stateMachineBlob.Value.States[stateIndex].StateIndex
-            };
-            
-            directional2DStates.Add(state);
-            return animationStates[animationStateIndex];
+                // Failed to allocate - return invalid state (caller should check validity)
+                return default;
+            }
+
+            directional2DState.AnimationStateId = animationStates[animationStateIndex].Id;
+            directional2DStates.Add(directional2DState);
+
+            return directional2DState;
         }
 
         internal static void ExtractVariables(
             in Directional2DBlendStateMachineState state,
-            ref StateMachineBlob stateMachineBlob,
             in DynamicBuffer<FloatParameter> floatParameters,
             out float2 input,
             out NativeArray<float2> positions,
             out NativeArray<float> speeds)
         {
-            ref var blob = ref stateMachineBlob.Directional2DBlendStates[state.BlobIndex];
+            ref var blob = ref state.Directional2DBlob;
             
-            float x = floatParameters[state.BlendParameterIndexX].Value;
-            float y = floatParameters[state.BlendParameterIndexY].Value;
+            float x = floatParameters[blob.BlendParameterIndexX].Value;
+            float y = floatParameters[blob.BlendParameterIndexY].Value;
             input = new float2(x, y);
             
             positions = CollectionUtils.AsArray(ref blob.ClipPositions);
@@ -79,13 +80,13 @@ namespace DMotion
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static void UpdateSamplers(
             float dt,
-            float2 input,
             in NativeArray<float2> positions,
-            in NativeArray<float> speeds, // per-clip speeds
+            in NativeArray<float> speeds,
             in NativeArray<float> weights,
             in AnimationState animation,
             ref DynamicBuffer<ClipSampler> samplers)
         {
+            Assert.IsTrue(positions.IsCreated);
             var startIndex = samplers.IdToIndex(animation.StartSamplerId);
             var endIndex = startIndex + positions.Length - 1;
 
@@ -104,19 +105,22 @@ namespace DMotion
             {
                 var sampler = samplers[i];
                 var clipSpeed = math.select(speeds[i - startIndex], 1f, speeds[i - startIndex] <= 0f);
-                loopDuration += (sampler.Clip.duration / clipSpeed) * weights[i - startIndex];
+                var weight = weights[i - startIndex];
+                if (weight > 0f)
+                {
+                    loopDuration += (sampler.Clip.duration / clipSpeed) * weight;
+                }
             }
 
             // Update clip times
             if (!mathex.iszero(loopDuration))
             {
                 var invLoopDuration = 1.0f / loopDuration;
-                var stateSpeed = animation.Speed; // Global state speed
+                var stateSpeed = animation.Speed;
 
                 for (var i = startIndex; i <= endIndex; i++)
                 {
                     var sampler = samplers[i];
-                    // Effective speed to sync loop: stateSpeed * clipDuration / loopDuration
                     var samplerSpeed = stateSpeed * sampler.Clip.duration * invLoopDuration;
 
                     sampler.PreviousTime = sampler.Time;

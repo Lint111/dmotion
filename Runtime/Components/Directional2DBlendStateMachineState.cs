@@ -1,16 +1,17 @@
-using Unity.Collections;
+using Unity.Burst;
 using Unity.Entities;
-using Unity.Mathematics;
 
 namespace DMotion
 {
-    public struct Directional2DBlendStateMachineState : IBufferElementData
+    [BurstCompile]
+    internal struct Directional2DBlendStateMachineState : IBufferElementData
     {
-        public byte AnimationStateId;
-        public int StartSampleIndex;
-        public int SampleCount;
-        public ushort BlendParameterIndexX;
-        public ushort BlendParameterIndexY;
-        public ushort BlobIndex; // Index into Directional2DBlendStates blob array
+        internal byte AnimationStateId;
+        internal BlobAssetReference<StateMachineBlob> StateMachineBlob;
+        internal short StateIndex;
+        
+        internal readonly ref AnimationStateBlob StateBlob => ref StateMachineBlob.Value.States[StateIndex];
+        internal readonly ref Directional2DBlendStateBlob Directional2DBlob =>
+            ref StateMachineBlob.Value.Directional2DBlendStates[StateBlob.StateIndex];
     }
 }

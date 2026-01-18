@@ -1,4 +1,5 @@
 using Unity.Burst;
+using Unity.Collections;
 using Unity.Entities;
 
 namespace DMotion
@@ -12,12 +13,11 @@ namespace DMotion
             ref DynamicBuffer<ClipSampler> clipSamplers,
             in DynamicBuffer<AnimationState> animationStates,
             in DynamicBuffer<Directional2DBlendStateMachineState> directional2DStates,
-            in DynamicBuffer<FloatParameter> floatParameters,
-            in AnimationStateMachine stateMachine
+            in DynamicBuffer<FloatParameter> floatParameters
         )
         {
-            ref var stateMachineBlob = ref stateMachine.StateMachineBlob.Value;
-            var weights = new NativeArray<float>(100, Allocator.Temp); // Max 100 clips per blend tree for now
+            // Pre-allocate weights array for reuse (max clips per blend tree)
+            var weights = new NativeArray<float>(64, Allocator.Temp);
 
             for (var i = 0; i < directional2DStates.Length; i++)
             {
@@ -26,12 +26,12 @@ namespace DMotion
                 {
                     Directional2DBlendStateUtils.ExtractVariables(
                         state,
-                        ref stateMachineBlob,
                         floatParameters,
                         out var input,
                         out var positions,
                         out var speeds);
 
+                    // Resize weights if needed
                     if (weights.Length < positions.Length)
                     {
                         weights.Dispose();
@@ -43,7 +43,6 @@ namespace DMotion
 
                     Directional2DBlendStateUtils.UpdateSamplers(
                         DeltaTime,
-                        input,
                         positions,
                         speeds,
                         activeWeights,
@@ -51,6 +50,8 @@ namespace DMotion
                         ref clipSamplers);
                 }
             }
+            
+            weights.Dispose();
         }
     }
 
