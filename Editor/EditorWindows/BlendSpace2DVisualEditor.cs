@@ -9,53 +9,20 @@ namespace DMotion.Editor
     /// Visual 2D blend space editor for Directional2DBlendStateAsset.
     /// Displays clips as colored circles on a 2D grid with zoom/pan functionality.
     /// </summary>
-    internal class BlendSpace2DVisualEditor
+    internal class BlendSpace2DVisualEditor : BlendSpaceVisualEditorBase
     {
-        // View state
-        private float zoom = 1f;
-        private Vector2 panOffset = Vector2.zero;
-        private int selectedClipIndex = -1;
-        private bool isDraggingClip;
-        private bool isPanning;
-        private Vector2 lastMousePos;
-        
-        // Visual settings
-        private const float MinZoom = 0.5f;
-        private const float MaxZoom = 3f;
+        // 2D-specific visual settings
         private const float GridSize = 0.5f;
-        private const float ClipCircleRadius = 12f;
         private const float AxisLabelOffset = 15f;
-        
-        // Colors
-        private static readonly Color GridColor = new Color(0.3f, 0.3f, 0.3f, 0.5f);
-        private static readonly Color AxisColor = new Color(0.5f, 0.5f, 0.5f, 1f);
-        private static readonly Color SelectionColor = new Color(1f, 0.8f, 0f, 1f);
-        private static readonly Color BackgroundColor = new Color(0.15f, 0.15f, 0.15f, 1f);
-        
-        // Cached clip colors (generated from index)
-        private static readonly Color[] ClipColors = GenerateClipColors(16);
-        
-        /// <summary>
-        /// Currently selected clip index, or -1 if none selected.
-        /// </summary>
-        public int SelectedClipIndex => selectedClipIndex;
         
         /// <summary>
         /// Event fired when a clip position is changed via dragging.
         /// </summary>
         public event Action<int, Vector2> OnClipPositionChanged;
-        
-        /// <summary>
-        /// Event fired when selection changes.
-        /// </summary>
-        public event Action<int> OnSelectionChanged;
 
         /// <summary>
         /// Draws the 2D blend space editor.
         /// </summary>
-        /// <param name="rect">The rect to draw in</param>
-        /// <param name="clips">The clips to display</param>
-        /// <param name="serializedObject">SerializedObject for undo support</param>
         public void Draw(Rect rect, Directional2DClipWithPosition[] clips, SerializedObject serializedObject)
         {
             if (clips == null) return;
@@ -78,7 +45,7 @@ namespace DMotion.Editor
             // Draw selection info
             if (selectedClipIndex >= 0 && selectedClipIndex < clips.Length)
             {
-                DrawSelectionInfo(rect, clips[selectedClipIndex], selectedClipIndex);
+                DrawSelectionInfo(rect, clips[selectedClipIndex]);
             }
             
             // Draw zoom indicator
@@ -87,7 +54,6 @@ namespace DMotion.Editor
 
         /// <summary>
         /// Draws position edit fields for the selected clip.
-        /// Call this after Draw() to show editable fields below the visual editor.
         /// </summary>
         public bool DrawSelectedClipFields(Directional2DClipWithPosition[] clips, SerializedProperty clipsProperty)
         {
@@ -127,27 +93,6 @@ namespace DMotion.Editor
             return false;
         }
 
-        /// <summary>
-        /// Resets the view to default zoom and pan.
-        /// </summary>
-        public void ResetView()
-        {
-            zoom = 1f;
-            panOffset = Vector2.zero;
-        }
-
-        /// <summary>
-        /// Clears the current selection.
-        /// </summary>
-        public void ClearSelection()
-        {
-            if (selectedClipIndex != -1)
-            {
-                selectedClipIndex = -1;
-                OnSelectionChanged?.Invoke(-1);
-            }
-        }
-
         private void HandleInput(Rect rect, Directional2DClipWithPosition[] clips, SerializedObject serializedObject)
         {
             var e = Event.current;
@@ -180,14 +125,11 @@ namespace DMotion.Editor
 
         private void HandleZoom(Rect rect, Event e)
         {
-            var zoomDelta = -e.delta.y * 0.05f;
-            var newZoom = Mathf.Clamp(zoom + zoomDelta, MinZoom, MaxZoom);
-            
             // Zoom toward mouse position
             var mouseBlendPos = ScreenToBlendSpace(e.mousePosition, rect);
-            zoom = newZoom;
+            ApplyZoomDelta(GetZoomDelta(e));
             var newMouseBlendPos = ScreenToBlendSpace(e.mousePosition, rect);
-            panOffset += (Vector2)(mouseBlendPos - newMouseBlendPos) * zoom;
+            panOffset += (mouseBlendPos - newMouseBlendPos) * zoom;
             
             e.Use();
         }
@@ -196,26 +138,19 @@ namespace DMotion.Editor
         {
             if (e.button == 0) // Left click
             {
-                // Check for clip selection
                 var clickedIndex = GetClipAtPosition(rect, clips, e.mousePosition);
                 if (clickedIndex >= 0)
                 {
-                    selectedClipIndex = clickedIndex;
+                    SetSelection(clickedIndex);
                     isDraggingClip = true;
-                    OnSelectionChanged?.Invoke(selectedClipIndex);
                     e.Use();
                 }
                 else
                 {
-                    // Clicked empty space - clear selection
-                    if (selectedClipIndex != -1)
-                    {
-                        selectedClipIndex = -1;
-                        OnSelectionChanged?.Invoke(-1);
-                    }
+                    SetSelection(-1);
                 }
             }
-            else if (e.button == 2 || (e.button == 0 && e.alt)) // Middle click or Alt+Left
+            else if (e.button == 2 || (e.button == 0 && e.alt))
             {
                 isPanning = true;
                 e.Use();
@@ -255,12 +190,6 @@ namespace DMotion.Editor
             }
         }
 
-        private void HandleMouseUp()
-        {
-            isDraggingClip = false;
-            isPanning = false;
-        }
-
         private void DrawGrid(Rect rect)
         {
             Handles.BeginGUI();
@@ -268,7 +197,6 @@ namespace DMotion.Editor
             var gridSpacing = GridSize * 100f * zoom;
             var center = GetBlendSpaceCenter(rect);
             
-            // Calculate visible range
             var minX = Mathf.Floor((rect.x - center.x) / gridSpacing) * gridSpacing;
             var maxX = Mathf.Ceil((rect.xMax - center.x) / gridSpacing) * gridSpacing;
             var minY = Mathf.Floor((rect.y - center.y) / gridSpacing) * gridSpacing;
@@ -316,8 +244,6 @@ namespace DMotion.Editor
                 Handles.DrawLine(
                     new Vector3(rect.x, center.y, 0),
                     new Vector3(rect.xMax, center.y, 0));
-                
-                // X label
                 GUI.Label(new Rect(rect.xMax - 20, center.y + 2, 20, 16), "X", EditorStyles.miniLabel);
             }
             
@@ -327,8 +253,6 @@ namespace DMotion.Editor
                 Handles.DrawLine(
                     new Vector3(center.x, rect.y, 0),
                     new Vector3(center.x, rect.yMax, 0));
-                
-                // Y label
                 GUI.Label(new Rect(center.x + 2, rect.y + 2, 20, 16), "Y", EditorStyles.miniLabel);
             }
             
@@ -359,39 +283,20 @@ namespace DMotion.Editor
                 
                 // Draw clip name
                 var clipName = clip.Clip != null ? clip.Clip.name : $"Clip {i}";
-                var labelContent = new GUIContent(clipName);
-                var labelSize = EditorStyles.miniLabel.CalcSize(labelContent);
-                var labelRect = new Rect(
-                    screenPos.x - labelSize.x / 2,
-                    screenPos.y - ClipCircleRadius - labelSize.y - 2,
-                    labelSize.x,
-                    labelSize.y);
-                
-                // Background for readability
-                EditorGUI.DrawRect(new Rect(labelRect.x - 2, labelRect.y, labelRect.width + 4, labelRect.height), 
-                    new Color(0, 0, 0, 0.7f));
-                GUI.Label(labelRect, labelContent, EditorStyles.miniLabel);
+                var labelRect = GetLabelRectAbove(screenPos, clipName);
+                DrawLabelWithBackground(labelRect, clipName);
                 
                 // Draw position text for selected clip
                 if (isSelected)
                 {
                     var posText = $"({clip.Position.x:F2}, {clip.Position.y:F2})";
-                    var posContent = new GUIContent(posText);
-                    var posSize = EditorStyles.miniLabel.CalcSize(posContent);
-                    var posRect = new Rect(
-                        screenPos.x - posSize.x / 2,
-                        screenPos.y + ClipCircleRadius + 2,
-                        posSize.x,
-                        posSize.y);
-                    
-                    EditorGUI.DrawRect(new Rect(posRect.x - 2, posRect.y, posRect.width + 4, posRect.height), 
-                        new Color(0, 0, 0, 0.7f));
-                    GUI.Label(posRect, posContent, EditorStyles.miniLabel);
+                    var posRect = GetLabelRectBelow(screenPos, posText);
+                    DrawLabelWithBackground(posRect, posText);
                 }
             }
         }
 
-        private void DrawSelectionInfo(Rect rect, Directional2DClipWithPosition clip, int index)
+        private void DrawSelectionInfo(Rect rect, Directional2DClipWithPosition clip)
         {
             var infoText = $"Selected: {(clip.Clip != null ? clip.Clip.name : "None")}";
             var style = new GUIStyle(EditorStyles.miniLabel)
@@ -401,37 +306,14 @@ namespace DMotion.Editor
             GUI.Label(new Rect(rect.x + 5, rect.y + 5, 200, 16), infoText, style);
         }
 
-        private void DrawZoomIndicator(Rect rect)
-        {
-            var zoomText = $"Zoom: {zoom:F1}x";
-            var style = new GUIStyle(EditorStyles.miniLabel)
-            {
-                alignment = TextAnchor.LowerRight
-            };
-            GUI.Label(new Rect(rect.xMax - 60, rect.yMax - 18, 55, 16), zoomText, style);
-            
-            // Instructions
-            var helpText = "Scroll: Zoom | MMB: Pan | Shift+Drag: Snap";
-            GUI.Label(new Rect(rect.x + 5, rect.yMax - 18, 250, 16), helpText, EditorStyles.miniLabel);
-        }
-
-        private void DrawCircle(Vector2 center, float radius, Color color)
-        {
-            Handles.BeginGUI();
-            Handles.color = color;
-            Handles.DrawSolidDisc(new Vector3(center.x, center.y, 0), Vector3.forward, radius);
-            Handles.EndGUI();
-        }
-
         private int GetClipAtPosition(Rect rect, Directional2DClipWithPosition[] clips, Vector2 mousePos)
         {
-            for (var i = clips.Length - 1; i >= 0; i--) // Reverse order for correct z-ordering
+            for (var i = clips.Length - 1; i >= 0; i--)
             {
                 var clip = clips[i];
                 var screenPos = BlendSpaceToScreen(new Vector2(clip.Position.x, clip.Position.y), rect);
-                var distance = Vector2.Distance(mousePos, screenPos);
                 
-                if (distance <= ClipCircleRadius)
+                if (IsPointInCircle(mousePos, screenPos, ClipCircleRadius))
                     return i;
             }
             return -1;
@@ -458,23 +340,6 @@ namespace DMotion.Editor
             return new Vector2(
                 (screenPos.x - center.x) / (100f * zoom),
                 -(screenPos.y - center.y) / (100f * zoom)); // Y is inverted
-        }
-
-        private static Color GetClipColor(int index)
-        {
-            return ClipColors[index % ClipColors.Length];
-        }
-
-        private static Color[] GenerateClipColors(int count)
-        {
-            var colors = new Color[count];
-            for (var i = 0; i < count; i++)
-            {
-                // Use HSV for evenly distributed colors
-                var hue = (float)i / count;
-                colors[i] = Color.HSVToRGB(hue, 0.7f, 0.9f);
-            }
-            return colors;
         }
     }
 }
