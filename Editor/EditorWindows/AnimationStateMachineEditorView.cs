@@ -73,6 +73,9 @@ namespace DMotion.Editor
         private Dictionary<TransitionPair, TransitionEdge> exitTransitionEdges =
             new Dictionary<TransitionPair, TransitionEdge>();
 
+        // Search window for creating new states (opened with Space)
+        private StateSearchWindowProvider searchWindowProvider;
+
         internal StateMachineAsset StateMachine => model.StateMachineAsset;
         internal VisualTreeAsset StateNodeXml => model.StateNodeXml;
 
@@ -86,6 +89,10 @@ namespace DMotion.Editor
             this.AddManipulator(new SelectionDragger());
             this.AddManipulator(new RectangleSelector());
             this.AddManipulator(new TransitionCutManipulator(this));
+            
+            // Initialize search window provider for Space shortcut
+            searchWindowProvider = ScriptableObject.CreateInstance<StateSearchWindowProvider>();
+            searchWindowProvider.Initialize(this);
             
             // Centralized keyboard handling for all nodes
             RegisterCallback<KeyDownEvent>(OnKeyDown);
@@ -153,6 +160,14 @@ namespace DMotion.Editor
         {
             if (Application.isPlaying) return;
             
+            // Space to open state creation search window
+            if (evt.keyCode == KeyCode.Space && model.StateMachineAsset != null)
+            {
+                OpenStateSearchWindow();
+                evt.StopImmediatePropagation();
+                return;
+            }
+            
             // F2 or Ctrl+R to rename selected node
             bool isRenameShortcut = evt.keyCode == KeyCode.F2 || 
                                     (evt.keyCode == KeyCode.R && evt.ctrlKey);
@@ -175,6 +190,13 @@ namespace DMotion.Editor
                     evt.StopImmediatePropagation();
                 }
             }
+        }
+
+        private void OpenStateSearchWindow()
+        {
+            // Get mouse position for the search window and state creation
+            var screenMousePosition = GUIUtility.GUIToScreenPoint(Event.current.mousePosition);
+            SearchWindow.Open(new SearchWindowContext(screenMousePosition), searchWindowProvider);
         }
 
         public override void BuildContextualMenu(ContextualMenuPopulateEvent evt)
@@ -325,6 +347,26 @@ namespace DMotion.Editor
             
             var state = model.StateMachineAsset.CreateState(stateType);
             state.StateEditorData.GraphPosition = graphPos;
+            InstantiateStateView(state);
+            
+            // Raise event for other panels
+            StateMachineEditorEvents.RaiseStateAdded(model.StateMachineAsset, state);
+        }
+
+        /// <summary>
+        /// Creates a state at a specific graph position. Called by StateSearchWindowProvider.
+        /// </summary>
+        internal void CreateStateAtPosition(Type stateType, Vector2 graphPosition)
+        {
+            // SubStateMachine uses a popup for configuration
+            if (stateType == typeof(SubStateMachineStateAsset))
+            {
+                SubStateMachineCreationPopup.Show(model.StateMachineAsset, graphPosition, OnSubStateMachineCreated);
+                return;
+            }
+            
+            var state = model.StateMachineAsset.CreateState(stateType);
+            state.StateEditorData.GraphPosition = graphPosition;
             InstantiateStateView(state);
             
             // Raise event for other panels
