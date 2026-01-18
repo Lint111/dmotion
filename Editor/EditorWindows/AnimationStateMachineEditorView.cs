@@ -320,6 +320,8 @@ namespace DMotion.Editor
                     fromState.OutTransitions.RemoveAt(i);
             }
             transitionToEdgeView.Remove(new TransitionPair(fromState, toState));
+            
+            StateMachineEditorEvents.RaiseTransitionRemoved(model.StateMachineAsset, fromState, toState);
         }
 
         private void CreateState(DropdownMenuAction action, Type stateType)
@@ -395,6 +397,8 @@ namespace DMotion.Editor
             Undo.RecordObject(fromState, "Create Transition");
             CreateOutTransition(fromState, toState);
             EditorUtility.SetDirty(fromState);
+            
+            StateMachineEditorEvents.RaiseTransitionAdded(model.StateMachineAsset, fromState, toState);
         }
 
         // Cached list for GetCompatiblePorts to avoid per-call allocations
@@ -573,6 +577,10 @@ namespace DMotion.Editor
 
         private void OnStateSelected(StateNodeView obj)
         {
+            // Raise event for any subscribers
+            StateMachineEditorEvents.RaiseStateSelected(model.StateMachineAsset, obj.State);
+            
+            // Update inspector (TODO: move to event subscriber for full decoupling)
             var inspectorModel = new AnimationStateInspectorModel
             {
                 StateView = obj
@@ -600,6 +608,10 @@ namespace DMotion.Editor
 
         private void OnTransitionSelected(TransitionEdge obj)
         {
+            // Raise event for any subscribers
+            StateMachineEditorEvents.RaiseTransitionSelected(model.StateMachineAsset, obj.FromState, obj.ToState);
+            
+            // Update inspector
             var inspectorModel = new TransitionGroupInspectorModel()
             {
                 FromState = obj.FromState,
@@ -631,6 +643,9 @@ namespace DMotion.Editor
 
         private void OnExitNodeSelected(ExitNodeView obj)
         {
+            // Raise event for any subscribers
+            StateMachineEditorEvents.RaiseExitNodeSelected(model.StateMachineAsset);
+            
             // Clear the inspector or show exit state info
             model.InspectorView.Clear();
         }
@@ -675,6 +690,8 @@ namespace DMotion.Editor
             Undo.RecordObject(model.StateMachineAsset, "Create Any State Transition");
             CreateAnyStateTransition(toState);
             EditorUtility.SetDirty(model.StateMachineAsset);
+            
+            StateMachineEditorEvents.RaiseAnyStateTransitionAdded(model.StateMachineAsset, toState);
         }
 
         private void DeleteAnyStateTransition(AnimationStateAsset toState)
@@ -686,6 +703,8 @@ namespace DMotion.Editor
                     transitions.RemoveAt(i);
             }
             anyStateTransitionEdges.Remove(toState);
+            
+            StateMachineEditorEvents.RaiseAnyStateTransitionRemoved(model.StateMachineAsset, toState);
         }
 
         private void AddExitState(AnimationStateAsset state)
@@ -702,6 +721,8 @@ namespace DMotion.Editor
             
             // Create visual edge
             InstantiateExitStateEdge(state);
+            
+            StateMachineEditorEvents.RaiseExitStateAdded(model.StateMachineAsset, state);
         }
         
         /// <summary>
@@ -725,6 +746,8 @@ namespace DMotion.Editor
             Undo.RecordObject(model.StateMachineAsset, "Remove Exit State");
             model.StateMachineAsset.ExitStates.Remove(state);
             EditorUtility.SetDirty(model.StateMachineAsset);
+            
+            StateMachineEditorEvents.RaiseExitStateRemoved(model.StateMachineAsset, state);
         }
 
         private void InstantiateExitStateEdge(AnimationStateAsset state)
@@ -769,6 +792,8 @@ namespace DMotion.Editor
             AssetDatabase.SaveAssets();
             
             InstantiateAnyStateExitEdge();
+            
+            StateMachineEditorEvents.RaiseAnyStateExitTransitionChanged(model.StateMachineAsset, true);
         }
         
         private void RemoveAnyStateExitTransition()
@@ -777,6 +802,8 @@ namespace DMotion.Editor
             model.StateMachineAsset.AnyStateExitTransition = null;
             EditorUtility.SetDirty(model.StateMachineAsset);
             AssetDatabase.SaveAssets();
+            
+            StateMachineEditorEvents.RaiseAnyStateExitTransitionChanged(model.StateMachineAsset, false);
         }
         
         private TransitionEdge anyStateExitEdge;
@@ -805,6 +832,9 @@ namespace DMotion.Editor
         
         private void OnAnyStateExitTransitionSelected(TransitionEdge obj)
         {
+            // Raise event for any subscribers (null toState indicates exit transition)
+            StateMachineEditorEvents.RaiseAnyStateTransitionSelected(model.StateMachineAsset, null);
+            
             // Show Any State exit transition inspector
             model.InspectorView.SetInspector<AnyStateTransitionsInspector, AnyStateInspectorModel>(
                 model.StateMachineAsset,
@@ -816,6 +846,9 @@ namespace DMotion.Editor
 
         private void OnAnyStateSelected(AnyStateNodeView obj)
         {
+            // Raise event for any subscribers
+            StateMachineEditorEvents.RaiseAnyStateSelected(model.StateMachineAsset);
+            
             // Show Any State transitions inspector (not parameters - those are in a separate panel)
             model.InspectorView.SetInspector<AnyStateTransitionsInspector, AnyStateInspectorModel>(
                 model.StateMachineAsset, new AnyStateInspectorModel()
@@ -826,6 +859,9 @@ namespace DMotion.Editor
 
         private void OnAnyStateTransitionSelected(TransitionEdge obj)
         {
+            // Raise event for any subscribers
+            StateMachineEditorEvents.RaiseAnyStateTransitionSelected(model.StateMachineAsset, obj.ToState);
+            
             // Set inspector for any state transition - shows all transitions to this state
             model.InspectorView.SetInspector<AnyStateTransitionsInspector, AnyStateInspectorModel>(
                 model.StateMachineAsset,

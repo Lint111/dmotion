@@ -57,6 +57,9 @@ namespace DMotion.Editor
         private void OnDestroy()
         {
             EditorApplication.playModeStateChanged -= OnPlaymodeStateChanged;
+            
+            // Clear all event subscriptions to prevent memory leaks
+            StateMachineEditorEvents.ClearAllSubscriptions();
         }
 
         private void OnPlaymodeStateChanged(PlayModeStateChange stateChange)

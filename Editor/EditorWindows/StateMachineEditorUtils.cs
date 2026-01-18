@@ -118,6 +118,9 @@ namespace DMotion.Editor
             Undo.RegisterCreatedObjectUndo(parameter, "Create Parameter");
 
             AssetDatabase.SaveAssets();
+            
+            StateMachineEditorEvents.RaiseParameterAdded(stateMachineAsset, parameter);
+            
             return parameter;
         }
 
@@ -165,7 +168,14 @@ namespace DMotion.Editor
         {
             Assert.IsTrue(stateMachineAsset.States.Contains(state),
                 $"State {state.name} not present in State machine {stateMachineAsset.name}");
+            
+            var previousDefault = stateMachineAsset.DefaultState;
             stateMachineAsset.DefaultState = state;
+            
+            if (previousDefault != state)
+            {
+                StateMachineEditorEvents.RaiseDefaultStateChanged(stateMachineAsset, state, previousDefault);
+            }
         }
 
         internal static void DrawTransitionSummary(AnimationStateAsset fromState, AnimationStateAsset toState,
