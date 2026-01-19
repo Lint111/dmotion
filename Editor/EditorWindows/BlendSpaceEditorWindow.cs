@@ -37,6 +37,11 @@ namespace DMotion.Editor
             this.serializedObject = new SerializedObject(editor.Target);
             this.onClosed = onClosed;
             
+            // Configure for standalone editing (always edit mode, no mode toggle)
+            editor.EditMode = true;
+            editor.ShowModeToggle = false;
+            editor.ShowPreviewIndicator = false;
+            
             titleContent = new GUIContent($"{editor.EditorTitle}: {editor.Target.name}");
             minSize = new Vector2(300, 200);
         }
@@ -77,6 +82,9 @@ namespace DMotion.Editor
             
             editor.Draw(editorRect, serializedObject);
 
+            // Help text below the editor (separate line)
+            DrawHelpText();
+
             // Selection fields at bottom
             EditorGUILayout.Space(5);
             if (editor.DrawSelectedClipFields(serializedObject))
@@ -86,6 +94,18 @@ namespace DMotion.Editor
             }
 
             serializedObject.ApplyModifiedProperties();
+        }
+        
+        private void DrawHelpText()
+        {
+            if (editor == null) return;
+            
+            var helpText = editor.GetHelpText();
+            var style = new GUIStyle(EditorStyles.miniLabel)
+            {
+                normal = { textColor = new Color(0.6f, 0.6f, 0.6f) }
+            };
+            EditorGUILayout.LabelField(helpText, style);
         }
 
         private void DrawToolbar()

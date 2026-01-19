@@ -125,10 +125,16 @@ namespace DMotion.Editor
             previewRenderUtility = new PreviewRenderUtility();
 
             var bounds = skinnedMeshRenderer.bounds;
-            var camPos = new Vector3(0f, bounds.size.y * 3, 10f);
-            previewRenderUtility.camera.transform.position = camPos;
-            var camRot = Quaternion.LookRotation(bounds.center - camPos);
-            previewRenderUtility.camera.transform.rotation = camRot;
+            
+            // Initialize orbit camera parameters
+            camPivot = bounds.center;
+            camDistance = bounds.size.magnitude * 2f;
+            lookAtOffset = Vector3.up * bounds.size.y * 0.3f;
+            camEuler = new Vector2(0, -45); // Default viewing angle
+            
+            // Set initial camera position using orbit parameters
+            UpdateCameraPosition();
+            
             previewRenderUtility.camera.nearClipPlane = 0.3f;
             previewRenderUtility.camera.farClipPlane = 3000f;
 
@@ -136,7 +142,7 @@ namespace DMotion.Editor
             light1.type = LightType.Directional;
             light1.color = Color.white;
             light1.intensity = 1;
-            light1.transform.rotation = camRot;
+            light1.transform.rotation = previewRenderUtility.camera.transform.rotation;
         }
 
         public void RefreshPreviewObjects()
@@ -224,10 +230,24 @@ namespace DMotion.Editor
             }
         }
 
-        private void HandleCamera(bool force = false)
+        /// <summary>
+        /// Handles camera orbit and zoom controls via mouse input. Call from an IMGUI context.
+        /// </summary>
+        public void HandleCamera(bool force = false)
         {
-            if (Event.current == null)
+            if (Event.current == null || previewRenderUtility == null)
             {
+                return;
+            }
+
+            // Handle scroll wheel zoom
+            if (Event.current.type == EventType.ScrollWheel)
+            {
+                var zoomDelta = Event.current.delta.y * 0.5f;
+                camDistance = Mathf.Max(0.5f, camDistance + zoomDelta);
+                UpdateCameraPosition();
+                Event.current.Use();
+                GUI.changed = true;
                 return;
             }
 
@@ -255,12 +275,7 @@ namespace DMotion.Editor
 
                 camEuler.y = Mathf.Clamp(camEuler.y, -179, -1); // -1 to avoid perpendicular angles
 
-                previewRenderUtility.camera.transform.position =
-                    Quaternion.Euler(-camEuler.y, camEuler.x, 0) * (Vector3.up * camDistance - camPivot) + camPivot;
-                previewRenderUtility.camera.transform.LookAt(camPivot + lookAtOffset);
-
-                // matcap feel
-                previewRenderUtility.lights[0].transform.rotation = previewRenderUtility.camera.transform.rotation;
+                UpdateCameraPosition();
 
                 // needed for repaint
                 GUI.changed = true;
@@ -279,6 +294,34 @@ namespace DMotion.Editor
             {
                 lastMousePosition = Event.current.mousePosition;
             }
+        }
+
+        private void UpdateCameraPosition()
+        {
+            if (previewRenderUtility == null) return;
+            
+            previewRenderUtility.camera.transform.position =
+                Quaternion.Euler(-camEuler.y, camEuler.x, 0) * (Vector3.up * camDistance - camPivot) + camPivot;
+            previewRenderUtility.camera.transform.LookAt(camPivot + lookAtOffset);
+
+            // matcap feel
+            previewRenderUtility.lights[0].transform.rotation = previewRenderUtility.camera.transform.rotation;
+        }
+
+        /// <summary>
+        /// Resets the camera to the default view position.
+        /// </summary>
+        public void ResetCameraView()
+        {
+            if (skinnedMeshRenderer == null || previewRenderUtility == null) return;
+            
+            var bounds = skinnedMeshRenderer.bounds;
+            camDistance = bounds.size.magnitude * 2f;
+            camPivot = bounds.center;
+            lookAtOffset = Vector3.zero;
+            camEuler = new Vector2(0, -45); // Default angle
+            
+            UpdateCameraPosition();
         }
     }
 }

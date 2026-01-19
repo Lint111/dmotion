@@ -11,8 +11,8 @@ namespace DMotion.Editor
 {
     internal static class ToolMenuConstants
     {
-        internal const string ToolsPath = "Tools";
-        internal const string DMotionPath = ToolsPath + "/DMotion";
+        internal const string WindowPath = "Window";
+        internal const string DMotionPath = WindowPath + "/DMotion";
     }
 
     internal struct StateMachineEditorViewModel
@@ -30,6 +30,18 @@ namespace DMotion.Editor
         // Persisted across domain reloads
         [SerializeField] private StateMachineAsset lastEditedStateMachine;
         [SerializeField] private string lastEditedAssetGuid;
+        
+        // Preference keys
+        private const string AutoOpenPreviewPrefKey = "DMotion.StateMachineEditor.AutoOpenPreview";
+        
+        /// <summary>
+        /// Whether to automatically open the Animation Preview window when the editor opens.
+        /// </summary>
+        internal static bool AutoOpenPreviewWindow
+        {
+            get => EditorPrefs.GetBool(AutoOpenPreviewPrefKey, true);
+            set => EditorPrefs.SetBool(AutoOpenPreviewPrefKey, value);
+        }
 
         private AnimationStateMachineEditorView stateMachineEditorView;
         private StateMachineInspectorView inspectorView;
@@ -45,12 +57,41 @@ namespace DMotion.Editor
         
         private bool hasRestoredAfterDomainReload;
 
-        [MenuItem(ToolMenuConstants.DMotionPath + "/State Machine Editor")]
-        internal static void ShowExample()
+        [MenuItem(ToolMenuConstants.DMotionPath + "/Open Workspace")]
+        internal static void OpenWorkspace()
         {
             var wnd = GetWindow<AnimationStateMachineEditorWindow>();
             wnd.titleContent = new GUIContent("State Machine Editor");
+            wnd.Focus();
+
+            // Best-effort: open the Animation Preview docked as a tab next to the editor.
+            AnimationPreviewWindow.ShowDockedWithStateMachineEditor();
+
+            // Ensure selection drives loading in the editor window.
             wnd.OnSelectionChange();
+        }
+
+        [MenuItem(ToolMenuConstants.DMotionPath + "/State Machine Editor")]
+        internal static void ShowWindow()
+        {
+            var wnd = GetWindow<AnimationStateMachineEditorWindow>();
+            wnd.titleContent = new GUIContent("State Machine Editor");
+            wnd.Focus();
+            wnd.OnSelectionChange();
+        }
+
+        
+        [MenuItem(ToolMenuConstants.DMotionPath + "/Auto-Open Animation Preview")]
+        private static void ToggleAutoOpenPreview()
+        {
+            AutoOpenPreviewWindow = !AutoOpenPreviewWindow;
+        }
+        
+        [MenuItem(ToolMenuConstants.DMotionPath + "/Auto-Open Animation Preview", true)]
+        private static bool ToggleAutoOpenPreviewValidate()
+        {
+            Menu.SetChecked(ToolMenuConstants.DMotionPath + "/Auto-Open Animation Preview", AutoOpenPreviewWindow);
+            return true;
         }
 
         private void Awake()
@@ -229,6 +270,12 @@ namespace DMotion.Editor
             breadcrumbController?.SetRoot(stateMachineAsset);
             
             LoadStateMachineInternal(stateMachineAsset, updateBreadcrumb: false);
+            
+            // Auto-open the Animation Preview window if enabled and not already open
+            if (AutoOpenPreviewWindow && !HasOpenInstances<AnimationPreviewWindow>())
+            {
+                AnimationPreviewWindow.ShowDockedWithStateMachineEditor();
+            }
         }
         
         /// <summary>
@@ -265,7 +312,7 @@ namespace DMotion.Editor
         {
             if (Selection.activeObject is StateMachineAsset)
             {
-                ShowExample();
+                OpenWorkspace();
                 return true;
             }
 

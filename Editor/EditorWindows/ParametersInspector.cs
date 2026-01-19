@@ -29,10 +29,14 @@ namespace DMotion.Editor
     {
         private List<AnimationParameterAsset> _orphanedParameters = new();
         private bool _needsRefresh = true;
+        
+        // Collapsible section
+        private DockablePanelSection parametersSection;
 
         private void OnEnable()
         {
             StateMachineEditorEvents.OnStateMachineChanged += OnStateMachineChanged;
+            parametersSection = new DockablePanelSection("Parameters", "DMotion_Params", true);
         }
 
         private void OnDisable()
@@ -81,20 +85,10 @@ namespace DMotion.Editor
         {
             serializedObject.Update();
             
-            // Header with add button
-            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            // Use collapsible section with Add button in toolbar
+            if (!parametersSection.DrawHeader(() => DrawParametersToolbar(), showDockButton: false))
             {
-                EditorGUILayout.LabelField(GUIContentCache.Parameters, EditorStyles.boldLabel);
-                GUILayout.FlexibleSpace();
-
-                using (new EditorGUI.DisabledScope(Application.isPlaying))
-                {
-                    var rect = EditorGUILayout.GetControlRect(GUILayout.Width(50));
-                    if (EditorGUI.DropdownButton(rect, GUIContentCache.AddButton, FocusType.Passive, EditorStyles.miniButton))
-                    {
-                        ShowAddParameterMenu(rect);
-                    }
-                }
+                return;
             }
 
             var parametersProperty = serializedObject.FindProperty(nameof(StateMachineAsset.Parameters));
@@ -112,6 +106,18 @@ namespace DMotion.Editor
                 }
 
                 DrawOrphanCleanup();
+            }
+        }
+
+        private void DrawParametersToolbar()
+        {
+            using (new EditorGUI.DisabledScope(Application.isPlaying))
+            {
+                var rect = EditorGUILayout.GetControlRect(GUILayout.Width(50));
+                if (EditorGUI.DropdownButton(rect, GUIContentCache.AddButton, FocusType.Passive, EditorStyles.toolbarDropDown))
+                {
+                    ShowAddParameterMenu(rect);
+                }
             }
         }
 

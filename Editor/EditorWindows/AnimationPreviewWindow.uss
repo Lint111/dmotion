@@ -1,0 +1,499 @@
+/* Animation Preview Window Styles */
+/* Phase 1: Foundation Layout */
+
+.preview-window {
+    flex-grow: 1;
+    background-color: rgb(56, 56, 56);
+}
+
+/* Toolbar */
+.preview-toolbar {
+    flex-direction: row;
+    background-color: rgb(40, 40, 40);
+    border-bottom-width: 1px;
+    border-bottom-color: rgb(30, 30, 30);
+    padding: 2px 4px;
+    height: 22px;
+}
+
+.selection-label {
+    -unity-text-align: middle-right;
+    color: rgb(200, 200, 200);
+    font-size: 12px;
+    -unity-font-style: bold;
+    padding-right: 8px;
+}
+
+/* Main Content */
+.main-content {
+    flex-grow: 1;
+}
+
+.main-split-view {
+    flex-grow: 1;
+}
+
+/* Inspector Panel (Left) */
+.inspector-panel {
+    background-color: rgb(56, 56, 56);
+    border-right-width: 1px;
+    border-right-color: rgb(30, 30, 30);
+}
+
+.inspector-scroll {
+    flex-grow: 1;
+}
+
+.inspector-content {
+    padding: 8px;
+}
+
+/* Preview Panel (Right) */
+.preview-panel {
+    background-color: rgb(40, 40, 40);
+    flex-grow: 1;
+}
+
+.preview-placeholder {
+    flex-grow: 1;
+    -unity-text-align: middle-center;
+    color: rgb(120, 120, 120);
+    font-size: 12px;
+    white-space: normal;
+    padding: 20px;
+}
+
+.preview-imgui {
+    flex-grow: 1;
+}
+
+/* Preview Toolbar Overlay */
+.preview-toolbar-overlay {
+    position: absolute;
+}
+
+.preview-control-button {
+    font-size: 10px;
+    padding: 2px 8px;
+    margin: 0 2px;
+    background-color: rgba(40, 40, 40, 0.8);
+    border-color: rgb(70, 70, 70);
+    border-radius: 3px;
+    color: rgb(180, 180, 180);
+    min-height: 18px;
+}
+
+.preview-control-button:hover {
+    background-color: rgba(60, 60, 60, 0.9);
+    color: rgb(220, 220, 220);
+}
+
+.preview-control-button:active {
+    background-color: rgba(50, 50, 50, 0.95);
+}
+
+/* Section Header */
+.section-header {
+    flex-direction: row;
+    align-items: center;
+    padding: 8px;
+    margin-bottom: 8px;
+    background-color: rgb(50, 50, 55);
+    border-radius: 4px;
+    border-left-width: 3px;
+    border-left-color: rgb(100, 150, 200);
+}
+
+.header-type {
+    background-color: rgb(70, 90, 110);
+    padding: 2px 8px;
+    border-radius: 3px;
+    color: rgb(180, 200, 220);
+    font-size: 10px;
+    margin-right: 8px;
+}
+
+.header-name {
+    color: rgb(220, 220, 220);
+    font-size: 14px;
+    -unity-font-style: bold;
+}
+
+/* Inspector Sections */
+.inspector-section {
+    margin-bottom: 4px;
+}
+
+.section-foldout {
+    margin: 0;
+}
+
+.section-foldout > Toggle {
+    background-color: rgb(60, 60, 60);
+    padding: 6px 8px;
+    border-radius: 4px;
+    margin: 0 0 2px 0;
+}
+
+.section-foldout > Toggle:hover {
+    background-color: rgb(70, 70, 70);
+}
+
+.section-foldout > Toggle > Label {
+    color: rgb(200, 200, 200);
+    font-size: 11px;
+    -unity-font-style: bold;
+}
+
+.section-foldout > #unity-content {
+    padding: 8px;
+    background-color: rgb(50, 50, 50);
+    border-radius: 0 0 4px 4px;
+    margin-top: -2px;
+}
+
+/* Property Rows */
+.property-row {
+    flex-direction: row;
+    padding: 4px 0;
+    border-bottom-width: 1px;
+    border-bottom-color: rgb(60, 60, 60);
+}
+
+.property-label {
+    color: rgb(150, 150, 150);
+    font-size: 11px;
+    min-width: 80px;
+    flex-basis: 40%;
+}
+
+.property-value {
+    color: rgb(200, 200, 200);
+    font-size: 11px;
+    flex-grow: 1;
+}
+
+/* Editable Properties */
+.editable-property {
+    align-items: center;
+}
+
+.property-value-container {
+    flex-grow: 1;
+    align-items: center;
+}
+
+.property-slider {
+    flex-grow: 1;
+    min-width: 60px;
+}
+
+.property-slider > .unity-base-slider__dragger {
+    background-color: rgb(100, 150, 200);
+    border-radius: 3px;
+}
+
+.property-slider > .unity-base-slider__tracker {
+    background-color: rgb(50, 50, 60);
+    border-radius: 2px;
+}
+
+.property-float-field {
+    min-width: 50px;
+}
+
+.property-float-field > .unity-base-field__input {
+    background-color: rgb(42, 42, 46);
+    border-color: rgb(60, 60, 70);
+    border-radius: 3px;
+    min-height: 18px;
+    padding: 2px 4px;
+}
+
+.property-suffix {
+    color: rgb(150, 150, 150);
+    font-size: 11px;
+    min-width: 12px;
+}
+
+.property-toggle {
+    margin: 0;
+}
+
+.property-toggle > .unity-toggle__input {
+    flex-grow: 0;
+}
+
+.property-field {
+    flex-grow: 1;
+}
+
+.property-field > .unity-base-field__input {
+    background-color: rgb(42, 42, 46);
+    border-color: rgb(60, 60, 70);
+    border-radius: 3px;
+}
+
+/* Subsection Labels */
+.subsection-label {
+    color: rgb(180, 180, 180);
+    font-size: 10px;
+    -unity-font-style: bold;
+    margin-top: 8px;
+    margin-bottom: 4px;
+}
+
+/* Messages */
+.no-selection-message {
+    color: rgb(140, 140, 140);
+    font-size: 11px;
+    -unity-font-style: italic;
+    white-space: normal;
+    padding: 16px;
+    -unity-text-align: middle-center;
+}
+
+.info-message {
+    color: rgb(140, 140, 140);
+    font-size: 11px;
+    white-space: normal;
+    padding: 8px;
+}
+
+.placeholder-message {
+    color: rgb(100, 100, 100);
+    font-size: 10px;
+    -unity-font-style: italic;
+    padding: 8px;
+    background-color: rgb(45, 45, 45);
+    border-radius: 3px;
+    margin-top: 4px;
+}
+
+/* Split View Styling */
+.unity-two-pane-split-view__dragline-anchor {
+    background-color: rgb(60, 60, 60);
+}
+
+.unity-two-pane-split-view__dragline-anchor:hover {
+    background-color: rgb(80, 80, 80);
+}
+
+/* Future Phase Styles (placeholders) */
+
+/* Phase 2: Editable Properties */
+.property-slider {
+    flex-grow: 1;
+}
+
+.property-toggle {
+    margin: 0;
+}
+
+/* Phase 3: Timeline Scrubber */
+.timeline-scrubber {
+    padding: 4px 0;
+}
+
+.timeline-top-row {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.timeline-play-button {
+    width: 24px;
+    height: 20px;
+    margin-right: 8px;
+    padding: 0;
+    font-size: 10px;
+    background-color: rgb(60, 60, 60);
+    border-color: rgb(80, 80, 80);
+    border-radius: 3px;
+}
+
+.timeline-play-button:hover {
+    background-color: rgb(70, 70, 70);
+}
+
+.timeline-play-button:active {
+    background-color: rgb(50, 50, 50);
+}
+
+.timeline-time-label {
+    color: rgb(180, 180, 180);
+    font-size: 10px;
+    flex-grow: 1;
+}
+
+.timeline-track-container {
+    height: 24px;
+    padding: 0 6px;
+}
+
+.timeline-track {
+    height: 100%;
+    background-color: rgb(40, 40, 45);
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: rgb(60, 60, 65);
+    position: relative;
+    overflow: hidden;
+}
+
+.timeline-progress-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    background-color: rgba(100, 150, 200, 0.3);
+    border-radius: 3px 0 0 3px;
+}
+
+.timeline-scrubber-handle {
+    position: absolute;
+    width: 12px;
+    top: -2px;
+    bottom: -2px;
+    background-color: rgb(200, 100, 100);
+    border-radius: 2px;
+    border-width: 1px;
+    border-color: rgb(255, 150, 150);
+}
+
+.timeline-scrubber-handle:hover {
+    background-color: rgb(220, 120, 120);
+}
+
+.timeline-markers-container {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+}
+
+.timeline-event-marker {
+    position: absolute;
+    width: 8px;
+    height: 100%;
+}
+
+.timeline-event-marker-dot {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    border-radius: 4px;
+    background-color: rgb(100, 200, 100);
+    top: 50%;
+    margin-top: -4px;
+    border-width: 1px;
+    border-color: rgb(150, 255, 150);
+}
+
+.timeline-event-marker:hover .timeline-event-marker-dot {
+    background-color: rgb(150, 255, 150);
+    width: 10px;
+    height: 10px;
+    border-radius: 5px;
+    margin-top: -5px;
+    margin-left: -1px;
+}
+
+.timeline-looping .timeline-track {
+    border-color: rgb(100, 150, 200);
+}
+
+/* Frame Input */
+.timeline-frame-container {
+    flex-direction: row;
+    align-items: center;
+    margin-left: 8px;
+}
+
+.timeline-frame-label {
+    color: rgb(150, 150, 150);
+    font-size: 10px;
+    margin-right: 4px;
+}
+
+.timeline-frame-field {
+    width: 50px;
+}
+
+.timeline-frame-field > .unity-base-field__input {
+    background-color: rgb(42, 42, 46);
+    border-color: rgb(60, 60, 70);
+    border-radius: 3px;
+    min-height: 16px;
+    padding: 1px 4px;
+    font-size: 10px;
+}
+
+/* Frame Ticks */
+.timeline-frame-ticks-container {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    overflow: hidden;
+}
+
+.timeline-frame-tick {
+    position: absolute;
+    width: 1px;
+    top: 0;
+    bottom: 50%;
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+.timeline-frame-tick-major {
+    bottom: 30%;
+    background-color: rgba(255, 255, 255, 0.4);
+}
+
+/* Phase 5-6: Blend Space */
+.blend-space-container {
+    height: 150px;
+    background-color: rgb(45, 45, 45);
+    border-radius: 4px;
+    margin-top: 8px;
+}
+
+.blend-indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    background-color: rgb(200, 150, 50);
+    border-width: 2px;
+    border-color: rgb(255, 200, 100);
+}
+
+.clip-circle {
+    width: 12px;
+    height: 12px;
+    border-radius: 6px;
+    background-color: rgb(100, 150, 200);
+}
+
+/* Phase 8: Transition Preview */
+.transition-progress-container {
+    height: 40px;
+    background-color: rgb(45, 45, 45);
+    border-radius: 4px;
+    margin-top: 8px;
+}
+
+.transition-progress-bar {
+    height: 8px;
+    background-color: rgb(60, 60, 60);
+    border-radius: 4px;
+    margin: 16px 8px;
+}
+
+.transition-progress-fill {
+    height: 100%;
+    background-color: rgb(100, 180, 100);
+    border-radius: 4px;
+}

@@ -151,20 +151,18 @@ namespace DMotion.Editor
             }
         }
 
-        protected override int GetClipAtPosition(Rect rect, Vector2 mousePos)
+        protected override Vector2 GetClipScreenPosition(int index, Rect rect)
         {
-            if (clips == null) return -1;
+            if (clips == null || index < 0 || index >= clips.Length)
+                return Vector2.zero;
             
-            for (var i = clips.Length - 1; i >= 0; i--)
-            {
-                var clip = clips[i];
-                var screenPos = BlendSpaceToScreen(new Vector2(clip.Position.x, clip.Position.y), rect);
-                
-                if (IsPointInCircle(mousePos, screenPos, ClipCircleRadius))
-                    return i;
-            }
-            return -1;
+            var clip = clips[index];
+            return BlendSpaceToScreen(new Vector2(clip.Position.x, clip.Position.y), rect);
         }
+        
+        // Uses base class implementations for:
+        // - GetClipLabelRect (label above clip)
+        // - GetClipAtPosition (check circle + label)
 
         protected override void HandleZoom(Rect rect, Event e)
         {
@@ -175,9 +173,30 @@ namespace DMotion.Editor
             e.Use();
         }
 
+        protected override void HandleMouseDrag(Rect rect, Event e, SerializedObject serializedObject)
+        {
+            if (isDraggingPreviewIndicator && !editMode)
+            {
+                // Clamp mouse position to rect bounds for 2D
+                var clampedMousePos = new Vector2(
+                    Mathf.Clamp(e.mousePosition.x, rect.x, rect.xMax),
+                    Mathf.Clamp(e.mousePosition.y, rect.y, rect.yMax));
+                PreviewPosition = ScreenToBlendSpace(clampedMousePos, rect);
+                e.Use();
+            }
+            else
+            {
+                base.HandleMouseDrag(rect, e, serializedObject);
+            }
+        }
+        
         protected override void HandleClipDrag(Rect rect, Event e)
         {
-            var blendPos = ScreenToBlendSpace(e.mousePosition, rect);
+            // Clamp mouse position to rect bounds for clip dragging
+            var clampedMousePos = new Vector2(
+                Mathf.Clamp(e.mousePosition.x, rect.x, rect.xMax),
+                Mathf.Clamp(e.mousePosition.y, rect.y, rect.yMax));
+            var blendPos = ScreenToBlendSpace(clampedMousePos, rect);
             
             // Snap to grid if shift is held
             if (e.shift)
@@ -200,6 +219,11 @@ namespace DMotion.Editor
         protected override void HandlePan(Event e, Rect rect)
         {
             var delta = e.mousePosition - lastMousePos;
+            panOffset -= delta / (100f * zoom);
+        }
+        
+        protected override void ApplyExternalPanDelta(Rect rect, Vector2 delta)
+        {
             panOffset -= delta / (100f * zoom);
         }
 
@@ -271,7 +295,7 @@ namespace DMotion.Editor
                 rect.center.y + panOffset.y * 100f * zoom);
         }
 
-        private Vector2 BlendSpaceToScreen(Vector2 blendPos, Rect rect)
+        protected override Vector2 BlendSpaceToScreen(Vector2 blendPos, Rect rect)
         {
             var center = GetBlendSpaceCenter(rect);
             return new Vector2(
@@ -279,12 +303,51 @@ namespace DMotion.Editor
                 center.y - blendPos.y * 100f * zoom);
         }
 
-        private Vector2 ScreenToBlendSpace(Vector2 screenPos, Rect rect)
+        protected override Vector2 ScreenToBlendSpace(Vector2 screenPos, Rect rect)
         {
             var center = GetBlendSpaceCenter(rect);
             return new Vector2(
                 (screenPos.x - center.x) / (100f * zoom),
                 -(screenPos.y - center.y) / (100f * zoom));
+        }
+        
+        protected override Vector2 ClampPreviewPosition(Vector2 position)
+        {
+            if (clips == null || clips.Length == 0)
+                return position;
+            
+            // Clamp to clip position bounds
+            Vector2 minBounds = new Vector2(float.MaxValue, float.MaxValue);
+            Vector2 maxBounds = new Vector2(float.MinValue, float.MinValue);
+            for (int i = 0; i < clips.Length; i++)
+            {
+                var pos = clips[i].Position;
+                minBounds = Vector2.Min(minBounds, pos);
+                maxBounds = Vector2.Max(maxBounds, pos);
+            }
+            
+            return new Vector2(
+                Mathf.Clamp(position.x, minBounds.x, maxBounds.x),
+                Mathf.Clamp(position.y, minBounds.y, maxBounds.y));
+        }
+        
+        protected override void GetBlendSpaceBounds(out Vector2 min, out Vector2 max)
+        {
+            if (clips == null || clips.Length == 0)
+            {
+                min = Vector2.zero;
+                max = Vector2.one;
+                return;
+            }
+            
+            min = new Vector2(float.MaxValue, float.MaxValue);
+            max = new Vector2(float.MinValue, float.MinValue);
+            for (int i = 0; i < clips.Length; i++)
+            {
+                var pos = clips[i].Position;
+                min = Vector2.Min(min, pos);
+                max = Vector2.Max(max, pos);
+            }
         }
 
         #endregion

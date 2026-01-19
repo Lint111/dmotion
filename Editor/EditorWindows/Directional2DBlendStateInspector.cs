@@ -69,6 +69,12 @@ namespace DMotion.Editor
             if (blendSpaceEditor != null) return;
             
             blendSpaceEditor = new BlendSpace2DVisualEditor();
+            
+            // Configure for editing (not preview)
+            blendSpaceEditor.EditMode = true;
+            blendSpaceEditor.ShowModeToggle = false;
+            blendSpaceEditor.ShowPreviewIndicator = false;
+            
             blendSpaceEditor.OnClipPositionChanged += OnClipPositionChanged;
             blendSpaceEditor.OnSelectionChanged += OnSelectionChanged;
         }
@@ -201,6 +207,14 @@ namespace DMotion.Editor
             if (visualRect.width < 100) visualRect.width = 100;
             
             blendSpaceEditor.Draw(visualRect, blendState.BlendClips, serializedObject);
+            
+            // Help text below the editor
+            var helpStyle = new GUIStyle(EditorStyles.miniLabel)
+            {
+                normal = { textColor = new Color(0.6f, 0.6f, 0.6f) },
+                wordWrap = true
+            };
+            EditorGUILayout.LabelField(blendSpaceEditor.GetHelpText(), helpStyle);
             
             EditorGUILayout.Space(5);
             if (blendSpaceEditor.DrawSelectedClipFields(blendState.BlendClips, clipsProperty))

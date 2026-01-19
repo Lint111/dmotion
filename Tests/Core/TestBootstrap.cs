@@ -10,6 +10,9 @@ namespace DMotion.Tests
     /// <summary>
     /// Baking bootstrap for test environment. Ensures DMotion and Kinemation
     /// SmartBlobbers are registered during subscene baking.
+    /// 
+    /// Note: If DMotion samples are also imported, there will be a harmless warning
+    /// about multiple bootstraps. Both bootstraps are functionally identical.
     /// </summary>
     [UnityEngine.Scripting.Preserve]
     public class TestBakingBootstrap : ICustomBakingBootstrap

@@ -29,7 +29,7 @@ namespace DMotion.Editor
         // 1D-specific visual settings
         private const float TickSpacing = 0.25f;
         private const float TrackHeight = 60f;
-        private const float TrackPadding = 40f;
+        private const float TrackPadding = 8f; // Minimal padding - track line extends nearly to edges
         private const float DefaultRangePadding = 0.2f;
         
         private static readonly Color TrackColor = new Color(0.25f, 0.25f, 0.25f, 1f);
@@ -88,12 +88,14 @@ namespace DMotion.Editor
                 UpdateBaseRange(clips);
             }
             
-            // Calculate track rect (centered vertically)
+            // Calculate track rect (positioned in upper third to leave room below for handles/labels)
+            var topPadding = 25f; // Room for overlay UI
+            var bottomPadding = editMode ? 55f : 45f; // Room for handles and labels below
             trackRect = new Rect(
                 rect.x + TrackPadding,
-                rect.y + (rect.height - TrackHeight) / 2,
+                rect.y + topPadding,
                 rect.width - TrackPadding * 2,
-                TrackHeight);
+                rect.height - topPadding - bottomPadding);
             lineY = trackRect.y + trackRect.height / 2;
             
             // Use base class core draw loop
@@ -160,50 +162,210 @@ namespace DMotion.Editor
 
         protected override void DrawBackground(Rect rect)
         {
-            // Draw track line
+            // Draw track line - extends to full trackRect width
             EditorGUI.DrawRect(new Rect(trackRect.x, lineY - 2, trackRect.width, 4), TrackColor);
             
             // Draw ticks
             DrawTicks();
+        }
+        
+        protected override void DrawPreviewIndicator(Rect rect)
+        {
+            // Only show in preview mode
+            if (!showPreviewIndicator || editMode) return;
+            
+            var screenPos = BlendSpaceToScreen(previewPosition, rect);
+            
+            // Use same bounds as clips - stop when center reaches trackRect edge
+            if (screenPos.x < trackRect.x || screenPos.x > trackRect.xMax)
+            {
+                return;
+            }
+            
+            // Draw glow/highlight when dragging
+            if (isDraggingPreviewIndicator)
+            {
+                DrawCircle(screenPos, PreviewIndicatorRadius + 4, PreviewIndicatorColor * 0.5f);
+            }
+            
+            // Draw indicator circle
+            DrawCircle(screenPos, PreviewIndicatorRadius, PreviewIndicatorColor);
+            
+            // Draw white border
+            Handles.BeginGUI();
+            Handles.color = Color.white;
+            Handles.DrawWireDisc(new Vector3(screenPos.x, screenPos.y, 0), Vector3.forward, PreviewIndicatorRadius);
+            Handles.EndGUI();
         }
 
         protected override void DrawClips(Rect rect)
         {
             if (clips == null) return;
             
-            // Sort clips by threshold for proper z-ordering
+            // Sort clips by threshold for proper z-ordering and label staggering
             var sortedIndices = new int[clips.Length];
             for (var i = 0; i < clips.Length; i++) sortedIndices[i] = i;
             Array.Sort(sortedIndices, (a, b) => clips[a].Threshold.CompareTo(clips[b].Threshold));
             
-            foreach (var i in sortedIndices)
+            // Track last label position to avoid overlap
+            float lastLabelX = float.MinValue;
+            bool alternateBelow = true;
+            
+            for (int idx = 0; idx < sortedIndices.Length; idx++)
             {
+                var i = sortedIndices[idx];
                 var clip = clips[i];
                 var screenX = ThresholdToScreen(clip.Threshold);
                 
-                if (screenX < trackRect.x - ClipCircleRadius || screenX > trackRect.xMax + ClipCircleRadius)
+                // Stop when center reaches trackRect edge (same as preview indicator)
+                if (screenX < trackRect.x || screenX > trackRect.xMax)
                     continue;
                 
-                var circleCenter = new Vector2(screenX, lineY - 25);
+                var clipColor = GetClipColor(i);
+                var isSelected = i == selectedClipIndex;
                 
-                // Draw vertical line from track to circle
-                EditorGUI.DrawRect(new Rect(screenX - 1, lineY - 20, 2, 20), GetClipColor(i));
+                // Draw vertical line BELOW track (to keep within bounds)
+                var lineHeight = editMode ? 20 : 12;
+                EditorGUI.DrawRect(new Rect(screenX - 1, lineY - 2, 2, lineHeight + 4), clipColor);
                 
-                // Draw clip circle with label
-                DrawClipCircle(circleCenter, i, GetClipName(i), true, clip.Threshold.ToString("F2"));
+                if (editMode)
+                {
+                    // Edit mode: show draggable handle BELOW track line
+                    var circleCenter = new Vector2(screenX, lineY + lineHeight + ClipHandleRadius);
+                    
+                    // Selection ring
+                    if (isSelected)
+                    {
+                        DrawCircle(circleCenter, ClipHandleRadius + 3, SelectionColor);
+                    }
+                    
+                    // Handle circle
+                    DrawCircle(circleCenter, ClipHandleRadius, clipColor);
+                    
+                    // Label below handle - stagger if too close to previous
+                    var labelOffset = 0f;
+                    if (screenX - lastLabelX < 50)
+                    {
+                        labelOffset = alternateBelow ? 0 : 12;
+                        alternateBelow = !alternateBelow;
+                    }
+                    else
+                    {
+                        alternateBelow = true;
+                    }
+                    lastLabelX = screenX;
+                    
+                    var clipName = GetClipName(i);
+                    var labelSize = EditorStyles.miniLabel.CalcSize(new GUIContent(clipName));
+                    var labelY = circleCenter.y + ClipHandleRadius + 2 + labelOffset;
+                    var labelRect = new Rect(screenX - labelSize.x / 2, labelY, labelSize.x, labelSize.y);
+                    
+                    var style = new GUIStyle(EditorStyles.miniLabel);
+                    if (isSelected) style.normal.textColor = SelectionColor;
+                    DrawLabelWithBackground(labelRect, clipName, style);
+                }
+                else
+                {
+                    // Preview mode: small tick below track with staggered label
+                    EditorGUI.DrawRect(new Rect(screenX - 3, lineY + lineHeight, 6, 3), clipColor);
+                    
+                    // Stagger labels to avoid overlap
+                    var labelOffset = 0f;
+                    if (screenX - lastLabelX < 50)
+                    {
+                        labelOffset = alternateBelow ? 0 : 12;
+                        alternateBelow = !alternateBelow;
+                    }
+                    else
+                    {
+                        alternateBelow = true;
+                    }
+                    lastLabelX = screenX;
+                    
+                    var labelY = lineY + lineHeight + 5 + labelOffset;
+                    var clipName = GetClipName(i);
+                    var labelSize = EditorStyles.miniLabel.CalcSize(new GUIContent(clipName));
+                    var labelRect = new Rect(screenX - labelSize.x / 2, labelY, labelSize.x, labelSize.y);
+                    
+                    // Highlight selected clip
+                    var style = new GUIStyle(EditorStyles.miniLabel);
+                    if (isSelected)
+                    {
+                        style.normal.textColor = SelectionColor;
+                    }
+                    DrawLabelWithBackground(labelRect, clipName, style);
+                }
             }
         }
 
+        protected override Vector2 GetClipScreenPosition(int index, Rect rect)
+        {
+            if (clips == null || index < 0 || index >= clips.Length)
+                return Vector2.zero;
+            
+            var screenX = ThresholdToScreen(clips[index].Threshold);
+            var lineHeight = editMode ? 20 : 12;
+            
+            if (editMode)
+            {
+                // Handle position (below track)
+                return new Vector2(screenX, lineY + lineHeight + ClipHandleRadius);
+            }
+            else
+            {
+                // Tick position (below track)
+                return new Vector2(screenX, lineY + lineHeight);
+            }
+        }
+        
+        protected override Rect GetClipLabelRect(int index, Rect rect)
+        {
+            var screenPos = GetClipScreenPosition(index, rect);
+            var clipName = GetClipName(index);
+            var labelSize = EditorStyles.miniLabel.CalcSize(new GUIContent(clipName));
+            
+            if (editMode)
+            {
+                // Label below handle
+                var labelY = screenPos.y + ClipHandleRadius + 2;
+                return new Rect(screenPos.x - labelSize.x / 2 - 2, labelY, labelSize.x + 4, labelSize.y + 2);
+            }
+            else
+            {
+                // Label below tick
+                var labelY = screenPos.y + 5;
+                return new Rect(screenPos.x - labelSize.x / 2 - 2, labelY, labelSize.x + 4, labelSize.y + 12);
+            }
+        }
+        
         protected override int GetClipAtPosition(Rect rect, Vector2 mousePos)
         {
             if (clips == null) return -1;
             
             for (var i = clips.Length - 1; i >= 0; i--)
             {
-                var screenX = ThresholdToScreen(clips[i].Threshold);
-                var circleCenter = new Vector2(screenX, lineY - 25);
+                var screenPos = GetClipScreenPosition(i, rect);
+                var lineHeight = editMode ? 20 : 12;
                 
-                if (IsPointInCircle(mousePos, circleCenter, ClipCircleRadius))
+                if (editMode)
+                {
+                    // Check handle circle
+                    if (IsPointInCircle(mousePos, screenPos, ClipHandleRadius + 4))
+                        return i;
+                }
+                else
+                {
+                    // Check line area (wider hit zone)
+                    var screenX = screenPos.x;
+                    var lineTop = lineY - 2;
+                    var lineBottom = lineY + lineHeight + 5;
+                    if (mousePos.x >= screenX - ClipLineHitRadius && mousePos.x <= screenX + ClipLineHitRadius &&
+                        mousePos.y >= lineTop && mousePos.y <= lineBottom)
+                        return i;
+                }
+                
+                // Check label (both modes)
+                if (IsMouseOverClipLabel(i, rect, mousePos))
                     return i;
             }
             return -1;
@@ -218,9 +380,26 @@ namespace DMotion.Editor
             e.Use();
         }
 
+        protected override void HandleMouseDrag(Rect rect, Event e, SerializedObject serializedObject)
+        {
+            if (isDraggingPreviewIndicator && !editMode)
+            {
+                // Clamp mouse position to trackRect bounds (not full rect) for 1D
+                var clampedX = Mathf.Clamp(e.mousePosition.x, trackRect.x, trackRect.xMax);
+                PreviewPosition = ScreenToBlendSpace(new Vector2(clampedX, lineY), rect);
+                e.Use();
+            }
+            else
+            {
+                base.HandleMouseDrag(rect, e, serializedObject);
+            }
+        }
+        
         protected override void HandleClipDrag(Rect rect, Event e)
         {
-            var threshold = ScreenToThreshold(e.mousePosition.x);
+            // Clamp to trackRect for clip dragging too
+            var clampedX = Mathf.Clamp(e.mousePosition.x, trackRect.x, trackRect.xMax);
+            var threshold = ScreenToThreshold(clampedX);
             
             // Snap to ticks if shift is held
             if (e.shift)
@@ -243,6 +422,12 @@ namespace DMotion.Editor
             var delta = e.mousePosition.x - lastMousePos.x;
             var range = (baseMax - baseMin) / zoom;
             panOffset.x -= delta / trackRect.width * range;
+        }
+        
+        protected override void ApplyExternalPanDelta(Rect rect, Vector2 delta)
+        {
+            var range = (baseMax - baseMin) / zoom;
+            panOffset.x -= delta.x / trackRect.width * range;
         }
 
         #endregion
@@ -330,6 +515,54 @@ namespace DMotion.Editor
             var visibleMin = baseMin + panOffset.x;
             var normalized = (screenX - trackRect.x) / trackRect.width;
             return visibleMin + normalized * range;
+        }
+        
+        protected override Vector2 BlendSpaceToScreen(Vector2 blendPos, Rect rect)
+        {
+            // For 1D, only X is used, Y is centered on the track
+            return new Vector2(ThresholdToScreen(blendPos.x), lineY);
+        }
+        
+        protected override Vector2 ScreenToBlendSpace(Vector2 screenPos, Rect rect)
+        {
+            // For 1D, only X matters
+            return new Vector2(ScreenToThreshold(screenPos.x), 0);
+        }
+        
+        protected override Vector2 ClampPreviewPosition(Vector2 position)
+        {
+            if (clips == null || clips.Length == 0)
+                return position;
+            
+            // Clamp to clip threshold range
+            float minThreshold = float.MaxValue, maxThreshold = float.MinValue;
+            for (int i = 0; i < clips.Length; i++)
+            {
+                minThreshold = Mathf.Min(minThreshold, clips[i].Threshold);
+                maxThreshold = Mathf.Max(maxThreshold, clips[i].Threshold);
+            }
+            
+            return new Vector2(Mathf.Clamp(position.x, minThreshold, maxThreshold), 0);
+        }
+        
+        protected override void GetBlendSpaceBounds(out Vector2 min, out Vector2 max)
+        {
+            if (clips == null || clips.Length == 0)
+            {
+                min = Vector2.zero;
+                max = Vector2.one;
+                return;
+            }
+            
+            float minThreshold = float.MaxValue, maxThreshold = float.MinValue;
+            for (int i = 0; i < clips.Length; i++)
+            {
+                minThreshold = Mathf.Min(minThreshold, clips[i].Threshold);
+                maxThreshold = Mathf.Max(maxThreshold, clips[i].Threshold);
+            }
+            
+            min = new Vector2(minThreshold, 0);
+            max = new Vector2(maxThreshold, 0);
         }
 
         #endregion
