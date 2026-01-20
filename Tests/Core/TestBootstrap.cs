@@ -24,25 +24,11 @@ namespace DMotion.Tests
         }
     }
 
-    /// <summary>
-    /// Editor bootstrap for test environment.
-    /// </summary>
-    [UnityEngine.Scripting.Preserve]
-    public class TestEditorBootstrap : ICustomEditorBootstrap
-    {
-        public World Initialize(string editorWorldName)
-        {
-            var world = new LatiosWorld(editorWorldName);
-            World.DefaultGameObjectInjectionWorld = world;
-
-            var systems = DefaultWorldInitialization.GetAllSystemTypeIndices(WorldSystemFilterFlags.Default, true);
-            BootstrapTools.InjectUnitySystems(systems, world, world.simulationSystemGroup);
-
-            KinemationBootstrap.InstallKinemation(world);
-
-            return world;
-        }
-    }
+    // NOTE: ICustomEditorBootstrap intentionally omitted.
+    // Installing Kinemation into the default editor world causes GenerateBrgDrawCommandsSystem
+    // to run every frame with no rendering consumer, resulting in JobTempAlloc leak warnings.
+    // Tests that need ECS preview should create an isolated world on-demand.
+    // See Documentation/Features/EcsPreviewAndRigBinding.md Phase 0.
 
     /// <summary>
     /// Runtime bootstrap for test environment.

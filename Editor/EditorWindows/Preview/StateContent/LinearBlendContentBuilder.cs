@@ -33,7 +33,7 @@ namespace DMotion.Editor
         
         #region Abstract Implementations
         
-        protected override float BlendSpaceHeight => PreviewWindowConstants.BlendSpace1DHeight;
+        protected override float BlendSpaceHeight => BlendSpace1DDefaultHeight;
         
         protected override string SectionTitle => "Blend Space 1D";
         
@@ -115,10 +115,12 @@ namespace DMotion.Editor
             
             if (state?.BlendClips == null) return;
             
+            // Use raw clip length for duration - speed is applied via TimelineScrubber.PlaybackSpeed
             float maxDuration = 0f;
             for (int i = 0; i < state.BlendClips.Length; i++)
             {
-                var clip = state.BlendClips[i].Clip?.Clip;
+                var blendClip = state.BlendClips[i];
+                var clip = blendClip.Clip?.Clip;
                 if (clip != null && clip.length > maxDuration)
                 {
                     maxDuration = clip.length;

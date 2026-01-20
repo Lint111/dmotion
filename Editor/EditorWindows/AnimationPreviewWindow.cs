@@ -20,10 +20,12 @@ namespace DMotion.Editor
         private const float MinPreviewHeight = 200f;
         private const float DefaultSplitPosition = 300f;
         private const string SplitPositionPrefKey = "DMotion.AnimationPreview.SplitPosition";
+        private const string PreviewModelPrefKeyPrefix = "DMotion.AnimationPreview.PreviewModel.";
 
         #region Serialized State
 
         [SerializeField] private float splitPosition = DefaultSplitPosition;
+        [SerializeField] private PlayableGraphPreview.CameraState savedCameraState;
 
         #endregion
 
@@ -37,6 +39,7 @@ namespace DMotion.Editor
         private Label previewPlaceholder;
         private ToolbarMenu modeDropdown;
         private Label selectionLabel;
+        private ObjectField previewModelField;
 
         // Timeline (owned by StateInspectorBuilder, but we need reference for playback)
         private double lastUpdateTime;
@@ -51,6 +54,9 @@ namespace DMotion.Editor
         private AnimationStateAsset selectedTransitionTo;
         private bool isAnyStateSelected;
         private SelectionType currentSelectionType = SelectionType.None;
+        
+        // Base state speed (from Speed slider), used to combine with weighted clip speed
+        private float currentStateSpeed = 1f;
 
         private enum SelectionType
         {
@@ -109,9 +115,26 @@ namespace DMotion.Editor
             StateMachineEditorEvents.OnSelectionCleared += OnGraphSelectionCleared;
             StateMachineEditorEvents.OnStateMachineChanged += OnStateMachineChanged;
             
+            // Subscribe to blend position events
+            AnimationPreviewEvents.OnBlendPosition1DChanged += OnBlendPosition1DChanged;
+            AnimationPreviewEvents.OnBlendPosition2DChanged += OnBlendPosition2DChanged;
+            AnimationPreviewEvents.OnClipSelectedForPreview += OnClipSelectedForPreview;
+            
+            // Subscribe to transition events
+            AnimationPreviewEvents.OnTransitionProgressChanged += OnTransitionProgressChanged;
+            AnimationPreviewEvents.OnTransitionFromBlendPositionChanged += OnTransitionFromBlendPositionChanged;
+            AnimationPreviewEvents.OnTransitionToBlendPositionChanged += OnTransitionToBlendPositionChanged;
+            AnimationPreviewEvents.OnTransitionTimeChanged += OnTransitionTimeChanged;
+            
             // Create extracted components
             CreateBuilders();
             previewRenderer = new PreviewRenderer();
+            
+            // Restore saved camera state
+            if (savedCameraState.IsValid)
+            {
+                previewRenderer.CameraState = savedCameraState;
+            }
         }
 
         private void OnDisable()
@@ -126,12 +149,34 @@ namespace DMotion.Editor
             StateMachineEditorEvents.OnAnyStateTransitionSelected -= OnGraphAnyStateTransitionSelected;
             StateMachineEditorEvents.OnSelectionCleared -= OnGraphSelectionCleared;
             StateMachineEditorEvents.OnStateMachineChanged -= OnStateMachineChanged;
+            
+            // Unsubscribe from blend position events
+            AnimationPreviewEvents.OnBlendPosition1DChanged -= OnBlendPosition1DChanged;
+            AnimationPreviewEvents.OnBlendPosition2DChanged -= OnBlendPosition2DChanged;
+            AnimationPreviewEvents.OnClipSelectedForPreview -= OnClipSelectedForPreview;
+            
+            // Unsubscribe from transition events
+            AnimationPreviewEvents.OnTransitionProgressChanged -= OnTransitionProgressChanged;
+            AnimationPreviewEvents.OnTransitionFromBlendPositionChanged -= OnTransitionFromBlendPositionChanged;
+            AnimationPreviewEvents.OnTransitionToBlendPositionChanged -= OnTransitionToBlendPositionChanged;
+            AnimationPreviewEvents.OnTransitionTimeChanged -= OnTransitionTimeChanged;
 
             // Clear preview event subscriptions (safety net for external subscribers)
             AnimationPreviewEvents.ClearAllSubscriptions();
 
+            // Save camera state before disposing
+            if (previewRenderer != null)
+            {
+                var camState = previewRenderer.CameraState;
+                if (camState.IsValid)
+                {
+                    savedCameraState = camState;
+                }
+            }
+
             // Dispose resources
             stateInspectorBuilder?.Cleanup();
+            transitionInspectorBuilder?.Cleanup();
             previewRenderer?.Dispose();
         }
 
@@ -148,6 +193,10 @@ namespace DMotion.Editor
             }
 
             BuildUI(root);
+            
+            // Load saved preview model for current state machine (if any)
+            LoadPreviewModelPreference();
+            
             UpdateSelectionUI();
             
             lastUpdateTime = EditorApplication.timeSinceStartup;
@@ -160,11 +209,39 @@ namespace DMotion.Editor
             var deltaTime = (float)(currentTime - lastUpdateTime);
             lastUpdateTime = currentTime;
 
-            // Update timeline playback
-            var timelineScrubber = stateInspectorBuilder?.TimelineScrubber;
-            if (timelineScrubber != null && timelineScrubber.IsPlaying)
+            bool needsRepaint = false;
+
+            // Update smooth blend transitions (do this first so weights are updated)
+            if (previewRenderer != null && previewRenderer.Tick(deltaTime))
             {
-                timelineScrubber.Tick(deltaTime);
+                needsRepaint = true;
+            }
+            
+            // Update combined playback speed: stateSpeed × weightedClipSpeed
+            var stateTimeline = stateInspectorBuilder?.TimelineScrubber;
+            if (stateTimeline != null && previewRenderer != null)
+            {
+                float weightedClipSpeed = previewRenderer.WeightedSpeed;
+                float combinedSpeed = currentStateSpeed * weightedClipSpeed;
+                stateTimeline.PlaybackSpeed = combinedSpeed;
+            }
+
+            // Update state timeline playback
+            if (stateTimeline != null && stateTimeline.IsPlaying)
+            {
+                stateTimeline.Tick(deltaTime);
+                needsRepaint = true;
+            }
+            
+            // Update transition timeline playback
+            if (transitionInspectorBuilder != null && transitionInspectorBuilder.IsPlaying)
+            {
+                transitionInspectorBuilder.Tick(deltaTime);
+                needsRepaint = true;
+            }
+            
+            if (needsRepaint)
+            {
                 Repaint();
             }
         }
@@ -175,21 +252,21 @@ namespace DMotion.Editor
 
         private void CreateBuilders()
         {
-            stateInspectorBuilder = new StateInspectorBuilder(
-                CreateSectionHeader,
-                CreateSection,
-                CreatePropertyRow,
-                CreateEditableFloatProperty,
-                CreateEditableBoolPropertyWithCallback);
-            
+            stateInspectorBuilder = new StateInspectorBuilder();
             stateInspectorBuilder.OnTimeChanged += OnTimelineTimeChanged;
             stateInspectorBuilder.OnRepaintRequested += Repaint;
+            stateInspectorBuilder.OnStateSpeedChanged += OnStateSpeedChanged;
             
-            transitionInspectorBuilder = new TransitionInspectorBuilder(
-                CreateSectionHeader,
-                CreateSection,
-                CreatePropertyRow,
-                CreateEditableSerializedFloatProperty);
+            transitionInspectorBuilder = new TransitionInspectorBuilder();
+            transitionInspectorBuilder.OnTimeChanged += OnTransitionTimelineTimeChanged;
+            transitionInspectorBuilder.OnRepaintRequested += Repaint;
+        }
+        
+        private void OnTransitionTimelineTimeChanged(float time)
+        {
+            // The TransitionInspectorBuilder already raises the centralized event
+            // This handler is for any local processing needed
+            Repaint();
         }
 
         #endregion
@@ -259,6 +336,38 @@ namespace DMotion.Editor
             var resetViewButton = new Button(OnResetViewClicked) { text = "Reset View", tooltip = "Reset camera to default position" };
             resetViewButton.AddToClassList("preview-control-button");
             previewToolbar.Add(resetViewButton);
+            
+            // Preview model selection (bottom of preview panel)
+            var modelSelectionBar = new VisualElement();
+            modelSelectionBar.AddToClassList("preview-model-bar");
+            modelSelectionBar.style.flexDirection = FlexDirection.Row;
+            modelSelectionBar.style.position = Position.Absolute;
+            modelSelectionBar.style.bottom = 4;
+            modelSelectionBar.style.left = 4;
+            modelSelectionBar.style.right = 4;
+            modelSelectionBar.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f, 0.8f);
+            modelSelectionBar.style.paddingLeft = 4;
+            modelSelectionBar.style.paddingRight = 4;
+            modelSelectionBar.style.paddingTop = 2;
+            modelSelectionBar.style.paddingBottom = 2;
+            modelSelectionBar.style.borderTopLeftRadius = 3;
+            modelSelectionBar.style.borderTopRightRadius = 3;
+            modelSelectionBar.style.borderBottomLeftRadius = 3;
+            modelSelectionBar.style.borderBottomRightRadius = 3;
+            
+            var modelLabel = new Label("Preview Model:");
+            modelLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
+            modelLabel.style.marginRight = 4;
+            modelLabel.style.color = new Color(0.8f, 0.8f, 0.8f);
+            modelSelectionBar.Add(modelLabel);
+            
+            previewModelField = new ObjectField();
+            previewModelField.objectType = typeof(GameObject);
+            previewModelField.allowSceneObjects = false;
+            previewModelField.style.flexGrow = 1;
+            previewModelField.tooltip = "Drag a model prefab with Animator and SkinnedMeshRenderer";
+            previewModelField.RegisterValueChangedCallback(OnPreviewModelChanged);
+            modelSelectionBar.Add(previewModelField);
 
             // Preview placeholder (shown when no preview available)
             previewPlaceholder = new Label("No Preview Available\n\nSelect a state or transition\nin the State Machine Editor");
@@ -272,6 +381,7 @@ namespace DMotion.Editor
             previewPanel.Add(previewPlaceholder);
             previewPanel.Add(previewContainer);
             previewPanel.Add(previewToolbar);
+            previewPanel.Add(modelSelectionBar);
 
             // Add panels to split view
             splitView.Add(inspectorPanel);
@@ -323,6 +433,10 @@ namespace DMotion.Editor
             selectedTransitionTo = null;
             isAnyStateSelected = false;
             currentSelectionType = state != null ? SelectionType.State : SelectionType.None;
+            
+            // Initialize state speed from the selected state
+            currentStateSpeed = state != null && state.Speed > 0 ? state.Speed : 1f;
+            
             UpdateSelectionUI();
         }
 
@@ -380,6 +494,73 @@ namespace DMotion.Editor
             if (machine != null && machine != currentStateMachine)
             {
                 currentStateMachine = machine;
+                
+                // Load saved preview model for this state machine
+                LoadPreviewModelPreference();
+            }
+        }
+        
+        private void SavePreviewModelPreference(GameObject model)
+        {
+            if (currentStateMachine == null) return;
+            
+            var assetPath = AssetDatabase.GetAssetPath(currentStateMachine);
+            if (string.IsNullOrEmpty(assetPath)) return;
+            
+            var guid = AssetDatabase.AssetPathToGUID(assetPath);
+            var prefKey = PreviewModelPrefKeyPrefix + guid;
+            
+            if (model != null)
+            {
+                var modelPath = AssetDatabase.GetAssetPath(model);
+                EditorPrefs.SetString(prefKey, modelPath);
+            }
+            else
+            {
+                EditorPrefs.DeleteKey(prefKey);
+            }
+        }
+        
+        private void LoadPreviewModelPreference()
+        {
+            if (currentStateMachine == null)
+            {
+                UpdatePreviewModelField(null);
+                return;
+            }
+            
+            var assetPath = AssetDatabase.GetAssetPath(currentStateMachine);
+            if (string.IsNullOrEmpty(assetPath))
+            {
+                UpdatePreviewModelField(null);
+                return;
+            }
+            
+            var guid = AssetDatabase.AssetPathToGUID(assetPath);
+            var prefKey = PreviewModelPrefKeyPrefix + guid;
+            
+            var modelPath = EditorPrefs.GetString(prefKey, null);
+            if (!string.IsNullOrEmpty(modelPath))
+            {
+                var model = AssetDatabase.LoadAssetAtPath<GameObject>(modelPath);
+                UpdatePreviewModelField(model);
+            }
+            else
+            {
+                UpdatePreviewModelField(null);
+            }
+        }
+        
+        private void UpdatePreviewModelField(GameObject model)
+        {
+            if (previewModelField != null)
+            {
+                previewModelField.SetValueWithoutNotify(model);
+            }
+            
+            if (previewRenderer != null)
+            {
+                previewRenderer.PreviewModel = model;
             }
         }
 
@@ -401,17 +582,20 @@ namespace DMotion.Editor
             UpdateSelectionLabel();
             UpdateInspectorContent();
             
-            // Create 3D preview for the selected state
+            // Create 3D preview for the selected state or transition
             if (currentSelectionType == SelectionType.State && selectedState != null)
             {
                 previewRenderer.CreatePreviewForState(selectedState);
+            }
+            else if (currentSelectionType == SelectionType.Transition || currentSelectionType == SelectionType.AnyStateTransition)
+            {
+                // Create transition preview
+                CreateTransitionPreviewForSelection();
             }
             else
             {
                 var message = currentSelectionType switch
                 {
-                    SelectionType.Transition or SelectionType.AnyStateTransition => 
-                        PreviewWindowConstants.TransitionPreviewNotAvailable,
                     SelectionType.AnyState => 
                         "Select a state to\npreview animation",
                     _ => null
@@ -444,8 +628,9 @@ namespace DMotion.Editor
         {
             if (inspectorContent == null) return;
             
-            // Cleanup previous state inspector
+            // Cleanup previous builders
             stateInspectorBuilder?.Cleanup();
+            transitionInspectorBuilder?.Cleanup();
             
             inspectorContent.Clear();
 
@@ -512,6 +697,47 @@ namespace DMotion.Editor
             }
         }
 
+        private void CreateTransitionPreviewForSelection()
+        {
+            if (selectedTransitionTo == null)
+            {
+                previewRenderer.SetMessage("No target state\nfor transition");
+                return;
+            }
+            
+            // Find the transition to get its duration
+            float transitionDuration = 0.25f; // Default
+            
+            if (isAnyStateSelected && currentStateMachine != null)
+            {
+                // Find in AnyStateTransitions
+                foreach (var t in currentStateMachine.AnyStateTransitions)
+                {
+                    if (t.ToState == selectedTransitionTo)
+                    {
+                        transitionDuration = t.TransitionDuration;
+                        break;
+                    }
+                }
+            }
+            else if (selectedTransitionFrom != null)
+            {
+                // Find in OutTransitions
+                foreach (var t in selectedTransitionFrom.OutTransitions)
+                {
+                    if (t.ToState == selectedTransitionTo)
+                    {
+                        transitionDuration = t.TransitionDuration;
+                        break;
+                    }
+                }
+            }
+            
+            // For Any State transitions, fromState is null
+            var fromState = isAnyStateSelected ? null : selectedTransitionFrom;
+            previewRenderer.CreateTransitionPreview(fromState, selectedTransitionTo, transitionDuration);
+        }
+        
         private void UpdatePreviewVisibility()
         {
             if (previewPlaceholder == null || previewContainer == null) return;
@@ -540,7 +766,108 @@ namespace DMotion.Editor
             
             Repaint();
         }
+        
+        private void OnStateSpeedChanged(float newSpeed)
+        {
+            // Store the base state speed - will be combined with weighted clip speed in Update
+            currentStateSpeed = newSpeed > 0 ? newSpeed : 1f;
+        }
 
+        #endregion
+        
+        #region Blend Position Events
+        
+        private void OnBlendPosition1DChanged(LinearBlendStateAsset state, float blendValue)
+        {
+            // Only update if this is the currently selected state
+            if (selectedState != state) return;
+            
+            previewRenderer?.SetBlendPosition1D(blendValue);
+            Repaint();
+        }
+        
+        private void OnBlendPosition2DChanged(Directional2DBlendStateAsset state, Vector2 blendPosition)
+        {
+            // Only update if this is the currently selected state
+            if (selectedState != state) return;
+            
+            previewRenderer?.SetBlendPosition2D(blendPosition);
+            Repaint();
+        }
+        
+        private void OnClipSelectedForPreview(AnimationStateAsset state, int clipIndex)
+        {
+            // Only update if this is the currently selected state
+            if (selectedState != state) return;
+            
+            // Set solo clip mode: -1 = blended, >= 0 = individual clip
+            previewRenderer?.SetSoloClip(clipIndex);
+            Repaint();
+        }
+        
+        #endregion
+        
+        #region Transition Events
+        
+        private void OnTransitionProgressChanged(AnimationStateAsset fromState, AnimationStateAsset toState, float progress)
+        {
+            // Only update if this matches the currently selected transition
+            if (currentSelectionType != SelectionType.Transition && currentSelectionType != SelectionType.AnyStateTransition)
+                return;
+            
+            // For Any State transitions, fromState will be null
+            bool matchesFrom = (isAnyStateSelected && fromState == null) || (fromState == selectedTransitionFrom);
+            bool matchesTo = toState == selectedTransitionTo;
+            
+            if (!matchesFrom || !matchesTo) return;
+            
+            previewRenderer?.SetTransitionProgress(progress);
+            Repaint();
+        }
+        
+        private void OnTransitionFromBlendPositionChanged(AnimationStateAsset fromState, Vector2 blendPosition)
+        {
+            // Only update if we're in a transition and this is the from state
+            if (currentSelectionType != SelectionType.Transition && currentSelectionType != SelectionType.AnyStateTransition)
+                return;
+            
+            // Check if this matches the from state of the current transition
+            var currentFromState = isAnyStateSelected ? null : selectedTransitionFrom;
+            if (fromState != currentFromState) return;
+            
+            previewRenderer?.SetTransitionFromBlendPosition(blendPosition);
+            Repaint();
+        }
+        
+        private void OnTransitionToBlendPositionChanged(AnimationStateAsset toState, Vector2 blendPosition)
+        {
+            // Only update if we're in a transition and this is the to state
+            if (currentSelectionType != SelectionType.Transition && currentSelectionType != SelectionType.AnyStateTransition)
+                return;
+            
+            // Check if this matches the to state of the current transition
+            if (toState != selectedTransitionTo) return;
+            
+            previewRenderer?.SetTransitionToBlendPosition(blendPosition);
+            Repaint();
+        }
+        
+        private void OnTransitionTimeChanged(AnimationStateAsset fromState, AnimationStateAsset toState, float normalizedTime)
+        {
+            // Only update if this matches the currently selected transition
+            if (currentSelectionType != SelectionType.Transition && currentSelectionType != SelectionType.AnyStateTransition)
+                return;
+            
+            // For Any State transitions, fromState will be null
+            bool matchesFrom = (isAnyStateSelected && fromState == null) || (fromState == selectedTransitionFrom);
+            bool matchesTo = toState == selectedTransitionTo;
+            
+            if (!matchesFrom || !matchesTo) return;
+            
+            previewRenderer?.SetTransitionNormalizedTime(normalizedTime);
+            Repaint();
+        }
+        
         #endregion
 
         #region Preview Rendering
@@ -551,11 +878,18 @@ namespace DMotion.Editor
             
             var rect = previewContainer.contentRect;
             
-            // Sync time from timeline scrubber
-            var timelineScrubber = stateInspectorBuilder?.TimelineScrubber;
-            if (timelineScrubber != null)
+            // Sync time from state timeline scrubber
+            var stateTimeline = stateInspectorBuilder?.TimelineScrubber;
+            if (stateTimeline != null && currentSelectionType == SelectionType.State)
             {
-                previewRenderer.SetNormalizedTime(timelineScrubber.NormalizedTime);
+                previewRenderer.SetNormalizedTime(stateTimeline.NormalizedTime);
+            }
+            
+            // Sync time from transition timeline
+            var transitionTimeline = transitionInspectorBuilder?.Timeline;
+            if (transitionTimeline != null && previewRenderer.IsTransitionPreview)
+            {
+                previewRenderer.SetTransitionNormalizedTime(transitionTimeline.NormalizedTime);
             }
             
             // Draw the preview
@@ -573,206 +907,40 @@ namespace DMotion.Editor
             previewRenderer?.ResetCameraView();
             Repaint();
         }
+        
+        private void OnPreviewModelChanged(ChangeEvent<UnityEngine.Object> evt)
+        {
+            var newModel = evt.newValue as GameObject;
+            
+            // Validate the model has required components
+            if (newModel != null)
+            {
+                var animator = newModel.GetComponentInChildren<Animator>();
+                var skinnedMesh = newModel.GetComponentInChildren<SkinnedMeshRenderer>();
+                
+                if (animator == null || skinnedMesh == null)
+                {
+                    Debug.LogWarning("[AnimationPreview] Preview model must have an Animator and SkinnedMeshRenderer.");
+                    previewModelField.SetValueWithoutNotify(evt.previousValue);
+                    return;
+                }
+            }
+            
+            // Update the renderer
+            if (previewRenderer != null)
+            {
+                previewRenderer.PreviewModel = newModel;
+            }
+            
+            // Save to EditorPrefs for this state machine
+            SavePreviewModelPreference(newModel);
+            
+            // Recreate the preview with the new model
+            UpdateSelectionUI();
+        }
 
         #endregion
 
-        #region UI Helpers
 
-        private VisualElement CreateSectionHeader(string type, string name)
-        {
-            var header = new VisualElement();
-            header.AddToClassList("section-header");
-
-            var typeLabel = new Label(type);
-            typeLabel.AddToClassList("header-type");
-
-            var nameLabel = new Label(name);
-            nameLabel.AddToClassList("header-name");
-
-            header.Add(typeLabel);
-            header.Add(nameLabel);
-
-            return header;
-        }
-
-        private VisualElement CreateSection(string title)
-        {
-            var section = new VisualElement();
-            section.AddToClassList("inspector-section");
-
-            var foldout = new Foldout { text = title, value = true };
-            foldout.AddToClassList("section-foldout");
-
-            section.Add(foldout);
-            return foldout;
-        }
-
-        private VisualElement CreatePropertyRow(string label, string value)
-        {
-            var row = new VisualElement();
-            row.AddToClassList("property-row");
-
-            var labelElement = new Label(label);
-            labelElement.AddToClassList("property-label");
-
-            var valueElement = new Label(value);
-            valueElement.AddToClassList("property-value");
-
-            row.Add(labelElement);
-            row.Add(valueElement);
-
-            return row;
-        }
-
-        /// <summary>
-        /// Creates an editable float property with slider and numeric field.
-        /// </summary>
-        private VisualElement CreateEditableFloatProperty(
-            SerializedObject serializedObject, 
-            string propertyName, 
-            string label, 
-            float min, 
-            float max,
-            string suffix = "")
-        {
-            var property = serializedObject.FindProperty(propertyName);
-            if (property == null)
-            {
-                return CreatePropertyRow(label, "Property not found");
-            }
-
-            var container = new VisualElement();
-            container.AddToClassList("property-row");
-            container.AddToClassList("editable-property");
-
-            var labelElement = new Label(label);
-            labelElement.AddToClassList("property-label");
-            container.Add(labelElement);
-
-            var valueContainer = new VisualElement();
-            valueContainer.AddToClassList("property-value-container");
-            valueContainer.style.flexDirection = FlexDirection.Row;
-            valueContainer.style.flexGrow = 1;
-
-            // Slider
-            var slider = new Slider(min, max);
-            slider.AddToClassList("property-slider");
-            slider.style.flexGrow = 1;
-            slider.bindingPath = propertyName;
-            
-            // Float field
-            var floatField = new FloatField();
-            floatField.AddToClassList("property-float-field");
-            floatField.style.width = 50;
-            floatField.style.marginLeft = 4;
-            floatField.bindingPath = propertyName;
-
-            // Suffix label
-            if (!string.IsNullOrEmpty(suffix))
-            {
-                var suffixLabel = new Label(suffix);
-                suffixLabel.AddToClassList("property-suffix");
-                suffixLabel.style.marginLeft = 2;
-                suffixLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
-                valueContainer.Add(slider);
-                valueContainer.Add(floatField);
-                valueContainer.Add(suffixLabel);
-            }
-            else
-            {
-                valueContainer.Add(slider);
-                valueContainer.Add(floatField);
-            }
-
-            container.Add(valueContainer);
-            return container;
-        }
-
-        /// <summary>
-        /// Creates an editable bool property with toggle and optional change callback.
-        /// </summary>
-        private VisualElement CreateEditableBoolPropertyWithCallback(
-            SerializedObject serializedObject,
-            string propertyName,
-            string label,
-            Action<bool> onValueChanged)
-        {
-            var property = serializedObject.FindProperty(propertyName);
-            if (property == null)
-            {
-                return CreatePropertyRow(label, "Property not found");
-            }
-
-            var container = new VisualElement();
-            container.AddToClassList("property-row");
-            container.AddToClassList("editable-property");
-
-            var labelElement = new Label(label);
-            labelElement.AddToClassList("property-label");
-            container.Add(labelElement);
-
-            var toggle = new Toggle();
-            toggle.AddToClassList("property-toggle");
-            toggle.bindingPath = propertyName;
-            
-            if (onValueChanged != null)
-            {
-                toggle.RegisterValueChangedCallback(evt => onValueChanged(evt.newValue));
-            }
-
-            container.Add(toggle);
-            return container;
-        }
-
-        /// <summary>
-        /// Creates an editable float property from a SerializedProperty.
-        /// </summary>
-        private VisualElement CreateEditableSerializedFloatProperty(
-            SerializedProperty property,
-            string label,
-            float min,
-            float max,
-            string suffix = "")
-        {
-            var container = new VisualElement();
-            container.AddToClassList("property-row");
-            container.AddToClassList("editable-property");
-
-            var labelElement = new Label(label);
-            labelElement.AddToClassList("property-label");
-            container.Add(labelElement);
-
-            var valueContainer = new VisualElement();
-            valueContainer.AddToClassList("property-value-container");
-            valueContainer.style.flexDirection = FlexDirection.Row;
-            valueContainer.style.flexGrow = 1;
-
-            var slider = new Slider(min, max);
-            slider.AddToClassList("property-slider");
-            slider.style.flexGrow = 1;
-            slider.BindProperty(property);
-
-            var floatField = new FloatField();
-            floatField.AddToClassList("property-float-field");
-            floatField.style.width = 50;
-            floatField.style.marginLeft = 4;
-            floatField.BindProperty(property);
-
-            valueContainer.Add(slider);
-            valueContainer.Add(floatField);
-
-            if (!string.IsNullOrEmpty(suffix))
-            {
-                var suffixLabel = new Label(suffix);
-                suffixLabel.AddToClassList("property-suffix");
-                suffixLabel.style.marginLeft = 2;
-                valueContainer.Add(suffixLabel);
-            }
-
-            container.Add(valueContainer);
-            return container;
-        }
-
-        #endregion
     }
 }

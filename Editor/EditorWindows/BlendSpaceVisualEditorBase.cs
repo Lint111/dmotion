@@ -548,6 +548,9 @@ namespace DMotion.Editor
         #endregion
 
         #region Input Handling
+        
+        // Control ID for hotControl management
+        private int blendSpaceControlId;
 
         /// <summary>
         /// Main input handler that delegates to specific handlers.
@@ -556,6 +559,9 @@ namespace DMotion.Editor
         {
             var e = Event.current;
             var mousePos = e.mousePosition;
+            
+            // Get a consistent control ID for this editor
+            blendSpaceControlId = GUIUtility.GetControlID(FocusType.Passive);
             
             // Allow drag events to continue even if mouse moves outside rect
             var isActiveDrag = isPanning || isDraggingClip || isDraggingPreviewIndicator;
@@ -593,6 +599,7 @@ namespace DMotion.Editor
             if (e.button == 2 || (e.button == 0 && e.alt))
             {
                 isPanning = true;
+                GUIUtility.hotControl = blendSpaceControlId; // Claim exclusive input
                 e.Use();
                 return;
             }
@@ -611,6 +618,7 @@ namespace DMotion.Editor
                 if (showPreviewIndicator && IsMouseOverPreviewIndicator(rect, e.mousePosition))
                 {
                     isDraggingPreviewIndicator = true;
+                    GUIUtility.hotControl = blendSpaceControlId; // Claim exclusive input
                     // Clicking the preview indicator switches to blended preview mode
                     SetPreviewClip(-1);
                     e.Use();
@@ -631,6 +639,7 @@ namespace DMotion.Editor
                     {
                         // In edit mode, allow dragging clips
                         isDraggingClip = true;
+                        GUIUtility.hotControl = blendSpaceControlId; // Claim exclusive input
                     }
                     
                     // Always request repaint after click detection
@@ -642,6 +651,7 @@ namespace DMotion.Editor
                     // Click empty space to move preview indicator and return to blended preview
                     PreviewPosition = ScreenToBlendSpace(e.mousePosition, rect);
                     isDraggingPreviewIndicator = true;
+                    GUIUtility.hotControl = blendSpaceControlId; // Claim exclusive input
                     SetPreviewClip(-1);
                     e.Use();
                 }
@@ -683,6 +693,12 @@ namespace DMotion.Editor
             isDraggingClip = false;
             isDraggingPreviewIndicator = false;
             isPanning = false;
+            
+            // Release hotControl if we had it
+            if (GUIUtility.hotControl == blendSpaceControlId)
+            {
+                GUIUtility.hotControl = 0;
+            }
         }
 
         #endregion

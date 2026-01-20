@@ -14,6 +14,31 @@ namespace DMotion.Editor
         where TState : AnimationStateAsset
         where TEditor : BlendSpaceVisualEditorBase
     {
+        #region Constants
+        
+        /// <summary>Height of the 1D blend space visualizer.</summary>
+        protected const float BlendSpace1DDefaultHeight = 120f;
+        
+        /// <summary>Height of the 2D blend space visualizer.</summary>
+        protected const float BlendSpace2DDefaultHeight = 180f;
+        
+        /// <summary>Width of float input fields.</summary>
+        protected const float FloatFieldWidth = 50f;
+        
+        /// <summary>Small spacing between elements (2px).</summary>
+        protected const float SpacingSmall = 2f;
+        
+        /// <summary>Medium spacing between elements (4px).</summary>
+        protected const float SpacingMedium = 4f;
+        
+        /// <summary>Large spacing between elements (8px).</summary>
+        protected const float SpacingLarge = 8f;
+        
+        /// <summary>Text color for help/hint text.</summary>
+        protected static readonly Color HelpTextColor = new(0.6f, 0.6f, 0.6f);
+        
+        #endregion
+        
         #region State
         
         protected TState state;
@@ -208,7 +233,7 @@ namespace DMotion.Editor
                 }
             });
             container.style.height = height;
-            container.style.marginTop = PreviewWindowConstants.SpacingLarge;
+            container.style.marginTop = SpacingLarge;
             container.focusable = true;
             container.pickingMode = PickingMode.Position;
             
@@ -257,13 +282,13 @@ namespace DMotion.Editor
                 {
                     var helpStyle = new GUIStyle(EditorStyles.miniLabel)
                     {
-                        normal = { textColor = PreviewWindowConstants.HelpTextColor },
+                        normal = { textColor = HelpTextColor },
                         wordWrap = true
                     };
                     GUILayout.Label(blendSpaceEditor.GetHelpText(), helpStyle);
                 }
             });
-            container.style.marginTop = PreviewWindowConstants.SpacingSmall;
+            container.style.marginTop = SpacingSmall;
             return container;
         }
         
@@ -277,7 +302,7 @@ namespace DMotion.Editor
                     DrawSelectedClipFields(clipsProperty);
                 }
             });
-            container.style.marginTop = PreviewWindowConstants.SpacingMedium;
+            container.style.marginTop = SpacingMedium;
             container.style.display = DisplayStyle.None;
             return container;
         }
@@ -327,8 +352,8 @@ namespace DMotion.Editor
             
             var field = new FloatField();
             field.AddToClassList("property-float-field");
-            field.style.width = PreviewWindowConstants.FloatFieldWidth;
-            field.style.marginLeft = PreviewWindowConstants.SpacingMedium;
+            field.style.width = FloatFieldWidth;
+            field.style.marginLeft = SpacingMedium;
             field.value = value;
             
             valueContainer.Add(slider);

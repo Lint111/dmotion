@@ -66,6 +66,95 @@ namespace DMotion.Authoring
                  "Draw transitions TO the Exit node in the graph editor to define these.")]
         public List<AnimationStateAsset> ExitStates = new();
 
+        #region Rig Binding
+
+        [Header("Rig Binding")]
+        [Tooltip("The armature data (typically a Unity Avatar) that this state machine is bound to. " +
+                 "Used for deterministic rig selection in preview and conversion workflows.")]
+        [SerializeField]
+        private UnityEngine.Object _boundArmatureData;
+
+        [SerializeField, HideInInspector]
+        private RigBindingStatus _rigBindingStatus = RigBindingStatus.Unresolved;
+
+        [SerializeField, HideInInspector]
+        private RigBindingSource _rigBindingSource = RigBindingSource.None;
+
+        [SerializeField, HideInInspector]
+        private string _rigBindingFingerprint;
+
+        /// <summary>
+        /// The armature data bound to this state machine.
+        /// Typically a Unity Avatar, but can be other armature types via adapters.
+        /// </summary>
+        public UnityEngine.Object BoundArmatureData
+        {
+            get => _boundArmatureData;
+            set => _boundArmatureData = value;
+        }
+
+        /// <summary>
+        /// The current status of rig binding resolution.
+        /// </summary>
+        public RigBindingStatus RigBindingStatus
+        {
+            get => _rigBindingStatus;
+            set => _rigBindingStatus = value;
+        }
+
+        /// <summary>
+        /// How the rig binding was determined (for diagnostics and Mechination integration).
+        /// </summary>
+        public RigBindingSource RigBindingSource
+        {
+            get => _rigBindingSource;
+            set => _rigBindingSource = value;
+        }
+
+        /// <summary>
+        /// Hash fingerprint for change detection during Mechination conversion.
+        /// Used to detect when re-prompting is needed after source changes.
+        /// </summary>
+        public string RigBindingFingerprint
+        {
+            get => _rigBindingFingerprint;
+            set => _rigBindingFingerprint = value;
+        }
+
+        /// <summary>
+        /// Returns true if a rig is bound and resolved.
+        /// </summary>
+        public bool HasResolvedRig => _rigBindingStatus == RigBindingStatus.Resolved && _boundArmatureData != null;
+
+        /// <summary>
+        /// Binds an armature to this state machine with full metadata.
+        /// </summary>
+        /// <param name="armatureData">The armature data (typically Avatar)</param>
+        /// <param name="source">How the binding was determined</param>
+        /// <param name="fingerprint">Optional fingerprint for change detection</param>
+        public void BindRig(UnityEngine.Object armatureData, RigBindingSource source, string fingerprint = null)
+        {
+            _boundArmatureData = armatureData;
+            _rigBindingStatus = armatureData != null ? RigBindingStatus.Resolved : RigBindingStatus.Unresolved;
+            _rigBindingSource = source;
+            _rigBindingFingerprint = fingerprint;
+        }
+
+        /// <summary>
+        /// Clears the rig binding, optionally marking as opted-out.
+        /// </summary>
+        /// <param name="optOut">If true, marks as UserOptedOut to prevent re-prompting</param>
+        /// <param name="fingerprint">Fingerprint to remember what was opted out of</param>
+        public void ClearRigBinding(bool optOut = false, string fingerprint = null)
+        {
+            _boundArmatureData = null;
+            _rigBindingStatus = optOut ? RigBindingStatus.UserOptedOut : RigBindingStatus.Unresolved;
+            _rigBindingSource = RigBindingSource.None;
+            _rigBindingFingerprint = optOut ? fingerprint : null;
+        }
+
+        #endregion
+
         #region Parameter Dependency Tracking
 
         /// <summary>

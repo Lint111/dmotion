@@ -6,7 +6,7 @@ namespace DMotion.Editor
 {
     [CustomEditor(typeof(AnimationClipAsset))]
     internal class AnimationClipAssetEditor : UnityEditor.Editor
-    {
+    { 
         /// <summary>
         /// Right padding for the events drawer to prevent UI overlap with inspector edge.
         /// </summary>

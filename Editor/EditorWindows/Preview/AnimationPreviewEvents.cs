@@ -83,6 +83,40 @@ namespace DMotion.Editor
 
         #endregion
 
+        #region Transition Events
+
+        /// <summary>
+        /// Fired when the transition preview progress changes.
+        /// Args: (fromState, toState, progress) - progress is 0-1 where 0 = fully "from" state, 1 = fully "to" state
+        /// </summary>
+        public static event Action<AnimationStateAsset, AnimationStateAsset, float> OnTransitionProgressChanged;
+
+        /// <summary>
+        /// Fired when the transition preview animation time changes.
+        /// Args: (fromState, toState, normalizedTime)
+        /// </summary>
+        public static event Action<AnimationStateAsset, AnimationStateAsset, float> OnTransitionTimeChanged;
+
+        /// <summary>
+        /// Fired when the blend position of the "from" state changes during transition preview.
+        /// Args: (fromState, blendPosition) - X for 1D, X and Y for 2D
+        /// </summary>
+        public static event Action<AnimationStateAsset, Vector2> OnTransitionFromBlendPositionChanged;
+
+        /// <summary>
+        /// Fired when the blend position of the "to" state changes during transition preview.
+        /// Args: (toState, blendPosition) - X for 1D, X and Y for 2D
+        /// </summary>
+        public static event Action<AnimationStateAsset, Vector2> OnTransitionToBlendPositionChanged;
+
+        /// <summary>
+        /// Fired when transition playback state changes.
+        /// Args: (isPlaying)
+        /// </summary>
+        public static event Action<bool> OnTransitionPlayStateChanged;
+
+        #endregion
+
         #region Mode Events
 
         /// <summary>
@@ -169,6 +203,40 @@ namespace DMotion.Editor
 
         #endregion
 
+        #region Raise Methods - Transition
+
+        /// <summary>Raises <see cref="OnTransitionProgressChanged"/>.</summary>
+        public static void RaiseTransitionProgressChanged(AnimationStateAsset fromState, AnimationStateAsset toState, float progress)
+        {
+            OnTransitionProgressChanged?.Invoke(fromState, toState, progress);
+        }
+
+        /// <summary>Raises <see cref="OnTransitionTimeChanged"/>.</summary>
+        public static void RaiseTransitionTimeChanged(AnimationStateAsset fromState, AnimationStateAsset toState, float normalizedTime)
+        {
+            OnTransitionTimeChanged?.Invoke(fromState, toState, normalizedTime);
+        }
+
+        /// <summary>Raises <see cref="OnTransitionFromBlendPositionChanged"/>.</summary>
+        public static void RaiseTransitionFromBlendPositionChanged(AnimationStateAsset fromState, Vector2 blendPosition)
+        {
+            OnTransitionFromBlendPositionChanged?.Invoke(fromState, blendPosition);
+        }
+
+        /// <summary>Raises <see cref="OnTransitionToBlendPositionChanged"/>.</summary>
+        public static void RaiseTransitionToBlendPositionChanged(AnimationStateAsset toState, Vector2 blendPosition)
+        {
+            OnTransitionToBlendPositionChanged?.Invoke(toState, blendPosition);
+        }
+
+        /// <summary>Raises <see cref="OnTransitionPlayStateChanged"/>.</summary>
+        public static void RaiseTransitionPlayStateChanged(bool isPlaying)
+        {
+            OnTransitionPlayStateChanged?.Invoke(isPlaying);
+        }
+
+        #endregion
+
         #region Raise Methods - Lifecycle
 
         /// <summary>Raises <see cref="OnPreviewCreated"/>.</summary>
@@ -213,13 +281,25 @@ namespace DMotion.Editor
                 UnityEngine.Debug.Log("[AnimationPreviewEvents] Clearing all subscriptions on window close.");
             }
             
+            // Preview time events
             OnPreviewTimeChanged = null;
             OnPlayStateChanged = null;
             OnLoopStateChanged = null;
+            
+            // Blend space events
             OnBlendPosition1DChanged = null;
             OnBlendPosition2DChanged = null;
             OnClipSelectedForPreview = null;
             OnBlendSpaceEditModeChanged = null;
+            
+            // Transition events
+            OnTransitionProgressChanged = null;
+            OnTransitionTimeChanged = null;
+            OnTransitionFromBlendPositionChanged = null;
+            OnTransitionToBlendPositionChanged = null;
+            OnTransitionPlayStateChanged = null;
+            
+            // Lifecycle events
             OnPreviewCreated = null;
             OnPreviewDisposed = null;
             OnPreviewError = null;

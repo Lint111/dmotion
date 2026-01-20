@@ -11,16 +11,19 @@ namespace DMotion.Editor
     /// Displays a horizontal track with draggable playhead, time display, frame ticks, and event markers.
     /// </summary>
     [UxmlElement]
-    internal partial class TimelineScrubber : VisualElement
+    internal partial class TimelineScrubber : TimelineBase
     {
-
+        #region Constants
+        
         private const float ScrubberWidth = 12f;
         private const float TrackHeight = 20f;
         private const float MarkerSize = 8f;
-        private const float MinTickSpacing = 4f; // Minimum pixels between frame ticks
+        private const float MinTickSpacing = 4f;
         private const int MaxPooledTicks = 256;
         
         private static readonly int[] NiceFrameSteps = { 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000 };
+        
+        #endregion
 
         #region UI Elements
 
@@ -38,12 +41,7 @@ namespace DMotion.Editor
 
         #region State
 
-        private float duration = 1f;
-        private float currentTime;
         private float frameRate = 30f;
-        private bool isDragging;
-        private bool isPlaying;
-        private bool isLooping;
         private bool showFrameTicks = true;
         private readonly List<EventMarker> eventMarkers = new(16);
         private readonly List<VisualElement> frameTicks = new(MaxPooledTicks);
@@ -54,94 +52,7 @@ namespace DMotion.Editor
 
         #endregion
 
-        #region Events
-
-        /// <summary>
-        /// Fired when the current time changes (from scrubbing or playback).
-        /// </summary>
-        public event Action<float> OnTimeChanged;
-
-        /// <summary>
-        /// Fired when play/pause state changes.
-        /// </summary>
-        public event Action<bool> OnPlayStateChanged;
-
-        #endregion
-
         #region Properties
-
-        /// <summary>
-        /// Total duration of the timeline in seconds.
-        /// </summary>
-        public float Duration
-        {
-            get => duration;
-            set
-            {
-                duration = Mathf.Max(0.001f, value);
-                UpdateTimeDisplay();
-                UpdateScrubberPosition();
-                UpdateFrameTicks();
-            }
-        }
-
-        /// <summary>
-        /// Current time position in seconds.
-        /// </summary>
-        public float CurrentTime
-        {
-            get => currentTime;
-            set
-            {
-                var newTime = Mathf.Clamp(value, 0, duration);
-                if (Math.Abs(newTime - currentTime) > 0.0001f)
-                {
-                    currentTime = newTime;
-                    UpdateTimeDisplay();
-                    UpdateScrubberPosition();
-                    OnTimeChanged?.Invoke(currentTime);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Current time as normalized value (0-1).
-        /// </summary>
-        public float NormalizedTime
-        {
-            get => duration > 0 ? currentTime / duration : 0;
-            set => CurrentTime = value * duration;
-        }
-
-        /// <summary>
-        /// Whether the timeline is currently playing.
-        /// </summary>
-        public bool IsPlaying
-        {
-            get => isPlaying;
-            set
-            {
-                if (isPlaying != value)
-                {
-                    isPlaying = value;
-                    UpdatePlayButton();
-                    OnPlayStateChanged?.Invoke(isPlaying);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Whether the timeline should loop.
-        /// </summary>
-        public bool IsLooping
-        {
-            get => isLooping;
-            set
-            {
-                isLooping = value;
-                UpdateLoopIndicator();
-            }
-        }
 
         /// <summary>
         /// Frame rate for frame calculations (frames per second).
@@ -162,14 +73,14 @@ namespace DMotion.Editor
         /// </summary>
         public int CurrentFrame
         {
-            get => Mathf.RoundToInt(currentTime * frameRate);
+            get => Mathf.RoundToInt(CurrentTime * frameRate);
             set => CurrentTime = value / frameRate;
         }
 
         /// <summary>
         /// Total number of frames in the timeline.
         /// </summary>
-        public int TotalFrames => Mathf.Max(1, Mathf.RoundToInt(duration * frameRate));
+        public int TotalFrames => Mathf.Max(1, Mathf.RoundToInt(Duration * frameRate));
 
         /// <summary>
         /// Whether to show frame tick marks on the timeline.
@@ -196,7 +107,7 @@ namespace DMotion.Editor
 
             playButton = new Button(OnPlayButtonClicked);
             playButton.AddToClassList("timeline-play-button");
-            playButton.text = "▶";
+            playButton.text = "\u25b6"; // Play symbol
             topRow.Add(playButton);
 
             timeLabel = new Label("0.00s / 0.00s");
@@ -252,76 +163,74 @@ namespace DMotion.Editor
             trackContainer.Add(track);
             Add(trackContainer);
 
-            // Register for drag events
-            RegisterCallback<PointerDownEvent>(OnPointerDown);
-            RegisterCallback<PointerMoveEvent>(OnPointerMove);
-            RegisterCallback<PointerUpEvent>(OnPointerUp);
-            RegisterCallback<PointerCaptureOutEvent>(OnPointerCaptureOut);
-            
-            // Register for keyboard events
-            RegisterCallback<KeyDownEvent>(OnKeyDown);
-            focusable = true;
-            
-            // Update frame ticks when layout changes
-            RegisterCallback<GeometryChangedEvent>(OnGeometryChanged);
-
             // Initial state
             UpdatePlayButton();
             UpdateTimeDisplay();
         }
+
+        #region TimelineBase Overrides
         
-        private void OnKeyDown(KeyDownEvent evt)
+        protected override Rect GetTrackRect()
         {
-            switch (evt.keyCode)
-            {
-                case KeyCode.LeftArrow:
-                    // Previous frame
-                    CurrentFrame = Mathf.Max(0, CurrentFrame - 1);
-                    evt.StopPropagation();
-                    break;
-                    
-                case KeyCode.RightArrow:
-                    // Next frame
-                    CurrentFrame = Mathf.Min(TotalFrames, CurrentFrame + 1);
-                    evt.StopPropagation();
-                    break;
-                    
-                case KeyCode.Home:
-                    // Go to start
-                    CurrentTime = 0;
-                    evt.StopPropagation();
-                    break;
-                    
-                case KeyCode.End:
-                    // Go to end
-                    CurrentTime = duration;
-                    evt.StopPropagation();
-                    break;
-                    
-                case KeyCode.Space:
-                    // Toggle play/pause (reuse button logic for consistent behavior)
-                    OnPlayButtonClicked();
-                    evt.StopPropagation();
-                    break;
-            }
+            return trackContainer.contentRect;
         }
         
-        private void OnGeometryChanged(GeometryChangedEvent evt)
+        protected override void OnDurationChanged()
         {
+            base.OnDurationChanged();
+            UpdateTimeDisplay();
+            UpdateScrubberPosition();
+            UpdateFrameTicks();
+        }
+        
+        protected override void OnCurrentTimeChanged()
+        {
+            base.OnCurrentTimeChanged();
+            UpdateTimeDisplay();
+            UpdateScrubberPosition();
+        }
+        
+        protected override void OnPlayingStateChanged()
+        {
+            base.OnPlayingStateChanged();
+            UpdatePlayButton();
+        }
+        
+        protected override void OnLoopingStateChanged()
+        {
+            base.OnLoopingStateChanged();
+            EnableInClassList("timeline-looping", IsLooping);
+        }
+        
+        protected override void OnGeometryChanged(GeometryChangedEvent evt)
+        {
+            base.OnGeometryChanged(evt);
             UpdateFrameTicks();
             UpdateMarkerPositions();
         }
         
-        private void OnFrameFieldChanged(ChangeEvent<int> evt)
-        {
-            // Clamp to valid range and update time
-            var frame = Mathf.Clamp(evt.newValue, 0, TotalFrames);
-            if (frame != CurrentFrame)
-            {
-                CurrentFrame = frame;
-            }
-        }
+        #endregion
 
+        #region Frame Stepping
+        
+        /// <summary>
+        /// Steps forward by one frame using the configured frame rate.
+        /// </summary>
+        public new void StepForward()
+        {
+            CurrentFrame = Mathf.Min(TotalFrames, CurrentFrame + 1);
+        }
+        
+        /// <summary>
+        /// Steps backward by one frame using the configured frame rate.
+        /// </summary>
+        public new void StepBackward()
+        {
+            CurrentFrame = Mathf.Max(0, CurrentFrame - 1);
+        }
+        
+        #endregion
+        
         #region Event Markers
 
         /// <summary>
@@ -391,114 +300,27 @@ namespace DMotion.Editor
 
         #endregion
 
-        #region Input Handling
-
-        private void OnPointerDown(PointerDownEvent evt)
-        {
-            if (evt.button != 0) return;
-
-            // Check if clicking on track area
-            var localPos = evt.localPosition;
-            var trackBounds = trackContainer.worldBound;
-            
-            if (trackContainer.ContainsPoint(trackContainer.WorldToLocal(evt.position)))
-            {
-                isDragging = true;
-                this.CapturePointer(evt.pointerId);
-                UpdateTimeFromPosition(evt.localPosition);
-                evt.StopPropagation();
-            }
-        }
-
-        private void OnPointerMove(PointerMoveEvent evt)
-        {
-            if (!isDragging) return;
-            UpdateTimeFromPosition(evt.localPosition);
-            evt.StopPropagation();
-        }
-
-        private void OnPointerUp(PointerUpEvent evt)
-        {
-            if (!isDragging) return;
-            
-            isDragging = false;
-            this.ReleasePointer(evt.pointerId);
-            evt.StopPropagation();
-        }
-
-        private void OnPointerCaptureOut(PointerCaptureOutEvent evt)
-        {
-            isDragging = false;
-        }
-
-        private void UpdateTimeFromPosition(Vector2 localPosition)
-        {
-            var trackBounds = trackContainer.contentRect;
-            var worldPos = this.LocalToWorld(localPosition);
-            var trackLocalPos = trackContainer.WorldToLocal(worldPos);
-            
-            // Calculate normalized position within track
-            var normalizedX = Mathf.Clamp01(trackLocalPos.x / trackBounds.width);
-            NormalizedTime = normalizedX;
-        }
-
-        #endregion
-
-        #region Playback
-
+        #region Private - UI
+        
         private void OnPlayButtonClicked()
         {
-            // If at the end and not looping, restart from beginning when pressing play
-            if (!isPlaying && !isLooping && currentTime >= duration - 0.001f)
-            {
-                CurrentTime = 0;
-            }
-            
-            IsPlaying = !IsPlaying;
+            TogglePlayPause();
         }
-
-        /// <summary>
-        /// Advances the timeline by deltaTime. Call from Update loop.
-        /// </summary>
-        public void Tick(float deltaTime)
+        
+        private void OnFrameFieldChanged(ChangeEvent<int> evt)
         {
-            if (!isPlaying) return;
-
-            var newTime = currentTime + deltaTime;
-            
-            if (newTime >= duration)
+            // Clamp to valid range and update time
+            var frame = Mathf.Clamp(evt.newValue, 0, TotalFrames);
+            if (frame != CurrentFrame)
             {
-                if (isLooping)
-                {
-                    newTime = newTime % duration;
-                }
-                else
-                {
-                    newTime = duration;
-                    IsPlaying = false;
-                }
+                CurrentFrame = frame;
             }
-
-            CurrentTime = newTime;
         }
-
-        /// <summary>
-        /// Resets the timeline to the beginning.
-        /// </summary>
-        public void Reset()
-        {
-            CurrentTime = 0;
-            IsPlaying = false;
-        }
-
-        #endregion
-
-        #region UI Updates
 
         private void UpdateTimeDisplay()
         {
             if (timeLabel == null) return;
-            timeLabel.text = $"{currentTime:F2}s / {duration:F2}s";
+            timeLabel.text = $"{CurrentTime:F2}s / {Duration:F2}s";
             
             // Update frame field without triggering change event
             if (frameField != null)
@@ -612,14 +434,8 @@ namespace DMotion.Editor
         private void UpdatePlayButton()
         {
             if (playButton == null) return;
-            playButton.text = isPlaying ? "❚❚" : "▶";
-            playButton.tooltip = isPlaying ? "Pause" : "Play";
-        }
-
-        private void UpdateLoopIndicator()
-        {
-            // Could add a visual indicator for loop state
-            EnableInClassList("timeline-looping", isLooping);
+            playButton.text = IsPlaying ? "\u275a\u275a" : "\u25b6"; // Pause or Play
+            playButton.tooltip = IsPlaying ? "Pause" : "Play";
         }
 
         #endregion

@@ -2,24 +2,23 @@ using System;
 using DMotion.Authoring;
 using UnityEditor;
 using UnityEditor.UIElements;
+using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace DMotion.Editor
 {
     /// <summary>
-    /// Coordinates building inspector UI for animation states.
+    /// Self-contained builder for animation state inspector UI in the preview window.
     /// Handles common elements (header, properties, timeline) and delegates
     /// state-specific content to specialized builders.
     /// </summary>
     internal class StateInspectorBuilder
     {
-        #region Dependencies
+        #region Constants
         
-        private readonly Func<string, string, VisualElement> createSectionHeader;
-        private readonly Func<string, VisualElement> createSection;
-        private readonly Func<string, string, VisualElement> createPropertyRow;
-        private readonly Func<SerializedObject, string, string, float, float, string, VisualElement> createEditableFloatProperty;
-        private readonly Func<SerializedObject, string, string, Action<bool>, VisualElement> createEditableBoolPropertyWithCallback;
+        private const float MinSpeed = 0f;
+        private const float MaxSpeed = 3f;
+        private const float FloatFieldWidth = 50f;
         
         #endregion
         
@@ -49,6 +48,11 @@ namespace DMotion.Editor
         /// </summary>
         public event Action OnRepaintRequested;
         
+        /// <summary>
+        /// Fired when the state speed changes (from Speed slider).
+        /// </summary>
+        public event Action<float> OnStateSpeedChanged;
+        
         #endregion
         
         #region Properties
@@ -66,7 +70,7 @@ namespace DMotion.Editor
         /// <summary>
         /// Current 2D blend preview position (if applicable).
         /// </summary>
-        public UnityEngine.Vector2 PreviewBlendPosition2D => blend2DBuilder?.PreviewBlendValue ?? UnityEngine.Vector2.zero;
+        public Vector2 PreviewBlendPosition2D => blend2DBuilder?.PreviewBlendValue ?? Vector2.zero;
         
         /// <summary>
         /// Currently selected clip for individual preview (-1 = blended).
@@ -79,24 +83,6 @@ namespace DMotion.Editor
                 if (blend2DBuilder != null) return blend2DBuilder.SelectedClipForPreview;
                 return -1;
             }
-        }
-        
-        #endregion
-        
-        #region Constructor
-        
-        public StateInspectorBuilder(
-            Func<string, string, VisualElement> createSectionHeader,
-            Func<string, VisualElement> createSection,
-            Func<string, string, VisualElement> createPropertyRow,
-            Func<SerializedObject, string, string, float, float, string, VisualElement> createEditableFloatProperty,
-            Func<SerializedObject, string, string, Action<bool>, VisualElement> createEditableBoolPropertyWithCallback)
-        {
-            this.createSectionHeader = createSectionHeader;
-            this.createSection = createSection;
-            this.createPropertyRow = createPropertyRow;
-            this.createEditableFloatProperty = createEditableFloatProperty;
-            this.createEditableBoolPropertyWithCallback = createEditableBoolPropertyWithCallback;
         }
         
         #endregion
@@ -121,9 +107,10 @@ namespace DMotion.Editor
             serializedObject.Update();
             
             var container = new VisualElement();
+            container.AddToClassList("state-inspector");
             
             // Header
-            var header = createSectionHeader(GetStateTypeLabel(state), state.name);
+            var header = CreateSectionHeader(GetStateTypeLabel(state), state.name);
             container.Add(header);
             
             // Common properties section
@@ -158,20 +145,177 @@ namespace DMotion.Editor
         
         #endregion
         
+        #region Private - UI Factories
+        
+        private VisualElement CreateSectionHeader(string type, string name)
+        {
+            var header = new VisualElement();
+            header.AddToClassList("section-header");
+            header.style.flexDirection = FlexDirection.Row;
+            header.style.paddingBottom = 4;
+            header.style.borderBottomWidth = 1;
+            header.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
+            header.style.marginBottom = 8;
+
+            var typeLabel = new Label(type);
+            typeLabel.AddToClassList("header-type");
+            typeLabel.style.color = new Color(0.6f, 0.6f, 0.6f);
+            typeLabel.style.marginRight = 8;
+
+            var nameLabel = new Label(name);
+            nameLabel.AddToClassList("header-name");
+            nameLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+
+            header.Add(typeLabel);
+            header.Add(nameLabel);
+
+            return header;
+        }
+        
+        private Foldout CreateSection(string title)
+        {
+            var foldout = new Foldout { text = title, value = true };
+            foldout.AddToClassList("section-foldout");
+            return foldout;
+        }
+        
+        private VisualElement CreatePropertyRow(string label, string value)
+        {
+            var row = new VisualElement();
+            row.AddToClassList("property-row");
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.marginBottom = 2;
+
+            var labelElement = new Label(label);
+            labelElement.AddToClassList("property-label");
+            labelElement.style.width = 100;
+            labelElement.style.minWidth = 100;
+
+            var valueElement = new Label(value);
+            valueElement.AddToClassList("property-value");
+
+            row.Add(labelElement);
+            row.Add(valueElement);
+
+            return row;
+        }
+        
+        private VisualElement CreateBoundFloatProperty(
+            string label, 
+            string propertyName, 
+            float min, 
+            float max, 
+            string suffix = "",
+            Action<float> onChanged = null)
+        {
+            var property = serializedObject.FindProperty(propertyName);
+            if (property == null)
+            {
+                return CreatePropertyRow(label, "Property not found");
+            }
+
+            var container = new VisualElement();
+            container.AddToClassList("property-row");
+            container.style.flexDirection = FlexDirection.Row;
+            container.style.marginBottom = 2;
+
+            var labelElement = new Label(label);
+            labelElement.AddToClassList("property-label");
+            labelElement.style.width = 100;
+            labelElement.style.minWidth = 100;
+            container.Add(labelElement);
+
+            var valueContainer = new VisualElement();
+            valueContainer.style.flexDirection = FlexDirection.Row;
+            valueContainer.style.flexGrow = 1;
+
+            var slider = new Slider(min, max);
+            slider.AddToClassList("property-slider");
+            slider.style.flexGrow = 1;
+            slider.bindingPath = propertyName;
+            
+            var floatField = new FloatField();
+            floatField.AddToClassList("property-float-field");
+            floatField.style.width = FloatFieldWidth;
+            floatField.style.marginLeft = 4;
+            floatField.bindingPath = propertyName;
+            
+            if (onChanged != null)
+            {
+                slider.RegisterValueChangedCallback(evt => onChanged(evt.newValue));
+                floatField.RegisterValueChangedCallback(evt => onChanged(evt.newValue));
+                // Invoke with initial value
+                onChanged(property.floatValue);
+            }
+
+            valueContainer.Add(slider);
+            valueContainer.Add(floatField);
+            
+            if (!string.IsNullOrEmpty(suffix))
+            {
+                var suffixLabel = new Label(suffix);
+                suffixLabel.AddToClassList("property-suffix");
+                suffixLabel.style.marginLeft = 2;
+                suffixLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
+                valueContainer.Add(suffixLabel);
+            }
+
+            container.Add(valueContainer);
+            return container;
+        }
+        
+        private VisualElement CreateBoundBoolProperty(
+            string label, 
+            string propertyName,
+            Action<bool> onChanged = null)
+        {
+            var property = serializedObject.FindProperty(propertyName);
+            if (property == null)
+            {
+                return CreatePropertyRow(label, "Property not found");
+            }
+
+            var container = new VisualElement();
+            container.AddToClassList("property-row");
+            container.style.flexDirection = FlexDirection.Row;
+            container.style.marginBottom = 2;
+
+            var labelElement = new Label(label);
+            labelElement.AddToClassList("property-label");
+            labelElement.style.width = 100;
+            labelElement.style.minWidth = 100;
+            container.Add(labelElement);
+
+            var toggle = new Toggle();
+            toggle.AddToClassList("property-toggle");
+            toggle.bindingPath = propertyName;
+            
+            if (onChanged != null)
+            {
+                toggle.RegisterValueChangedCallback(evt => onChanged(evt.newValue));
+            }
+
+            container.Add(toggle);
+            return container;
+        }
+        
+        #endregion
+        
         #region Private - Common UI
         
         private void BuildCommonProperties(VisualElement container, AnimationStateAsset state)
         {
-            var propertiesSection = createSection("Properties");
+            var propertiesSection = CreateSection("Properties");
             
-            // Speed property
-            var speedContainer = createEditableFloatProperty(
-                serializedObject, "Speed", "Speed", 0.0f, 3.0f, "x");
+            // Speed property - with callback to notify when speed changes
+            var speedContainer = CreateBoundFloatProperty(
+                "Speed", "Speed", MinSpeed, MaxSpeed, "x",
+                newSpeed => OnStateSpeedChanged?.Invoke(newSpeed));
             propertiesSection.Add(speedContainer);
             
             // Loop property (syncs with timeline)
-            var loopContainer = createEditableBoolPropertyWithCallback(
-                serializedObject, "Loop", "Loop",
+            var loopContainer = CreateBoundBoolProperty(
+                "Loop", "Loop",
                 newValue =>
                 {
                     if (timelineScrubber != null)
@@ -187,9 +331,13 @@ namespace DMotion.Editor
             {
                 var speedParamContainer = new VisualElement();
                 speedParamContainer.AddToClassList("property-row");
+                speedParamContainer.style.flexDirection = FlexDirection.Row;
+                speedParamContainer.style.marginBottom = 2;
                 
                 var speedParamLabel = new Label("Speed Param");
                 speedParamLabel.AddToClassList("property-label");
+                speedParamLabel.style.width = 100;
+                speedParamLabel.style.minWidth = 100;
                 speedParamContainer.Add(speedParamLabel);
                 
                 var speedParamField = new PropertyField(speedParamProp, "");
@@ -220,9 +368,9 @@ namespace DMotion.Editor
             var context = new StateContentContext(
                 state,
                 serializedObject,
-                createSectionHeader,
-                createSection,
-                createPropertyRow,
+                CreateSectionHeader,
+                CreateSection,
+                CreatePropertyRow,
                 () => OnRepaintRequested?.Invoke());
             
             // Build content
@@ -231,7 +379,7 @@ namespace DMotion.Editor
         
         private void BuildTimeline(VisualElement container, AnimationStateAsset state)
         {
-            var timelineSection = createSection("Timeline");
+            var timelineSection = CreateSection("Timeline");
             
             timelineScrubber = new TimelineScrubber();
             timelineScrubber.IsLooping = state.Loop;
@@ -242,9 +390,9 @@ namespace DMotion.Editor
                 var context = new StateContentContext(
                     state,
                     serializedObject,
-                    createSectionHeader,
-                    createSection,
-                    createPropertyRow,
+                    CreateSectionHeader,
+                    CreateSection,
+                    CreatePropertyRow,
                     () => OnRepaintRequested?.Invoke());
                 
                 currentContentBuilder.ConfigureTimeline(timelineScrubber, context);

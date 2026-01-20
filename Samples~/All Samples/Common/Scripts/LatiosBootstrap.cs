@@ -3,7 +3,6 @@ using Latios;
 using Latios.Authoring;
 using Latios.Kinemation;
 using Latios.Kinemation.Authoring;
-using Unity.Collections;
 using Unity.Entities;
 
 namespace DMotion.Samples.Common
@@ -18,24 +17,11 @@ namespace DMotion.Samples.Common
         }
     }
 
-    [UnityEngine.Scripting.Preserve]
-    public class LatiosEditorBootstrap : ICustomEditorBootstrap
-    {
-        public World Initialize(string editorWorldName)
-        {
-            var world = new LatiosWorld(editorWorldName);
-            World.DefaultGameObjectInjectionWorld = world;
-
-            // Get all systems and inject Unity systems first (required for Kinemation)
-            var systems = DefaultWorldInitialization.GetAllSystemTypeIndices(WorldSystemFilterFlags.Default, true);
-            BootstrapTools.InjectUnitySystems(systems, world, world.simulationSystemGroup);
-
-            // Now install Kinemation (requires EntitiesGraphicsSystem to exist)
-            KinemationBootstrap.InstallKinemation(world);
-
-            return world;
-        }
-    }
+    // NOTE: ICustomEditorBootstrap intentionally omitted.
+    // Installing Kinemation into the default editor world causes GenerateBrgDrawCommandsSystem
+    // to run every frame with no rendering consumer, resulting in JobTempAlloc leak warnings.
+    // ECS preview features should create an isolated world on-demand when needed.
+    // See DMotion Documentation/Features/EcsPreviewAndRigBinding.md Phase 0.
 
     [UnityEngine.Scripting.Preserve]
     public class LatiosBootstrap : ICustomBootstrap

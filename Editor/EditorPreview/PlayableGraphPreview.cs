@@ -34,6 +34,45 @@ namespace DMotion.Editor
         private Vector2 camEuler;
         private Vector2 lastMousePosition;
         private Boolean isMouseDrag;
+        
+        /// <summary>
+        /// Serializable camera state for persistence across domain reloads.
+        /// </summary>
+        [Serializable]
+        public struct CameraState
+        {
+            public float Distance;
+            public Vector3 Pivot;
+            public Vector3 LookAtOffset;
+            public Vector2 Euler;
+            public bool IsValid;
+            
+            public static CameraState Invalid => new CameraState { IsValid = false };
+        }
+        
+        /// <summary>
+        /// Gets or sets the camera state for persistence.
+        /// </summary>
+        public CameraState CurrentCameraState
+        {
+            get => new CameraState
+            {
+                Distance = camDistance,
+                Pivot = camPivot,
+                LookAtOffset = lookAtOffset,
+                Euler = camEuler,
+                IsValid = previewRenderUtility != null
+            };
+            set
+            {
+                if (!value.IsValid) return;
+                camDistance = value.Distance;
+                camPivot = value.Pivot;
+                lookAtOffset = value.LookAtOffset;
+                camEuler = value.Euler;
+                UpdateCameraPosition();
+            }
+        }
 
         public void Initialize()
         {
@@ -149,6 +188,12 @@ namespace DMotion.Editor
         {
             if (gameObject != null)
             {
+                // Skip if already initialized with this gameObject
+                if (skinnedMeshRenderer != null && playableGraph.IsValid())
+                {
+                    return;
+                }
+                
                 if (!TryInstantiateSkinnedMesh(gameObject))
                 {
                     gameObject = null;
@@ -251,9 +296,26 @@ namespace DMotion.Editor
                 return;
             }
 
-            // must set hotControl or MouseUp event will not be detected outside window
+            // Get our control ID for hotControl management
             int controlId = GUIUtility.GetControlID(FocusType.Passive);
-            if (Event.current.GetTypeForControl(controlId) == EventType.MouseDown)
+            
+            // Check if another control has hotControl (e.g., blend space editor is dragging)
+            // If so, don't respond to mouse events
+            int currentHotControl = GUIUtility.hotControl;
+            if (currentHotControl != 0 && currentHotControl != controlId)
+            {
+                // Another control is active - don't interfere
+                // Reset our drag state if we were dragging
+                if (isMouseDrag)
+                {
+                    isMouseDrag = false;
+                    EditorGUIUtility.SetWantsMouseJumping(0);
+                }
+                return;
+            }
+
+            // Only claim hotControl on mouse down if no other control has it
+            if (Event.current.GetTypeForControl(controlId) == EventType.MouseDown && currentHotControl == 0)
                 GUIUtility.hotControl = controlId;
 
             var isMouseDown = Event.current.type == EventType.MouseDown;
@@ -287,6 +349,10 @@ namespace DMotion.Editor
             {
                 EditorGUIUtility.SetWantsMouseJumping(0);
                 isMouseDrag = false;
+                
+                // Release hotControl if we had it
+                if (GUIUtility.hotControl == controlId)
+                    GUIUtility.hotControl = 0;
             }
 
             // store lastMousePosition starting with mouseDown to prevent wrong initial delta

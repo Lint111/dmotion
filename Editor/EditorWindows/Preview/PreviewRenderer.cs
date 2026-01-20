@@ -1,5 +1,6 @@
 using System;
 using DMotion.Authoring;
+using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
 
@@ -11,12 +12,34 @@ namespace DMotion.Editor
     /// </summary>
     internal class PreviewRenderer : IDisposable
     {
+        #region Constants
+        
+        /// <summary>Background color for the 3D preview area.</summary>
+        private static readonly Color PreviewBackground = new(0.15f, 0.15f, 0.15f);
+        
+        /// <summary>Text color for error/info messages.</summary>
+        private static readonly Color MessageTextColor = new(0.7f, 0.7f, 0.7f);
+        
+        #endregion
+        
         #region State
         
-        private SingleClipPreview singleClipPreview;
+        private PlayableGraphPreview activePreview;
+        private BlendedClipPreview blendedPreview; // Cast reference for blend-specific operations
+        private TransitionPreview transitionPreview; // Cast reference for transition-specific operations
         private bool previewInitialized;
         private string previewErrorMessage;
         private AnimationStateAsset currentState;
+        
+        // Transition state
+        private AnimationStateAsset transitionFromState;
+        private AnimationStateAsset transitionToState;
+        
+        // Preview model (manually assigned)
+        private GameObject previewModel;
+        
+        // Camera state for persistence
+        private PlayableGraphPreview.CameraState savedCameraState;
         
         #endregion
         
@@ -41,6 +64,26 @@ namespace DMotion.Editor
         /// The current state being previewed.
         /// </summary>
         public AnimationStateAsset CurrentState => currentState;
+        
+        /// <summary>
+        /// The preview model (armature with Animator and SkinnedMeshRenderer).
+        /// When set, this model will be used instead of auto-detecting from clips.
+        /// </summary>
+        public GameObject PreviewModel
+        {
+            get => previewModel;
+            set
+            {
+                if (previewModel == value) return;
+                previewModel = value;
+                
+                // If we have an active preview, update its model
+                if (activePreview != null && previewInitialized)
+                {
+                    activePreview.GameObject = previewModel;
+                }
+            }
+        }
         
         #endregion
         
@@ -67,12 +110,12 @@ namespace DMotion.Editor
                     CreateSingleClipPreview(singleClip);
                     break;
                     
-                case LinearBlendStateAsset:
-                    previewErrorMessage = PreviewWindowConstants.BlendPreviewNotAvailable;
+                case LinearBlendStateAsset linearBlend:
+                    CreateLinearBlendPreview(linearBlend);
                     break;
                     
-                case Directional2DBlendStateAsset:
-                    previewErrorMessage = PreviewWindowConstants.Blend2DPreviewNotAvailable;
+                case Directional2DBlendStateAsset blend2D:
+                    Create2DBlendPreview(blend2D);
                     break;
                     
                 default:
@@ -106,9 +149,258 @@ namespace DMotion.Editor
         /// </summary>
         public void SetNormalizedTime(float normalizedTime)
         {
-            if (singleClipPreview != null && previewInitialized)
+            if (activePreview != null && previewInitialized)
             {
-                singleClipPreview.NormalizedSampleTime = normalizedTime;
+                activePreview.NormalizedSampleTime = normalizedTime;
+            }
+        }
+        
+        /// <summary>
+        /// Updates the 1D blend position for LinearBlendStateAsset previews (smooth transition).
+        /// </summary>
+        public void SetBlendPosition1D(float blendValue)
+        {
+            if (blendedPreview != null && previewInitialized)
+            {
+                blendedPreview.SetBlendPositionTarget(new float2(blendValue, 0));
+            }
+        }
+        
+        /// <summary>
+        /// Updates the 2D blend position for Directional2DBlendStateAsset previews (smooth transition).
+        /// </summary>
+        public void SetBlendPosition2D(Vector2 blendPosition)
+        {
+            if (blendedPreview != null && previewInitialized)
+            {
+                blendedPreview.SetBlendPositionTarget(new float2(blendPosition.x, blendPosition.y));
+            }
+        }
+        
+        /// <summary>
+        /// Immediately sets the 1D blend position without smooth transition.
+        /// </summary>
+        public void SetBlendPosition1DImmediate(float blendValue)
+        {
+            if (blendedPreview != null && previewInitialized)
+            {
+                blendedPreview.SetBlendPositionImmediate(new float2(blendValue, 0));
+            }
+        }
+        
+        /// <summary>
+        /// Immediately sets the 2D blend position without smooth transition.
+        /// </summary>
+        public void SetBlendPosition2DImmediate(Vector2 blendPosition)
+        {
+            if (blendedPreview != null && previewInitialized)
+            {
+                blendedPreview.SetBlendPositionImmediate(new float2(blendPosition.x, blendPosition.y));
+            }
+        }
+        
+        /// <summary>
+        /// Whether the blend position is currently transitioning.
+        /// </summary>
+        public bool IsBlendTransitioning => blendedPreview?.IsTransitioning ?? false;
+        
+        /// <summary>
+        /// Updates smooth transitions. Call every frame.
+        /// </summary>
+        /// <param name="deltaTime">Time since last update.</param>
+        /// <returns>True if any transition is still in progress.</returns>
+        public bool Tick(float deltaTime)
+        {
+            if (blendedPreview != null && previewInitialized)
+            {
+                return blendedPreview.Tick(deltaTime);
+            }
+            return false;
+        }
+        
+        /// <summary>
+        /// Gets the current blend weights (for UI visualization).
+        /// Returns null if not a blend preview.
+        /// </summary>
+        public float[] GetCurrentBlendWeights()
+        {
+            return blendedPreview?.CurrentWeights;
+        }
+        
+        /// <summary>
+        /// Sets the preview to show only a single clip from a blend state (solo mode).
+        /// Pass -1 to return to blended preview mode.
+        /// </summary>
+        /// <param name="clipIndex">Index of the clip to solo, or -1 for blended mode.</param>
+        public void SetSoloClip(int clipIndex)
+        {
+            if (blendedPreview != null && previewInitialized)
+            {
+                blendedPreview.SetSoloClip(clipIndex);
+            }
+        }
+        
+        /// <summary>
+        /// Gets the currently soloed clip index, or -1 if in blended mode.
+        /// </summary>
+        public int SoloClipIndex => blendedPreview?.SoloClipIndex ?? -1;
+        
+        /// <summary>
+        /// Gets the weighted average speed based on current blend weights.
+        /// Returns 1.0 for non-blend previews or if not initialized.
+        /// </summary>
+        public float WeightedSpeed => blendedPreview?.WeightedSpeed ?? 1f;
+        
+        /// <summary>
+        /// Creates a preview for a transition between two states.
+        /// </summary>
+        public void CreateTransitionPreview(AnimationStateAsset fromState, AnimationStateAsset toState, float transitionDuration)
+        {
+            DisposePreview();
+            previewErrorMessage = null;
+            currentState = null;
+            transitionFromState = fromState;
+            transitionToState = toState;
+            
+            // Validate that we have at least a "to" state
+            if (toState == null)
+            {
+                previewErrorMessage = "No target state for transition";
+                return;
+            }
+            
+            // Check if states have valid clips
+            if (!HasValidClips(fromState) && !HasValidClips(toState))
+            {
+                previewErrorMessage = "No valid animation clips\nin transition states";
+                return;
+            }
+            
+            try
+            {
+                var preview = new TransitionPreview(fromState, toState, transitionDuration);
+                
+                // Set manual model if available
+                if (previewModel != null)
+                {
+                    preview.GameObject = previewModel;
+                }
+                
+                preview.Initialize();
+                
+                // Check if model was found
+                if (preview.GameObject == null)
+                {
+                    preview.Dispose();
+                    previewErrorMessage = "Could not find model\nfor transition states.\n\nDrag a model prefab to\nthe Preview Model field.";
+                    return;
+                }
+                
+                activePreview = preview;
+                transitionPreview = preview;
+                blendedPreview = null;
+                previewInitialized = true;
+                RestoreCameraState();
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[PreviewRenderer] Failed to create transition preview: {e.Message}");
+                DisposePreview();
+                previewErrorMessage = $"Preview error:\n{e.Message}";
+            }
+        }
+        
+        /// <summary>
+        /// Sets the transition progress (0 = fully "from" state, 1 = fully "to" state).
+        /// </summary>
+        public void SetTransitionProgress(float progress)
+        {
+            if (transitionPreview != null && previewInitialized)
+            {
+                transitionPreview.TransitionProgress = progress;
+            }
+        }
+        
+        /// <summary>
+        /// Gets the current transition progress.
+        /// </summary>
+        public float GetTransitionProgress()
+        {
+            return transitionPreview?.TransitionProgress ?? 0f;
+        }
+        
+        /// <summary>
+        /// Whether the current preview is a transition preview.
+        /// </summary>
+        public bool IsTransitionPreview => transitionPreview != null && previewInitialized;
+        
+        /// <summary>
+        /// Sets the blend position for the "from" state in a transition preview.
+        /// Only applicable when the from state is a blend state.
+        /// </summary>
+        public void SetTransitionFromBlendPosition(Vector2 blendPosition)
+        {
+            if (transitionPreview != null && previewInitialized)
+            {
+                transitionPreview.FromBlendPosition = new Unity.Mathematics.float2(blendPosition.x, blendPosition.y);
+            }
+        }
+        
+        /// <summary>
+        /// Sets the blend position for the "to" state in a transition preview.
+        /// Only applicable when the to state is a blend state.
+        /// </summary>
+        public void SetTransitionToBlendPosition(Vector2 blendPosition)
+        {
+            if (transitionPreview != null && previewInitialized)
+            {
+                transitionPreview.ToBlendPosition = new Unity.Mathematics.float2(blendPosition.x, blendPosition.y);
+            }
+        }
+        
+        /// <summary>
+        /// Gets the "from" state of the current transition preview.
+        /// </summary>
+        public AnimationStateAsset TransitionFromState => transitionPreview?.FromState;
+        
+        /// <summary>
+        /// Gets the "to" state of the current transition preview.
+        /// </summary>
+        public AnimationStateAsset TransitionToState => transitionPreview?.ToState;
+        
+        /// <summary>
+        /// Sets the normalized sample time for transition previews.
+        /// This controls the animation playback time (0-1) within the transition.
+        /// </summary>
+        public void SetTransitionNormalizedTime(float normalizedTime)
+        {
+            if (transitionPreview != null && previewInitialized)
+            {
+                transitionPreview.NormalizedSampleTime = normalizedTime;
+            }
+        }
+        
+        /// <summary>
+        /// Gets the current normalized sample time for transition previews.
+        /// </summary>
+        public float GetTransitionNormalizedTime()
+        {
+            return transitionPreview?.NormalizedSampleTime ?? 0f;
+        }
+        
+        /// <summary>
+        /// Gets or sets the camera state for persistence across domain reloads.
+        /// </summary>
+        public PlayableGraphPreview.CameraState CameraState
+        {
+            get => activePreview?.CurrentCameraState ?? savedCameraState;
+            set
+            {
+                savedCameraState = value;
+                if (activePreview != null && previewInitialized)
+                {
+                    activePreview.CurrentCameraState = value;
+                }
             }
         }
         
@@ -120,13 +412,13 @@ namespace DMotion.Editor
             if (rect.width <= 0 || rect.height <= 0) return;
             
             // Draw background
-            EditorGUI.DrawRect(rect, PreviewWindowConstants.PreviewBackground);
+            EditorGUI.DrawRect(rect, PreviewBackground);
             
             // Check if we have a valid preview
-            if (singleClipPreview != null && previewInitialized)
+            if (activePreview != null && previewInitialized)
             {
                 // Draw the 3D preview
-                singleClipPreview.DrawPreview(rect, GUIStyle.none);
+                activePreview.DrawPreview(rect, GUIStyle.none);
             }
             else if (!string.IsNullOrEmpty(previewErrorMessage))
             {
@@ -135,7 +427,7 @@ namespace DMotion.Editor
                 {
                     wordWrap = true,
                     alignment = TextAnchor.MiddleCenter,
-                    normal = { textColor = PreviewWindowConstants.MessageTextColor }
+                    normal = { textColor = MessageTextColor }
                 };
                 GUI.Label(rect, previewErrorMessage, style);
             }
@@ -151,10 +443,10 @@ namespace DMotion.Editor
             if (evt == null) return false;
             
             // Handle camera orbit when mouse is over the preview area
-            if (rect.Contains(evt.mousePosition) && singleClipPreview != null && previewInitialized)
+            if (rect.Contains(evt.mousePosition) && activePreview != null && previewInitialized)
             {
                 // Let PlayableGraphPreview handle camera controls
-                singleClipPreview.HandleCamera();
+                activePreview.HandleCamera();
                 
                 if (evt.type == EventType.MouseDrag || evt.type == EventType.ScrollWheel)
                 {
@@ -170,7 +462,7 @@ namespace DMotion.Editor
         /// </summary>
         public void ResetCameraView()
         {
-            singleClipPreview?.ResetCameraView();
+            activePreview?.ResetCameraView();
         }
         
         /// <summary>
@@ -197,19 +489,29 @@ namespace DMotion.Editor
             
             try
             {
-                singleClipPreview = new SingleClipPreview(clipAsset.Clip);
-                singleClipPreview.Initialize();
+                var preview = new SingleClipPreview(clipAsset.Clip);
+                
+                // Set manual model if available
+                if (previewModel != null)
+                {
+                    preview.GameObject = previewModel;
+                }
+                
+                preview.Initialize();
                 
                 // Check if model was found
-                if (singleClipPreview.GameObject == null)
+                if (preview.GameObject == null)
                 {
-                    DisposePreview();
-                    previewErrorMessage = "Could not find model\nfor this animation clip.\n\nEnsure the clip has a\nvalid source avatar.";
+                    preview.Dispose();
+                    previewErrorMessage = "Could not find model\nfor this animation clip.\n\nDrag a model prefab to\nthe Preview Model field.";
                     AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
                     return;
                 }
                 
+                activePreview = preview;
+                blendedPreview = null;
                 previewInitialized = true;
+                RestoreCameraState();
                 AnimationPreviewEvents.RaisePreviewCreated(state);
             }
             catch (Exception e)
@@ -221,29 +523,210 @@ namespace DMotion.Editor
             }
         }
         
+        private void CreateLinearBlendPreview(LinearBlendStateAsset state)
+        {
+            if (state.BlendClips == null || state.BlendClips.Length == 0)
+            {
+                previewErrorMessage = "No clips assigned to blend state";
+                AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
+                return;
+            }
+            
+            // Check if any clips have valid animation clips
+            bool hasValidClip = false;
+            foreach (var clip in state.BlendClips)
+            {
+                if (clip.Clip?.Clip != null)
+                {
+                    hasValidClip = true;
+                    break;
+                }
+            }
+            
+            if (!hasValidClip)
+            {
+                previewErrorMessage = "No valid animation clips\nin blend state";
+                AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
+                return;
+            }
+            
+            try
+            {
+                var preview = new BlendedClipPreview(state);
+                
+                // Set manual model if available
+                if (previewModel != null)
+                {
+                    preview.GameObject = previewModel;
+                }
+                
+                preview.Initialize();
+                
+                // Check if model was found
+                if (preview.GameObject == null)
+                {
+                    preview.Dispose();
+                    previewErrorMessage = "Could not find model\nfor blend state clips.\n\nDrag a model prefab to\nthe Preview Model field.";
+                    AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
+                    return;
+                }
+                
+                activePreview = preview;
+                blendedPreview = preview;
+                previewInitialized = true;
+                RestoreCameraState();
+                AnimationPreviewEvents.RaisePreviewCreated(state);
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[PreviewRenderer] Failed to create blend preview: {e.Message}");
+                DisposePreview();
+                previewErrorMessage = $"Preview error:\n{e.Message}";
+                AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
+            }
+        }
+        
+        private void Create2DBlendPreview(Directional2DBlendStateAsset state)
+        {
+            if (state.BlendClips == null || state.BlendClips.Length == 0)
+            {
+                previewErrorMessage = "No clips assigned to\n2D blend state";
+                AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
+                return;
+            }
+            
+            // Check if any clips have valid animation clips
+            bool hasValidClip = false;
+            foreach (var clip in state.BlendClips)
+            {
+                if (clip.Clip?.Clip != null)
+                {
+                    hasValidClip = true;
+                    break;
+                }
+            }
+            
+            if (!hasValidClip)
+            {
+                previewErrorMessage = "No valid animation clips\nin 2D blend state";
+                AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
+                return;
+            }
+            
+            try
+            {
+                var preview = new BlendedClipPreview(state);
+                
+                // Set manual model if available
+                if (previewModel != null)
+                {
+                    preview.GameObject = previewModel;
+                }
+                
+                preview.Initialize();
+                
+                // Check if model was found
+                if (preview.GameObject == null)
+                {
+                    preview.Dispose();
+                    previewErrorMessage = "Could not find model\nfor 2D blend state clips.\n\nDrag a model prefab to\nthe Preview Model field.";
+                    AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
+                    return;
+                }
+                
+                activePreview = preview;
+                blendedPreview = preview;
+                previewInitialized = true;
+                RestoreCameraState();
+                AnimationPreviewEvents.RaisePreviewCreated(state);
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[PreviewRenderer] Failed to create 2D blend preview: {e.Message}");
+                DisposePreview();
+                previewErrorMessage = $"Preview error:\n{e.Message}";
+                AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
+            }
+        }
+        
         private void DisposePreview()
         {
             var wasInitialized = previewInitialized;
             var previousState = currentState;
             
-            if (singleClipPreview != null)
+            if (activePreview != null)
             {
+                // Save camera state before disposing
+                var currentCamState = activePreview.CurrentCameraState;
+                if (currentCamState.IsValid)
+                {
+                    savedCameraState = currentCamState;
+                }
+                
                 try
                 {
-                    singleClipPreview.Dispose();
+                    activePreview.Dispose();
                 }
                 catch (Exception e)
                 {
                     Debug.LogWarning($"[PreviewRenderer] Error disposing preview: {e.Message}");
                 }
-                singleClipPreview = null;
+                activePreview = null;
+                blendedPreview = null;
+                transitionPreview = null;
             }
             previewInitialized = false;
+            transitionFromState = null;
+            transitionToState = null;
             
             // Raise disposed event if we had an active preview
             if (wasInitialized && previousState != null)
             {
                 AnimationPreviewEvents.RaisePreviewDisposed(previousState);
+            }
+        }
+        
+        /// <summary>
+        /// Restores the saved camera state to the active preview.
+        /// </summary>
+        private void RestoreCameraState()
+        {
+            if (activePreview != null && savedCameraState.IsValid)
+            {
+                activePreview.CurrentCameraState = savedCameraState;
+            }
+        }
+        
+        /// <summary>
+        /// Checks if a state has valid animation clips.
+        /// </summary>
+        private static bool HasValidClips(AnimationStateAsset state)
+        {
+            if (state == null) return false;
+            
+            switch (state)
+            {
+                case SingleClipStateAsset singleClip:
+                    return singleClip.Clip?.Clip != null;
+                    
+                case LinearBlendStateAsset linearBlend:
+                    if (linearBlend.BlendClips == null) return false;
+                    foreach (var clip in linearBlend.BlendClips)
+                    {
+                        if (clip.Clip?.Clip != null) return true;
+                    }
+                    return false;
+                    
+                case Directional2DBlendStateAsset blend2D:
+                    if (blend2D.BlendClips == null) return false;
+                    foreach (var clip in blend2D.BlendClips)
+                    {
+                        if (clip.Clip?.Clip != null) return true;
+                    }
+                    return false;
+                    
+                default:
+                    return false;
             }
         }
         
