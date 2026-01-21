@@ -24,6 +24,14 @@ namespace DMotion.Authoring
         /// </summary>
         [Tooltip("Allow this transition to fire when already in the target state")]
         public bool CanTransitionToSelf;
+        
+        /// <summary>
+        /// Custom blend curve for the transition. X axis is normalized transition time (0-1),
+        /// Y axis is the weight of the "From" state (1 at start, 0 at end).
+        /// The "To" state weight is (1 - curve value).
+        /// </summary>
+        [Tooltip("Custom blend curve. X = transition time (0-1), Y = From state weight (1 to 0)")]
+        public AnimationCurve BlendCurve = AnimationCurve.Linear(0f, 1f, 1f, 0f);
 
         public IEnumerable<BoolTransitionCondition> BoolTransitions =>
             Conditions.Where(c => c.Parameter is BoolParameterAsset).Select(c => c.AsBoolCondition);

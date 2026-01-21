@@ -18,7 +18,9 @@ namespace DMotion.Editor
         
         private const float MinSpeed = 0f;
         private const float MaxSpeed = 3f;
-        private const float FloatFieldWidth = 50f;
+        
+        // Use shared constant
+        private const float FloatFieldWidth = PreviewEditorConstants.FloatFieldWidth;
         
         #endregion
         

@@ -148,11 +148,12 @@ namespace DMotion.Editor
         
         /// <summary>
         /// Whether the user is currently dragging the scrubber.
+        /// Use this to suppress other input handling (e.g., camera controls).
         /// </summary>
-        protected bool IsDragging
+        public bool IsDragging
         {
             get => isDragging;
-            set => isDragging = value;
+            protected set => isDragging = value;
         }
         
         #endregion

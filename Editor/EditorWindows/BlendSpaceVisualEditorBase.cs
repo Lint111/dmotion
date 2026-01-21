@@ -23,6 +23,11 @@ namespace DMotion.Editor
         private Vector2 externalLastMousePos;
         private Vector2 pendingPanDelta;
         
+        // Scroll ownership - prevents scroll hijacking when scrolling from outside
+        private bool wasMouseInRect;
+        private double mouseEnteredTime;
+        private const double ScrollOwnershipDelay = 0.25; // Seconds to wait after mouse enters before accepting scroll
+        
         // Preview indicator state
         protected Vector2 previewPosition;
         protected bool showPreviewIndicator;
@@ -563,15 +568,31 @@ namespace DMotion.Editor
             // Get a consistent control ID for this editor
             blendSpaceControlId = GUIUtility.GetControlID(FocusType.Passive);
             
+            // Track mouse entry for scroll ownership
+            bool mouseInRect = rect.Contains(mousePos);
+            if (mouseInRect && !wasMouseInRect)
+            {
+                // Mouse just entered - record the time
+                mouseEnteredTime = EditorApplication.timeSinceStartup;
+            }
+            wasMouseInRect = mouseInRect;
+            
             // Allow drag events to continue even if mouse moves outside rect
             var isActiveDrag = isPanning || isDraggingClip || isDraggingPreviewIndicator;
-            if (!rect.Contains(mousePos) && e.type != EventType.MouseUp && !(e.type == EventType.MouseDrag && isActiveDrag))
+            if (!mouseInRect && e.type != EventType.MouseUp && !(e.type == EventType.MouseDrag && isActiveDrag))
                 return;
 
             switch (e.type)
             {
                 case EventType.ScrollWheel:
-                    HandleZoom(rect, e);
+                    // Only handle scroll if mouse has been in rect long enough
+                    // This prevents scroll hijacking when scrolling from outside
+                    double timeSinceEntry = EditorApplication.timeSinceStartup - mouseEnteredTime;
+                    if (timeSinceEntry >= ScrollOwnershipDelay)
+                    {
+                        HandleZoom(rect, e);
+                    }
+                    // Note: We don't Use() the event if we ignore it, allowing parent to handle it
                     break;
                     
                 case EventType.MouseDown:

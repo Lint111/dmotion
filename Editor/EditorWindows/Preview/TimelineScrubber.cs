@@ -216,7 +216,7 @@ namespace DMotion.Editor
         /// <summary>
         /// Steps forward by one frame using the configured frame rate.
         /// </summary>
-        public new void StepForward()
+        public void StepForward()
         {
             CurrentFrame = Mathf.Min(TotalFrames, CurrentFrame + 1);
         }
@@ -224,7 +224,7 @@ namespace DMotion.Editor
         /// <summary>
         /// Steps backward by one frame using the configured frame rate.
         /// </summary>
-        public new void StepBackward()
+        public void StepBackward()
         {
             CurrentFrame = Mathf.Max(0, CurrentFrame - 1);
         }

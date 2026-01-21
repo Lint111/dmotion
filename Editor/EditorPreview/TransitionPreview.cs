@@ -37,6 +37,18 @@ namespace DMotion.Editor
         private BlendedClipPreview.BlendClipData[] fromClipData;
         private BlendedClipPreview.BlendClipData[] toClipData;
         
+        // Track clip playables for time synchronization
+        private AnimationClipPlayable[] fromClipPlayables;
+        private AnimationClipPlayable[] toClipPlayables;
+        private AnimationClipPlayable singleFromClipPlayable;
+        private AnimationClipPlayable singleToClipPlayable;
+        
+        // Cached arrays to avoid per-frame allocations
+        private float[] cachedFromWeights;
+        private float[] cachedToWeights;
+        private float[] cachedDistances;
+        private List<AnimationClip> cachedClips;
+        
         #endregion
         
         #region Properties
@@ -84,10 +96,16 @@ namespace DMotion.Editor
         {
             get
             {
-                var clips = new List<AnimationClip>();
-                clips.AddRange(GetClipsFromState(fromState));
-                clips.AddRange(GetClipsFromState(toState));
-                return clips.Where(c => c != null);
+                // Use cached list to avoid allocation
+                if (cachedClips == null)
+                {
+                    cachedClips = new List<AnimationClip>();
+                    foreach (var clip in GetClipsFromState(fromState))
+                        if (clip != null) cachedClips.Add(clip);
+                    foreach (var clip in GetClipsFromState(toState))
+                        if (clip != null) cachedClips.Add(clip);
+                }
+                return cachedClips;
             }
         }
         
@@ -95,11 +113,10 @@ namespace DMotion.Editor
         {
             get
             {
-                // Blend between from and to durations based on progress
-                float fromDuration = GetStateDuration(fromState);
-                float toDuration = GetStateDuration(toState);
-                float blendedDuration = Mathf.Lerp(fromDuration, toDuration, transitionProgress);
-                return NormalizedSampleTime * blendedDuration;
+                // Sync individual clip times before sampling
+                SyncClipTimes();
+                // Return 0 - we manually set each clip's time based on normalized time
+                return 0;
             }
         }
         
@@ -158,23 +175,24 @@ namespace DMotion.Editor
             playableOutput.SetSourcePlayable(transitionMixer);
             
             // Build "from" state playable
-            fromPlayable = BuildStatePlayable(graph, fromState, out fromMixer);
+            fromPlayable = BuildStatePlayable(graph, fromState, out fromMixer, out singleFromClipPlayable, out fromClipPlayables);
             if (fromPlayable.IsValid())
             {
                 graph.Connect(fromPlayable, 0, transitionMixer, 0);
             }
             
             // Build "to" state playable
-            toPlayable = BuildStatePlayable(graph, toState, out toMixer);
+            toPlayable = BuildStatePlayable(graph, toState, out toMixer, out singleToClipPlayable, out toClipPlayables);
             if (toPlayable.IsValid())
             {
                 graph.Connect(toPlayable, 0, transitionMixer, 1);
             }
             
-            // Initialize weights
+            // Initialize weights and sync times
             UpdateTransitionWeights();
             UpdateFromBlendWeights();
             UpdateToBlendWeights();
+            SyncClipTimes();
             
             return graph;
         }
@@ -182,9 +200,12 @@ namespace DMotion.Editor
         /// <summary>
         /// Builds a playable for a state. Returns the root playable and optionally a mixer for blend states.
         /// </summary>
-        private Playable BuildStatePlayable(PlayableGraph graph, AnimationStateAsset state, out AnimationMixerPlayable mixer)
+        private Playable BuildStatePlayable(PlayableGraph graph, AnimationStateAsset state, out AnimationMixerPlayable mixer,
+            out AnimationClipPlayable singleClipPlayable, out AnimationClipPlayable[] blendClipPlayables)
         {
             mixer = default;
+            singleClipPlayable = default;
+            blendClipPlayables = null;
             
             if (state == null)
             {
@@ -195,13 +216,13 @@ namespace DMotion.Editor
             switch (state)
             {
                 case SingleClipStateAsset singleClip:
-                    return BuildSingleClipPlayable(graph, singleClip);
+                    return BuildSingleClipPlayable(graph, singleClip, out singleClipPlayable);
                     
                 case LinearBlendStateAsset linearBlend:
-                    return BuildBlendPlayable(graph, GetBlendClipData(linearBlend), out mixer);
+                    return BuildBlendPlayable(graph, GetBlendClipData(linearBlend), out mixer, out blendClipPlayables);
                     
                 case Directional2DBlendStateAsset blend2D:
-                    return BuildBlendPlayable(graph, GetBlendClipData(blend2D), out mixer);
+                    return BuildBlendPlayable(graph, GetBlendClipData(blend2D), out mixer, out blendClipPlayables);
                     
                 default:
                     Debug.LogWarning($"[TransitionPreview] Unsupported state type: {state.GetType().Name}");
@@ -209,17 +230,21 @@ namespace DMotion.Editor
             }
         }
         
-        private Playable BuildSingleClipPlayable(PlayableGraph graph, SingleClipStateAsset state)
+        private Playable BuildSingleClipPlayable(PlayableGraph graph, SingleClipStateAsset state, out AnimationClipPlayable clipPlayable)
         {
+            clipPlayable = default;
             var clip = state.Clip?.Clip;
             if (clip == null) return Playable.Null;
             
-            return AnimationClipPlayable.Create(graph, clip);
+            clipPlayable = AnimationClipPlayable.Create(graph, clip);
+            return clipPlayable;
         }
         
-        private Playable BuildBlendPlayable(PlayableGraph graph, BlendedClipPreview.BlendClipData[] clipData, out AnimationMixerPlayable mixer)
+        private Playable BuildBlendPlayable(PlayableGraph graph, BlendedClipPreview.BlendClipData[] clipData, 
+            out AnimationMixerPlayable mixer, out AnimationClipPlayable[] clipPlayables)
         {
             mixer = default;
+            clipPlayables = null;
             
             if (clipData == null || clipData.Length == 0)
             {
@@ -227,13 +252,15 @@ namespace DMotion.Editor
             }
             
             mixer = AnimationMixerPlayable.Create(graph, clipData.Length);
+            clipPlayables = new AnimationClipPlayable[clipData.Length];
             
             for (int i = 0; i < clipData.Length; i++)
             {
                 if (clipData[i].Clip != null)
                 {
                     var clipPlayable = AnimationClipPlayable.Create(graph, clipData[i].Clip);
-                    clipPlayable.SetSpeed(clipData[i].Speed);
+                    // Don't set speed - we handle time synchronization manually
+                    clipPlayables[i] = clipPlayable;
                     graph.Connect(clipPlayable, 0, mixer, i);
                 }
             }
@@ -261,23 +288,34 @@ namespace DMotion.Editor
         {
             if (!fromMixer.IsValid() || fromClipData == null) return;
             
-            var weights = CalculateBlendWeights(fromClipData, fromBlendPosition, IsState2D(fromState));
-            ApplyWeightsToMixer(fromMixer, weights);
+            // Ensure cached array is correct size
+            EnsureArraySize(ref cachedFromWeights, fromClipData.Length);
+            CalculateBlendWeights(fromClipData, fromBlendPosition, IsState2D(fromState), cachedFromWeights);
+            ApplyWeightsToMixer(fromMixer, cachedFromWeights, fromClipData.Length);
         }
         
         private void UpdateToBlendWeights()
         {
             if (!toMixer.IsValid() || toClipData == null) return;
             
-            var weights = CalculateBlendWeights(toClipData, toBlendPosition, IsState2D(toState));
-            ApplyWeightsToMixer(toMixer, weights);
+            // Ensure cached array is correct size
+            EnsureArraySize(ref cachedToWeights, toClipData.Length);
+            CalculateBlendWeights(toClipData, toBlendPosition, IsState2D(toState), cachedToWeights);
+            ApplyWeightsToMixer(toMixer, cachedToWeights, toClipData.Length);
         }
         
-        private void ApplyWeightsToMixer(AnimationMixerPlayable mixer, float[] weights)
+        private static void EnsureArraySize(ref float[] array, int requiredSize)
+        {
+            if (array == null || array.Length < requiredSize)
+                array = new float[requiredSize];
+        }
+        
+        private static void ApplyWeightsToMixer(AnimationMixerPlayable mixer, float[] weights, int count)
         {
             if (!mixer.IsValid() || weights == null) return;
             
-            for (int i = 0; i < weights.Length && i < mixer.GetInputCount(); i++)
+            int inputCount = mixer.GetInputCount();
+            for (int i = 0; i < count && i < inputCount; i++)
             {
                 mixer.SetInputWeight(i, weights[i]);
             }
@@ -285,17 +323,20 @@ namespace DMotion.Editor
         
         /// <summary>
         /// Calculates blend weights for a set of clips at a given blend position.
+        /// Fills the provided weights array in-place to avoid allocation.
         /// </summary>
-        private float[] CalculateBlendWeights(BlendedClipPreview.BlendClipData[] clipData, float2 blendPosition, bool is2D)
+        private void CalculateBlendWeights(BlendedClipPreview.BlendClipData[] clipData, float2 blendPosition, bool is2D, float[] weights)
         {
-            if (clipData == null || clipData.Length == 0) return Array.Empty<float>();
+            if (clipData == null || clipData.Length == 0) return;
             
-            var weights = new float[clipData.Length];
+            // Clear weights
+            for (int i = 0; i < clipData.Length; i++)
+                weights[i] = 0f;
             
             if (clipData.Length == 1)
             {
                 weights[0] = 1f;
-                return weights;
+                return;
             }
             
             if (is2D)
@@ -306,8 +347,6 @@ namespace DMotion.Editor
             {
                 Calculate1DWeights(clipData, blendPosition.x, weights);
             }
-            
-            return weights;
         }
         
         private void Calculate1DWeights(BlendedClipPreview.BlendClipData[] clipData, float blendValue, float[] weights)
@@ -368,9 +407,10 @@ namespace DMotion.Editor
         
         private void Calculate2DWeights(BlendedClipPreview.BlendClipData[] clipData, float2 blendPosition, float[] weights)
         {
-            // Inverse distance weighting
+            // Inverse distance weighting - use cached distances array
+            EnsureArraySize(ref cachedDistances, clipData.Length);
+            
             float totalWeight = 0;
-            float[] distances = new float[clipData.Length];
             
             for (int i = 0; i < clipData.Length; i++)
             {
@@ -379,20 +419,20 @@ namespace DMotion.Editor
                 if (distance < 0.0001f)
                 {
                     // Exactly on this clip position
-                    for (int j = 0; j < weights.Length; j++)
+                    for (int j = 0; j < clipData.Length; j++)
                     {
                         weights[j] = (j == i) ? 1 : 0;
                     }
                     return;
                 }
                 
-                distances[i] = distance;
+                cachedDistances[i] = distance;
             }
             
             const float power = 2f;
             for (int i = 0; i < clipData.Length; i++)
             {
-                float weight = 1f / math.pow(distances[i], power);
+                float weight = 1f / math.pow(cachedDistances[i], power);
                 weights[i] = weight;
                 totalWeight += weight;
             }
@@ -400,11 +440,82 @@ namespace DMotion.Editor
             // Normalize
             if (totalWeight > 0.0001f)
             {
-                for (int i = 0; i < weights.Length; i++)
+                for (int i = 0; i < clipData.Length; i++)
                 {
                     weights[i] /= totalWeight;
                 }
             }
+        }
+        
+        #endregion
+        
+        #region Time Synchronization
+        
+        /// <summary>
+        /// Synchronizes all clip times based on normalized sample time.
+        /// Each clip is set to its own time: normalizedTime * clipLength
+        /// This ensures all clips are at the same normalized position regardless of their individual lengths.
+        /// </summary>
+        private void SyncClipTimes()
+        {
+            // Sync "from" state clips
+            SyncStateClipTimes(fromState, singleFromClipPlayable, fromClipPlayables, fromClipData);
+            
+            // Sync "to" state clips
+            SyncStateClipTimes(toState, singleToClipPlayable, toClipPlayables, toClipData);
+        }
+        
+        private void SyncStateClipTimes(AnimationStateAsset state, AnimationClipPlayable singleClipPlayable, 
+            AnimationClipPlayable[] blendClipPlayables, BlendedClipPreview.BlendClipData[] clipData)
+        {
+            if (state == null) return;
+            
+            // Handle single clip state
+            if (state is SingleClipStateAsset singleClipState && singleClipPlayable.IsValid())
+            {
+                var clip = singleClipState.Clip?.Clip;
+                if (clip != null)
+                {
+                    SetClipTime(singleClipPlayable, clip, normalizedSampleTime);
+                }
+                return;
+            }
+            
+            // Handle blend state
+            if (blendClipPlayables == null || clipData == null) return;
+            
+            for (int i = 0; i < blendClipPlayables.Length && i < clipData.Length; i++)
+            {
+                if (!blendClipPlayables[i].IsValid()) continue;
+                
+                var clip = clipData[i].Clip;
+                if (clip == null) continue;
+                
+                SetClipTime(blendClipPlayables[i], clip, normalizedSampleTime);
+            }
+        }
+        
+        private static void SetClipTime(AnimationClipPlayable clipPlayable, AnimationClip clip, float normalizedTime)
+        {
+            float clipLength = clip.length;
+            if (clipLength <= 0) return;
+            
+            // Each clip's time = normalized position in its own timeline
+            // All clips are synchronized by normalized time (0 = start, 1 = end)
+            float clipTime = normalizedTime * clipLength;
+            
+            // Handle looping - wrap time within clip length
+            if (clip.isLooping)
+            {
+                clipTime = clipTime % clipLength;
+            }
+            else
+            {
+                // Non-looping: clamp to clip duration
+                clipTime = Mathf.Min(clipTime, clipLength);
+            }
+            
+            clipPlayable.SetTime(clipTime);
         }
         
         #endregion
@@ -443,49 +554,6 @@ namespace DMotion.Editor
                         }
                     }
                     break;
-            }
-        }
-        
-        private static float GetStateDuration(AnimationStateAsset state)
-        {
-            if (state == null) return 1f;
-            
-            switch (state)
-            {
-                case SingleClipStateAsset singleClip:
-                    return singleClip.Clip?.Clip?.length ?? 1f;
-                    
-                case LinearBlendStateAsset linearBlend:
-                    if (linearBlend.BlendClips == null || linearBlend.BlendClips.Length == 0)
-                        return 1f;
-                    // Return max duration
-                    float maxDuration = 0f;
-                    foreach (var bc in linearBlend.BlendClips)
-                    {
-                        if (bc.Clip?.Clip != null)
-                        {
-                            float duration = bc.Clip.Clip.length / (bc.Speed > 0 ? bc.Speed : 1f);
-                            maxDuration = Mathf.Max(maxDuration, duration);
-                        }
-                    }
-                    return maxDuration > 0 ? maxDuration : 1f;
-                    
-                case Directional2DBlendStateAsset blend2D:
-                    if (blend2D.BlendClips == null || blend2D.BlendClips.Length == 0)
-                        return 1f;
-                    float max2D = 0f;
-                    foreach (var bc in blend2D.BlendClips)
-                    {
-                        if (bc.Clip?.Clip != null)
-                        {
-                            float duration = bc.Clip.Clip.length / (bc.Speed > 0 ? bc.Speed : 1f);
-                            max2D = Mathf.Max(max2D, duration);
-                        }
-                    }
-                    return max2D > 0 ? max2D : 1f;
-                    
-                default:
-                    return 1f;
             }
         }
         
