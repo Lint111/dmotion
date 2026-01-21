@@ -821,6 +821,41 @@ namespace DMotion.Editor
                 case EventType.MouseMove:
                     UpdateHoveredElement(e.mousePosition);
                     break;
+                    
+                case EventType.KeyDown:
+                    HandleKeyDown(e);
+                    break;
+            }
+        }
+        
+        private void HandleKeyDown(Event e)
+        {
+            switch (e.keyCode)
+            {
+                case KeyCode.Space:
+                    TogglePlayPause();
+                    e.Use();
+                    break;
+                    
+                case KeyCode.LeftArrow:
+                    StepBackward();
+                    e.Use();
+                    break;
+                    
+                case KeyCode.RightArrow:
+                    StepForward();
+                    e.Use();
+                    break;
+                    
+                case KeyCode.Home:
+                    GoToStart();
+                    e.Use();
+                    break;
+                    
+                case KeyCode.End:
+                    GoToEnd();
+                    e.Use();
+                    break;
             }
         }
         
