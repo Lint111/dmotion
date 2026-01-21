@@ -826,6 +826,9 @@ namespace DMotion.Editor
         
         private void HandleMouseDown(Event e, Rect rect)
         {
+            // Take focus so keyboard shortcuts work
+            Focus();
+            
             var mousePos = e.mousePosition;
             float totalDuration = GetTotalTimelineDuration();
             float trackWidth = rect.width - Padding * 2;

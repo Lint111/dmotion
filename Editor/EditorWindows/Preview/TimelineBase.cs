@@ -352,6 +352,9 @@ namespace DMotion.Editor
             var trackRect = GetTrackRect();
             if (trackRect.Contains(evt.localPosition))
             {
+                // Take focus so keyboard shortcuts work
+                Focus();
+                
                 isDragging = true;
                 this.CapturePointer(evt.pointerId);
                 NormalizedTime = PositionToNormalizedTime(evt.localPosition);
