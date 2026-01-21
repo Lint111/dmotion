@@ -192,6 +192,7 @@ namespace DMotion.Editor
         {
             var root = rootVisualElement;
             root.AddToClassList("preview-window");
+            root.focusable = true;
 
             // Load stylesheet
             var styleSheet = FindStyleSheet(UssFileName);
@@ -201,6 +202,9 @@ namespace DMotion.Editor
             }
 
             BuildUI(root);
+            
+            // Register window-level keyboard handler for consistent shortcuts
+            root.RegisterCallback<KeyDownEvent>(OnWindowKeyDown);
             
             // Load saved preview model for current state machine (if any)
             LoadPreviewModelPreference();
@@ -385,6 +389,9 @@ namespace DMotion.Editor
             previewContainer = new IMGUIContainer(OnPreviewGUI);
             previewContainer.AddToClassList("preview-imgui");
             previewContainer.style.display = DisplayStyle.None;
+            
+            // Click on 3D preview focuses the timeline for keyboard shortcuts
+            previewContainer.RegisterCallback<PointerDownEvent>(OnPreviewClicked);
 
             previewPanel.Add(previewPlaceholder);
             previewPanel.Add(previewContainer);
@@ -802,6 +809,68 @@ namespace DMotion.Editor
             previewContainer.style.display = hasPreview ? DisplayStyle.Flex : DisplayStyle.None;
         }
 
+        #endregion
+
+        #region Keyboard and Input Handling
+        
+        private void OnWindowKeyDown(KeyDownEvent evt)
+        {
+            // Forward keyboard events to the active timeline for consistent behavior
+            // This ensures shortcuts work regardless of focus state
+            
+            TimelineBase activeTimeline = currentSelectionType switch
+            {
+                SelectionType.State => stateInspectorBuilder?.TimelineScrubber,
+                SelectionType.Transition or SelectionType.AnyStateTransition => transitionInspectorBuilder?.Timeline,
+                _ => null
+            };
+            
+            if (activeTimeline == null) return;
+            
+            switch (evt.keyCode)
+            {
+                case KeyCode.Space:
+                    activeTimeline.TogglePlayPause();
+                    evt.StopPropagation();
+                    break;
+                    
+                case KeyCode.LeftArrow:
+                    activeTimeline.StepBackward();
+                    evt.StopPropagation();
+                    break;
+                    
+                case KeyCode.RightArrow:
+                    activeTimeline.StepForward();
+                    evt.StopPropagation();
+                    break;
+                    
+                case KeyCode.Home:
+                    activeTimeline.GoToStart();
+                    evt.StopPropagation();
+                    break;
+                    
+                case KeyCode.End:
+                    activeTimeline.GoToEnd();
+                    evt.StopPropagation();
+                    break;
+            }
+        }
+        
+        private void OnPreviewClicked(PointerDownEvent evt)
+        {
+            // Focus the appropriate timeline when clicking on the 3D preview
+            // This enables keyboard shortcuts after interacting with the preview
+            
+            TimelineBase activeTimeline = currentSelectionType switch
+            {
+                SelectionType.State => stateInspectorBuilder?.TimelineScrubber,
+                SelectionType.Transition or SelectionType.AnyStateTransition => transitionInspectorBuilder?.Timeline,
+                _ => null
+            };
+            
+            activeTimeline?.Focus();
+        }
+        
         #endregion
 
         #region Timeline Events
