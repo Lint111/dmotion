@@ -22,20 +22,14 @@ namespace DMotion.Editor
         /// <summary>Height of the 2D blend space visualizer.</summary>
         protected const float BlendSpace2DDefaultHeight = 180f;
         
-        /// <summary>Width of float input fields.</summary>
-        protected const float FloatFieldWidth = 50f;
-        
-        /// <summary>Small spacing between elements (2px).</summary>
-        protected const float SpacingSmall = 2f;
-        
-        /// <summary>Medium spacing between elements (4px).</summary>
-        protected const float SpacingMedium = 4f;
-        
-        /// <summary>Large spacing between elements (8px).</summary>
-        protected const float SpacingLarge = 8f;
+        // Use shared constants
+        protected const float FloatFieldWidth = PreviewEditorConstants.FloatFieldWidth;
+        protected const float SpacingSmall = PreviewEditorConstants.SpacingSmall;
+        protected const float SpacingMedium = PreviewEditorConstants.SpacingMedium;
+        protected const float SpacingLarge = PreviewEditorConstants.SpacingLarge;
         
         /// <summary>Text color for help/hint text.</summary>
-        protected static readonly Color HelpTextColor = new(0.6f, 0.6f, 0.6f);
+        protected static Color HelpTextColor => PreviewEditorColors.DimText;
         
         #endregion
         

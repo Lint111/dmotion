@@ -895,8 +895,10 @@ namespace DMotion.Editor
             // Draw the preview
             previewRenderer.Draw(rect);
             
-            // Handle camera input
-            if (previewRenderer.HandleInput(rect))
+            // Handle camera input (but not if any timeline is dragging)
+            bool transitionTimelineDragging = transitionInspectorBuilder?.Timeline?.IsDragging ?? false;
+            bool stateTimelineDragging = stateInspectorBuilder?.TimelineScrubber?.IsDragging ?? false;
+            if (!transitionTimelineDragging && !stateTimelineDragging && previewRenderer.HandleInput(rect))
             {
                 Repaint();
             }
