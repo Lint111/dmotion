@@ -717,7 +717,7 @@ namespace DMotion.Editor
         {
             if (selectedState == null || stateInspectorBuilder == null) return;
             
-            var content = stateInspectorBuilder.Build(selectedState);
+            var content = stateInspectorBuilder.Build(currentStateMachine, selectedState);
             if (content != null)
             {
                 inspectorContent.Add(content);
