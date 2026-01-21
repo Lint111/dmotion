@@ -336,22 +336,7 @@ namespace DMotion.Editor
             
             trackArea.Add(fromBar);
             
-            // Overlap area (between bars)
-            overlapArea = new VisualElement();
-            overlapArea.AddToClassList("transition-timeline__overlap");
-            
-            blendCurveElement = new VisualElement();
-            blendCurveElement.AddToClassList("transition-timeline__curve");
-            blendCurveElement.generateVisualContent += DrawBlendCurve;
-            overlapArea.Add(blendCurveElement);
-            
-            overlapDurationLabel = new Label();
-            overlapDurationLabel.AddToClassList("transition-timeline__overlap-label");
-            overlapArea.Add(overlapDurationLabel);
-            
-            trackArea.Add(overlapArea);
-            
-            // To bar
+            // To bar (added before overlap so overlap draws on top)
             toBar = new VisualElement();
             toBar.AddToClassList("transition-timeline__bar");
             toBar.AddToClassList("transition-timeline__bar--to");
@@ -371,7 +356,23 @@ namespace DMotion.Editor
             
             trackArea.Add(toBar);
             
-            // Scrubber
+            // Overlap area (between bars - added after bars so it draws on top)
+            overlapArea = new VisualElement();
+            overlapArea.AddToClassList("transition-timeline__overlap");
+            overlapArea.generateVisualContent += DrawOverlapGradient;
+            
+            blendCurveElement = new VisualElement();
+            blendCurveElement.AddToClassList("transition-timeline__curve");
+            blendCurveElement.generateVisualContent += DrawBlendCurve;
+            overlapArea.Add(blendCurveElement);
+            
+            overlapDurationLabel = new Label();
+            overlapDurationLabel.AddToClassList("transition-timeline__overlap-label");
+            overlapArea.Add(overlapDurationLabel);
+            
+            trackArea.Add(overlapArea);
+            
+            // Scrubber (on very top)
             scrubber = new VisualElement();
             scrubber.AddToClassList("transition-timeline__scrubber");
             trackArea.Add(scrubber);
@@ -514,6 +515,41 @@ namespace DMotion.Editor
             }
             
             painter.Stroke();
+        }
+        
+        private void DrawOverlapGradient(MeshGenerationContext ctx)
+        {
+            var rect = overlapArea.contentRect;
+            if (rect.width < 2 || rect.height < 2) return;
+            
+            var painter = ctx.painter2D;
+            
+            // Draw gradient from "from" color (blue) to "to" color (green)
+            // Using vertical strips to simulate a horizontal gradient
+            const int strips = 20;
+            float stripWidth = rect.width / strips;
+            
+            var fromColor = new Color(0.27f, 0.43f, 0.63f, 0.7f);  // Blue-ish
+            var toColor = new Color(0.27f, 0.55f, 0.39f, 0.7f);    // Green-ish
+            
+            for (int i = 0; i < strips; i++)
+            {
+                float t = i / (float)(strips - 1);
+                var color = Color.Lerp(fromColor, toColor, t);
+                
+                painter.fillColor = color;
+                painter.BeginPath();
+                
+                float x = i * stripWidth;
+                float w = stripWidth + 1; // +1 to avoid gaps
+                
+                painter.MoveTo(new Vector2(x, 0));
+                painter.LineTo(new Vector2(x + w, 0));
+                painter.LineTo(new Vector2(x + w, rect.height));
+                painter.LineTo(new Vector2(x, rect.height));
+                painter.ClosePath();
+                painter.Fill();
+            }
         }
         
         #endregion

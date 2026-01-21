@@ -195,7 +195,7 @@ namespace DMotion.Editor
             // Initialize weights and sync times
             UpdateTransitionWeights();
             UpdateFromBlendWeights();
-            UpdateToBlendWeights();
+            UpdateToBlendWeights(); 
             SyncClipTimes();
             
             return graph;
