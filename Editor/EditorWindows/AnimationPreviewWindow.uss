@@ -589,7 +589,12 @@
 }
 
 .transition-timeline__bar--hover {
-    filter: brightness(1.2);
+    /* Brighten effect - use lighter background color since filter is not supported */
+    background-color: rgb(90, 130, 180);
+}
+
+.transition-timeline__bar--to.transition-timeline__bar--hover {
+    background-color: rgb(90, 160, 120);
 }
 
 .transition-timeline__bar-overlap {
@@ -636,7 +641,6 @@
     bottom: -4px;
     background-color: rgba(255, 255, 255, 0.7);
     border-radius: 2px;
-    cursor: ew-resize;
 }
 
 .transition-timeline__handle--hover,
@@ -649,7 +653,7 @@
     position: absolute;
     top: 42px;
     height: 40px;
-    background: linear-gradient(to right, rgba(70, 110, 160, 0.5), rgba(70, 140, 100, 0.5));
+    background-color: rgba(70, 125, 130, 0.5);
     border-width: 1px;
     border-color: rgba(255, 255, 255, 0.2);
     border-radius: 2px;
@@ -683,18 +687,6 @@
     bottom: 20px;
     background-color: rgb(220, 100, 100);
     border-radius: 1px;
-}
-
-.transition-timeline__scrubber::before {
-    content: "";
-    position: absolute;
-    top: -6px;
-    left: -4px;
-    width: 0;
-    height: 0;
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    border-top: 6px solid rgb(220, 100, 100);
 }
 
 /* Footer */
