@@ -23,6 +23,9 @@ namespace DMotion.Editor
         // Use shared constant
         private const float FloatFieldWidth = PreviewEditorConstants.FloatFieldWidth;
         
+        // Use shared constant
+        private const float FloatFieldWidth = PreviewEditorConstants.FloatFieldWidth;
+        
         #endregion
         
         #region State
@@ -50,6 +53,16 @@ namespace DMotion.Editor
         // Cached blend curve for timeline
         private AnimationCurve cachedBlendCurve;
         
+        // Serialized data for undo support
+        private SerializedObject cachedSerializedObject;
+        private SerializedProperty cachedTransitionProperty;
+        private SerializedProperty cachedDurationProperty;
+        private SerializedProperty cachedExitTimeProperty;
+        private SerializedProperty cachedBlendCurveProperty;
+        
+        // Cached blend curve for timeline
+        private AnimationCurve cachedBlendCurve;
+        
         // Blend space editors - using base class references (polymorphism)
         private BlendSpaceVisualEditorBase fromBlendSpaceEditor;
         private BlendSpaceVisualEditorBase toBlendSpaceEditor;
@@ -59,6 +72,11 @@ namespace DMotion.Editor
         private Action<Vector2> toBlendPositionHandler;
         private Action fromRepaintHandler;
         private Action toRepaintHandler;
+        
+        // Cached arrays to avoid per-frame allocation in IMGUI callbacks
+        private const int CurvePreviewSegments = 30;
+        private static readonly Vector3[] cachedCurvePreviewPoints = new Vector3[CurvePreviewSegments + 1];
+        private static GUIStyle cachedCurvePreviewLabelStyle;
         
         // Cached arrays to avoid per-frame allocation in IMGUI callbacks
         private const int CurvePreviewSegments = 30;
@@ -131,8 +149,20 @@ namespace DMotion.Editor
                 cachedBlendCurveProperty = transitionProperty.FindPropertyRelative("BlendCurve");
             }
             
+            // Cache serialized data for timeline editing with undo support
+            cachedSerializedObject = sourceSerializedObject;
+            cachedTransitionProperty = transitionProperty;
+            if (transitionProperty != null)
+            {
+                cachedDurationProperty = transitionProperty.FindPropertyRelative("TransitionDuration");
+                cachedExitTimeProperty = transitionProperty.FindPropertyRelative("EndTime");
+                cachedBlendCurveProperty = transitionProperty.FindPropertyRelative("BlendCurve");
+            }
+            
             // Store transition settings for playback
             transitionDuration = transition?.TransitionDuration ?? 0.25f;
+            transitionExitTime = transition?.EndTime ?? 0.75f;  // Exit time = To bar position
+            cachedBlendCurve = transition?.BlendCurve ?? AnimationCurve.Linear(0f, 1f, 1f, 0f);
             transitionExitTime = transition?.EndTime ?? 0.75f;  // Exit time = To bar position
             cachedBlendCurve = transition?.BlendCurve ?? AnimationCurve.Linear(0f, 1f, 1f, 0f);
             
@@ -183,10 +213,15 @@ namespace DMotion.Editor
                 timeline.OnExitTimeChanged -= OnTimelineExitTimeChanged;
                 timeline.OnTransitionDurationChanged -= OnTimelineDurationChanged;
                 timeline.OnTransitionOffsetChanged -= OnTimelineOffsetChanged;
+                timeline.OnExitTimeChanged -= OnTimelineExitTimeChanged;
+                timeline.OnTransitionDurationChanged -= OnTimelineDurationChanged;
+                timeline.OnTransitionOffsetChanged -= OnTimelineOffsetChanged;
                 timeline = null;
             }
 
+
             // Cleanup blend space editors
+
 
             CleanupBlendSpaceEditor(ref fromBlendSpaceEditor, fromBlendPositionHandler, fromRepaintHandler);
             CleanupBlendSpaceEditor(ref toBlendSpaceEditor, toBlendPositionHandler, toRepaintHandler);
@@ -195,6 +230,14 @@ namespace DMotion.Editor
             toBlendPositionHandler = null;
             fromRepaintHandler = null;
             toRepaintHandler = null;
+            
+            // Clear cached serialized data
+            cachedSerializedObject = null;
+            cachedTransitionProperty = null;
+            cachedDurationProperty = null;
+            cachedExitTimeProperty = null;
+            cachedBlendCurveProperty = null;
+            cachedBlendCurve = null;
             
             // Clear cached serialized data
             cachedSerializedObject = null;
@@ -233,6 +276,7 @@ namespace DMotion.Editor
             infoLabel.AddToClassList("info-message");
             infoLabel.style.whiteSpace = WhiteSpace.Normal;
             infoLabel.style.color = PreviewEditorColors.DimText;
+            infoLabel.style.color = PreviewEditorColors.DimText;
             infoSection.Add(infoLabel);
             container.Add(infoSection);
             
@@ -251,10 +295,12 @@ namespace DMotion.Editor
             header.style.paddingBottom = 4;
             header.style.borderBottomWidth = 1;
             header.style.borderBottomColor = PreviewEditorColors.Border;
+            header.style.borderBottomColor = PreviewEditorColors.Border;
             header.style.marginBottom = 8;
 
             var typeLabel = new Label(type);
             typeLabel.AddToClassList("header-type");
+            typeLabel.style.color = PreviewEditorColors.DimText;
             typeLabel.style.color = PreviewEditorColors.DimText;
             typeLabel.style.marginRight = 8;
 
@@ -378,6 +424,11 @@ namespace DMotion.Editor
         /// </summary>
         private VisualElement CreateSliderWithField(string label, float min, float max, float value,
             out Slider outSlider, out FloatField outField, Action<float> onValueChanged, string suffix = "")
+        /// <summary>
+        /// Creates a slider with float field, optionally returning references for external sync.
+        /// </summary>
+        private VisualElement CreateSliderWithField(string label, float min, float max, float value,
+            out Slider outSlider, out FloatField outField, Action<float> onValueChanged, string suffix = "")
         {
             var container = new VisualElement();
             container.AddToClassList("property-row");
@@ -434,7 +485,20 @@ namespace DMotion.Editor
             outSlider = slider;
             outField = field;
             
+            
+            outSlider = slider;
+            outField = field;
+            
             return container;
+        }
+        
+        /// <summary>
+        /// Creates a slider with float field (convenience overload without output refs).
+        /// </summary>
+        private VisualElement CreateSliderWithField(string label, float min, float max, float value,
+            Action<float> onValueChanged, string suffix = "")
+        {
+            return CreateSliderWithField(label, min, max, value, out _, out _, onValueChanged, suffix);
         }
         
         /// <summary>
@@ -706,6 +770,95 @@ namespace DMotion.Editor
                     section.Add(curveSection);
                 }
             }
+            
+            // Blend Curve - uses custom editor window with correct presets
+            if (transitionProperty != null)
+            {
+                var blendCurveProp = transitionProperty.FindPropertyRelative("BlendCurve");
+                if (blendCurveProp != null)
+                {
+                    var curveSection = new VisualElement();
+                    curveSection.style.marginTop = 8;
+                    
+                    // Header row with label and edit button
+                    var headerRow = new VisualElement();
+                    headerRow.style.flexDirection = FlexDirection.Row;
+                    headerRow.style.justifyContent = Justify.SpaceBetween;
+                    headerRow.style.alignItems = Align.Center;
+                    
+                    var curveLabel = new Label("Blend Curve");
+                    curveLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+                    headerRow.Add(curveLabel);
+                    
+                    curveSection.Add(headerRow);
+                    
+                    // Curve preview (IMGUI for drawing)
+                    IMGUIContainer curvePreview = null;
+                    curvePreview = new IMGUIContainer(() =>
+                    {
+                        var rect = curvePreview.contentRect;
+                        if (rect.width < 10 || rect.height < 10) return;
+                        
+                        // Background
+                        EditorGUI.DrawRect(rect, PreviewEditorColors.DarkBackground);
+                        
+                        // Draw curve - use cached arrays to avoid allocation
+                        var curve = cachedBlendCurve ?? AnimationCurve.Linear(0f, 1f, 1f, 0f);
+                        
+                        Handles.BeginGUI();
+                        Handles.color = PreviewEditorColors.CurveAccent;
+                        
+                        float padding = 4f;
+                        float curveWidth = rect.width - padding * 2;
+                        float curveHeight = rect.height - padding * 2;
+                        
+                        for (int i = 0; i <= CurvePreviewSegments; i++)
+                        {
+                            float t = i / (float)CurvePreviewSegments;
+                            float value = curve.Evaluate(t);
+                            float x = rect.x + padding + t * curveWidth;
+                            float y = rect.y + padding + (1f - value) * curveHeight;
+                            cachedCurvePreviewPoints[i] = new Vector3(x, y, 0);
+                        }
+                        
+                        Handles.DrawAAPolyLine(2f, cachedCurvePreviewPoints);
+                        Handles.EndGUI();
+                        
+                        // Labels - use cached style
+                        cachedCurvePreviewLabelStyle ??= new GUIStyle(EditorStyles.miniLabel)
+                        {
+                            fontSize = 9,
+                            normal = { textColor = PreviewEditorColors.DimText }
+                        };
+                        GUI.Label(new Rect(rect.x + 2, rect.y + 2, 30, 12), "From", cachedCurvePreviewLabelStyle);
+                        GUI.Label(new Rect(rect.x + 2, rect.yMax - 14, 20, 12), "To", cachedCurvePreviewLabelStyle);
+                        
+                        // Click to edit
+                        if (Event.current.type == EventType.MouseDown && rect.Contains(Event.current.mousePosition))
+                        {
+                            BlendCurveEditorWindow.Show(
+                                cachedBlendCurve ?? AnimationCurve.Linear(0f, 1f, 1f, 0f),
+                                newCurve =>
+                                {
+                                    cachedBlendCurve = newCurve;
+                                    blendCurveProp.animationCurveValue = newCurve;
+                                    blendCurveProp.serializedObject.ApplyModifiedProperties();
+                                    if (timeline != null)
+                                        timeline.BlendCurve = newCurve;
+                                },
+                                curvePreview.worldBound);
+                            Event.current.Use();
+                        }
+                    });
+                    curvePreview.style.height = 60;
+                    curvePreview.style.marginTop = 4;
+                    curvePreview.style.cursor = StyleKeyword.None; // Will show as clickable
+                    curvePreview.tooltip = "Click to edit curve";
+                    curveSection.Add(curvePreview);
+                    
+                    section.Add(curveSection);
+                }
+            }
         }
         
         #endregion
@@ -722,13 +875,23 @@ namespace DMotion.Editor
                 transitionDuration,
                 0f, // transitionOffset
                 cachedBlendCurve);
+                transitionDuration,
+                0f, // transitionOffset
+                cachedBlendCurve);
             timeline.IsLooping = cachedIsLooping;
             timeline.PlaybackSpeed = 1f; // Real-time playback, state speeds affect animation sampling
+            timeline.PlaybackSpeed = 1f; // Real-time playback, state speeds affect animation sampling
             
+            // Subscribe to playback events
             // Subscribe to playback events
             timeline.OnTimeChanged += OnTimelineTimeChanged;
             timeline.OnPlayStateChanged += OnTimelinePlayStateChanged;
             timeline.OnTransitionProgressChanged += OnTimelineProgressChanged;
+            
+            // Subscribe to editing events (for dragging markers)
+            timeline.OnExitTimeChanged += OnTimelineExitTimeChanged;
+            timeline.OnTransitionDurationChanged += OnTimelineDurationChanged;
+            timeline.OnTransitionOffsetChanged += OnTimelineOffsetChanged;
             
             // Subscribe to editing events (for dragging markers)
             timeline.OnExitTimeChanged += OnTimelineExitTimeChanged;
@@ -754,6 +917,40 @@ namespace DMotion.Editor
         private void OnTimelineProgressChanged(float progress)
         {
             AnimationPreviewEvents.RaiseTransitionProgressChanged(transitionFrom, transitionTo, progress);
+        }
+        
+        private void OnTimelineExitTimeChanged(float newExitTime)
+        {
+            if (cachedExitTimeProperty != null && cachedSerializedObject != null)
+            {
+                cachedSerializedObject.Update();
+                cachedExitTimeProperty.floatValue = newExitTime;
+                cachedSerializedObject.ApplyModifiedProperties();
+                
+                transitionExitTime = newExitTime;
+            }
+            OnRepaintRequested?.Invoke();
+        }
+        
+        private void OnTimelineDurationChanged(float newDuration)
+        {
+            if (cachedDurationProperty != null && cachedSerializedObject != null)
+            {
+                cachedSerializedObject.Update();
+                cachedDurationProperty.floatValue = newDuration;
+                cachedSerializedObject.ApplyModifiedProperties();
+                
+                transitionDuration = newDuration;
+            }
+            OnRepaintRequested?.Invoke();
+        }
+        
+        private void OnTimelineOffsetChanged(float newOffset)
+        {
+            // TransitionOffset is not currently stored in the transition data
+            // This would need a new field in StateOutTransition if we want to persist it
+            // For now, just update the preview
+            OnRepaintRequested?.Invoke();
         }
         
         private void OnTimelineExitTimeChanged(float newExitTime)
@@ -824,11 +1021,16 @@ namespace DMotion.Editor
             
             // Build parameter info
             foreach (var (label, name) in blendInfo.ParameterNames)
+            foreach (var (label, name) in blendInfo.ParameterNames)
             {
+                section.Add(CreatePropertyRow(label, name));
                 section.Add(CreatePropertyRow(label, name));
             }
             
             // Build sliders based on dimensionality
+            // Track slider/field references for bidirectional sync
+            Slider xSlider = null, ySlider = null;
+            FloatField xField = null, yField = null;
             // Track slider/field references for bidirectional sync
             Slider xSlider = null, ySlider = null;
             FloatField xField = null, yField = null;
@@ -838,6 +1040,7 @@ namespace DMotion.Editor
             {
                 // X slider
                 var xRow = CreateSliderWithField("X", blendInfo.MinX, blendInfo.MaxX, 0f,
+                    out xSlider, out xField,
                     out xSlider, out xField,
                     newValue =>
                     {
@@ -849,6 +1052,7 @@ namespace DMotion.Editor
                 
                 // Y slider
                 var yRow = CreateSliderWithField("Y", blendInfo.MinY, blendInfo.MaxY, 0f,
+                    out ySlider, out yField,
                     out ySlider, out yField,
                     newValue =>
                     {
@@ -864,6 +1068,7 @@ namespace DMotion.Editor
                 float defaultValue = (blendInfo.MinX + blendInfo.MaxX) / 2f;
                 var sliderRow = CreateSliderWithField("Blend Value", blendInfo.MinX, blendInfo.MaxX, defaultValue,
                     out xSlider, out xField,
+                    out xSlider, out xField,
                     newValue =>
                     {
                         currentPosition = new Vector2(newValue, 0);
@@ -877,6 +1082,8 @@ namespace DMotion.Editor
             var serializedObject = new SerializedObject(state);
             float editorHeight = blendInfo.Is2D ? BlendSpace2DHeight : BlendSpace1DHeight;
             
+            IMGUIContainer blendSpaceContainer = null;
+            blendSpaceContainer = new IMGUIContainer(() =>
             IMGUIContainer blendSpaceContainer = null;
             blendSpaceContainer = new IMGUIContainer(() =>
             {
@@ -933,9 +1140,17 @@ namespace DMotion.Editor
             section.Add(blendSpaceContainer);
             
             // Wire up position change from visual editor (bidirectional sync)
+            // Wire up position change from visual editor (bidirectional sync)
             Action<Vector2> positionHandler = pos =>
             {
                 currentPosition = pos;
+                
+                // Sync sliders with new position from visual editor
+                xSlider?.SetValueWithoutNotify(pos.x);
+                xField?.SetValueWithoutNotify(pos.x);
+                ySlider?.SetValueWithoutNotify(pos.y);
+                yField?.SetValueWithoutNotify(pos.y);
+                
                 
                 // Sync sliders with new position from visual editor
                 xSlider?.SetValueWithoutNotify(pos.x);
@@ -1066,6 +1281,7 @@ namespace DMotion.Editor
                 AnimationPreviewEvents.RaiseTransitionToBlendPositionChanged(state, position);
         }
         
+        private static void CleanupBlendSpaceEditor(ref BlendSpaceVisualEditorBase editor, Action<Vector2> positionHandler, Action repaintHandler)
         private static void CleanupBlendSpaceEditor(ref BlendSpaceVisualEditorBase editor, Action<Vector2> positionHandler, Action repaintHandler)
         {
             if (editor != null)
