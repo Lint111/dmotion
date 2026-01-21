@@ -498,9 +498,7 @@
     border-radius: 4px;
 }
 
-/* ============================================
-   Transition Timeline (UIElements version)
-   ============================================ */
+/* Transition Timeline */
 
 .transition-timeline {
     min-height: 180px;
@@ -509,12 +507,14 @@
     margin-top: 8px;
 }
 
-/* Header */
 .transition-timeline__header {
     flex-direction: row;
     justify-content: space-between;
     height: 22px;
-    padding: 2px 8px;
+    padding-left: 8px;
+    padding-right: 8px;
+    padding-top: 2px;
+    padding-bottom: 2px;
     background-color: rgb(40, 40, 45);
     border-top-left-radius: 4px;
     border-top-right-radius: 4px;
@@ -533,18 +533,19 @@
     color: rgb(100, 200, 140);
 }
 
-/* Track Area */
 .transition-timeline__track {
     flex-grow: 1;
     min-height: 120px;
     position: relative;
     background-color: rgb(50, 50, 55);
-    margin: 4px;
+    margin-left: 4px;
+    margin-right: 4px;
+    margin-top: 4px;
+    margin-bottom: 4px;
     border-radius: 3px;
     overflow: hidden;
 }
 
-/* Time Grid */
 .transition-timeline__grid {
     position: absolute;
     left: 0;
@@ -570,7 +571,6 @@
     -unity-text-align: middle-center;
 }
 
-/* State Bars */
 .transition-timeline__bar {
     position: absolute;
     height: 26px;
@@ -586,15 +586,6 @@
 .transition-timeline__bar--to {
     bottom: 32px;
     background-color: rgb(70, 140, 100);
-}
-
-.transition-timeline__bar--hover {
-    /* Brighten effect - use lighter background color since filter is not supported */
-    background-color: rgb(90, 130, 180);
-}
-
-.transition-timeline__bar--to.transition-timeline__bar--hover {
-    background-color: rgb(90, 160, 120);
 }
 
 .transition-timeline__bar-overlap {
@@ -618,7 +609,7 @@
     top: 0;
     bottom: 0;
     font-size: 11px;
-    color: white;
+    color: rgb(255, 255, 255);
     -unity-font-style: bold;
     -unity-text-align: middle-left;
 }
@@ -633,7 +624,6 @@
     -unity-text-align: middle-right;
 }
 
-/* Exit Time Handle */
 .transition-timeline__handle {
     position: absolute;
     width: 10px;
@@ -643,12 +633,10 @@
     border-radius: 2px;
 }
 
-.transition-timeline__handle--hover,
-.transition-timeline__handle:hover {
+.transition-timeline__handle--hover {
     background-color: rgb(255, 180, 80);
 }
 
-/* Overlap Area */
 .transition-timeline__overlap {
     position: absolute;
     top: 42px;
@@ -674,12 +662,11 @@
     top: 0;
     bottom: 0;
     font-size: 11px;
-    color: white;
+    color: rgb(255, 255, 255);
     -unity-font-style: bold;
     -unity-text-align: middle-center;
 }
 
-/* Scrubber */
 .transition-timeline__scrubber {
     position: absolute;
     width: 2px;
@@ -689,12 +676,12 @@
     border-radius: 1px;
 }
 
-/* Footer */
 .transition-timeline__footer {
     flex-direction: row;
     align-items: center;
     height: 28px;
-    padding: 0 8px;
+    padding-left: 8px;
+    padding-right: 8px;
     background-color: rgb(40, 40, 45);
     border-bottom-left-radius: 4px;
     border-bottom-right-radius: 4px;
@@ -703,7 +690,10 @@
 .transition-timeline__play-button {
     width: 24px;
     height: 20px;
-    padding: 0;
+    padding-left: 0;
+    padding-right: 0;
+    padding-top: 0;
+    padding-bottom: 0;
     font-size: 10px;
     background-color: rgb(60, 60, 65);
     border-color: rgb(80, 80, 85);
