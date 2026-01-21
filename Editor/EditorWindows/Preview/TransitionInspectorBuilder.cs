@@ -114,11 +114,8 @@ namespace DMotion.Editor
             var container = new VisualElement();
             container.AddToClassList("transition-inspector");
             
-            string fromName = isAnyState ? "Any State" : (fromState?.name ?? "?");
-            string toName = toState?.name ?? "(exit)";
-            
-            // Header
-            var header = CreateSectionHeader("Transition", $"{fromName} -> {toName}");
+            // Header with clickable state names
+            var header = CreateTransitionHeader(fromState, toState, isAnyState);
             container.Add(header);
             
             // Find the transition and its serialized property
@@ -267,6 +264,83 @@ namespace DMotion.Editor
 
             header.Add(typeLabel);
             header.Add(nameLabel);
+
+            return header;
+        }
+        
+        /// <summary>
+        /// Creates a transition header with clickable state name links.
+        /// </summary>
+        private VisualElement CreateTransitionHeader(AnimationStateAsset fromState, AnimationStateAsset toState, bool isAnyState)
+        {
+            var header = new VisualElement();
+            header.AddToClassList("section-header");
+            header.style.flexDirection = FlexDirection.Row;
+            header.style.flexWrap = Wrap.Wrap;
+            header.style.paddingBottom = 4;
+            header.style.borderBottomWidth = 1;
+            header.style.borderBottomColor = PreviewEditorColors.Border;
+            header.style.marginBottom = 8;
+
+            // Type label
+            var typeLabel = new Label("Transition");
+            typeLabel.AddToClassList("header-type");
+            typeLabel.style.color = PreviewEditorColors.DimText;
+            typeLabel.style.marginRight = 8;
+            header.Add(typeLabel);
+
+            // From state - clickable if it's an actual state (not Any State)
+            string fromName = isAnyState ? "Any State" : (fromState?.name ?? "?");
+            var fromLabel = new Label(fromName);
+            fromLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+            
+            if (!isAnyState && fromState != null)
+            {
+                fromLabel.style.color = PreviewEditorColors.FromState;
+                fromLabel.style.cursor = StyleKeyword.None;
+                fromLabel.tooltip = $"Click to preview {fromState.name}";
+                fromLabel.RegisterCallback<MouseDownEvent>(evt =>
+                {
+                    AnimationPreviewEvents.RaiseNavigateToState(fromState);
+                    evt.StopPropagation();
+                });
+                fromLabel.RegisterCallback<MouseEnterEvent>(_ => fromLabel.style.color = PreviewEditorColors.FromStateHighlight);
+                fromLabel.RegisterCallback<MouseLeaveEvent>(_ => fromLabel.style.color = PreviewEditorColors.FromState);
+            }
+            else
+            {
+                fromLabel.style.color = PreviewEditorColors.DimText;
+            }
+            header.Add(fromLabel);
+
+            // Arrow
+            var arrowLabel = new Label(" -> ");
+            arrowLabel.style.color = PreviewEditorColors.DimText;
+            header.Add(arrowLabel);
+
+            // To state - clickable if it exists
+            string toName = toState?.name ?? "(exit)";
+            var toLabel = new Label(toName);
+            toLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+            
+            if (toState != null)
+            {
+                toLabel.style.color = PreviewEditorColors.ToState;
+                toLabel.style.cursor = StyleKeyword.None;
+                toLabel.tooltip = $"Click to preview {toState.name}";
+                toLabel.RegisterCallback<MouseDownEvent>(evt =>
+                {
+                    AnimationPreviewEvents.RaiseNavigateToState(toState);
+                    evt.StopPropagation();
+                });
+                toLabel.RegisterCallback<MouseEnterEvent>(_ => toLabel.style.color = PreviewEditorColors.ToStateHighlight);
+                toLabel.RegisterCallback<MouseLeaveEvent>(_ => toLabel.style.color = PreviewEditorColors.ToState);
+            }
+            else
+            {
+                toLabel.style.color = PreviewEditorColors.DimText;
+            }
+            header.Add(toLabel);
 
             return header;
         }

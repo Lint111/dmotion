@@ -126,6 +126,10 @@ namespace DMotion.Editor
             AnimationPreviewEvents.OnTransitionToBlendPositionChanged += OnTransitionToBlendPositionChanged;
             AnimationPreviewEvents.OnTransitionTimeChanged += OnTransitionTimeChanged;
             
+            // Subscribe to navigation events
+            AnimationPreviewEvents.OnNavigateToState += OnNavigateToState;
+            AnimationPreviewEvents.OnNavigateToTransition += OnNavigateToTransition;
+            
             // Create extracted components
             CreateBuilders();
             previewRenderer = new PreviewRenderer();
@@ -160,6 +164,10 @@ namespace DMotion.Editor
             AnimationPreviewEvents.OnTransitionFromBlendPositionChanged -= OnTransitionFromBlendPositionChanged;
             AnimationPreviewEvents.OnTransitionToBlendPositionChanged -= OnTransitionToBlendPositionChanged;
             AnimationPreviewEvents.OnTransitionTimeChanged -= OnTransitionTimeChanged;
+            
+            // Unsubscribe from navigation events
+            AnimationPreviewEvents.OnNavigateToState -= OnNavigateToState;
+            AnimationPreviewEvents.OnNavigateToTransition -= OnNavigateToTransition;
 
             // Clear preview event subscriptions (safety net for external subscribers)
             AnimationPreviewEvents.ClearAllSubscriptions();
@@ -486,6 +494,52 @@ namespace DMotion.Editor
             {
                 // Refresh the UI in case the selected element was modified
                 UpdateSelectionUI();
+            }
+        }
+        
+        private void OnNavigateToState(AnimationStateAsset state)
+        {
+            if (state == null || currentStateMachine == null) return;
+            
+            // Update local selection state
+            selectedState = state;
+            selectedTransitionFrom = null;
+            selectedTransitionTo = null;
+            isAnyStateSelected = false;
+            currentSelectionType = SelectionType.State;
+            
+            // Initialize state speed from the selected state
+            currentStateSpeed = state.Speed > 0 ? state.Speed : 1f;
+            
+            // Update UI
+            UpdateSelectionUI();
+            
+            // Also notify the state machine editor to sync selection
+            StateMachineEditorEvents.RaiseStateSelected(currentStateMachine, state);
+        }
+        
+        private void OnNavigateToTransition(AnimationStateAsset fromState, AnimationStateAsset toState, bool isAnyState)
+        {
+            if (currentStateMachine == null) return;
+            
+            // Update local selection state
+            selectedState = null;
+            selectedTransitionFrom = fromState;
+            selectedTransitionTo = toState;
+            isAnyStateSelected = isAnyState;
+            currentSelectionType = isAnyState ? SelectionType.AnyStateTransition : SelectionType.Transition;
+            
+            // Update UI
+            UpdateSelectionUI();
+            
+            // Also notify the state machine editor to sync selection
+            if (isAnyState)
+            {
+                StateMachineEditorEvents.RaiseAnyStateTransitionSelected(currentStateMachine, toState);
+            }
+            else
+            {
+                StateMachineEditorEvents.RaiseTransitionSelected(currentStateMachine, fromState, toState);
             }
         }
 

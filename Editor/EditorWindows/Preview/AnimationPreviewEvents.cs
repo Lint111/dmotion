@@ -127,6 +127,22 @@ namespace DMotion.Editor
 
         #endregion
 
+        #region Navigation Events
+
+        /// <summary>
+        /// Fired when the user requests to navigate to a state preview.
+        /// Args: (state)
+        /// </summary>
+        public static event Action<AnimationStateAsset> OnNavigateToState;
+
+        /// <summary>
+        /// Fired when the user requests to navigate to a transition preview.
+        /// Args: (fromState, toState, isAnyState)
+        /// </summary>
+        public static event Action<AnimationStateAsset, AnimationStateAsset, bool> OnNavigateToTransition;
+
+        #endregion
+
         #region Preview Lifecycle Events
 
         /// <summary>
@@ -237,6 +253,22 @@ namespace DMotion.Editor
 
         #endregion
 
+        #region Raise Methods - Navigation
+
+        /// <summary>Raises <see cref="OnNavigateToState"/>.</summary>
+        public static void RaiseNavigateToState(AnimationStateAsset state)
+        {
+            OnNavigateToState?.Invoke(state);
+        }
+
+        /// <summary>Raises <see cref="OnNavigateToTransition"/>.</summary>
+        public static void RaiseNavigateToTransition(AnimationStateAsset fromState, AnimationStateAsset toState, bool isAnyState)
+        {
+            OnNavigateToTransition?.Invoke(fromState, toState, isAnyState);
+        }
+
+        #endregion
+
         #region Raise Methods - Lifecycle
 
         /// <summary>Raises <see cref="OnPreviewCreated"/>.</summary>
@@ -298,6 +330,10 @@ namespace DMotion.Editor
             OnTransitionFromBlendPositionChanged = null;
             OnTransitionToBlendPositionChanged = null;
             OnTransitionPlayStateChanged = null;
+            
+            // Navigation events
+            OnNavigateToState = null;
+            OnNavigateToTransition = null;
             
             // Lifecycle events
             OnPreviewCreated = null;

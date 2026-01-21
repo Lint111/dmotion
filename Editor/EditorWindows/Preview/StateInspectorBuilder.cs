@@ -124,6 +124,9 @@ namespace DMotion.Editor
             // Timeline section
             BuildTimeline(container, state);
             
+            // Outgoing transitions section
+            BuildTransitionsSection(container, state);
+            
             // Bind serialized object
             container.Bind(serializedObject);
             
@@ -404,6 +407,91 @@ namespace DMotion.Editor
             
             timelineSection.Add(timelineScrubber);
             container.Add(timelineSection);
+        }
+        
+        private void BuildTransitionsSection(VisualElement container, AnimationStateAsset state)
+        {
+            if (state.OutTransitions == null || state.OutTransitions.Count == 0)
+                return;
+            
+            var transitionsSection = CreateSection("Transitions");
+            
+            foreach (var transition in state.OutTransitions)
+            {
+                var toState = transition.ToState;
+                var transitionRow = CreateClickableTransitionRow(state, toState, transition);
+                transitionsSection.Add(transitionRow);
+            }
+            
+            container.Add(transitionsSection);
+        }
+        
+        private VisualElement CreateClickableTransitionRow(AnimationStateAsset fromState, AnimationStateAsset toState, StateOutTransition transition)
+        {
+            var row = new VisualElement();
+            row.AddToClassList("transition-link-row");
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.marginBottom = 2;
+            row.style.paddingLeft = 4;
+            row.style.paddingTop = 2;
+            row.style.paddingBottom = 2;
+            
+            // Arrow icon
+            var arrowLabel = new Label("\u2192"); // Unicode right arrow
+            arrowLabel.style.marginRight = 6;
+            arrowLabel.style.color = PreviewEditorColors.DimText;
+            row.Add(arrowLabel);
+            
+            // Target state name (clickable)
+            string toName = toState?.name ?? "(exit)";
+            var targetLabel = new Label(toName);
+            targetLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+            
+            if (toState != null)
+            {
+                targetLabel.style.color = PreviewEditorColors.ToState;
+                targetLabel.tooltip = $"Click to preview transition to {toState.name}";
+                
+                // Hover effect
+                targetLabel.RegisterCallback<MouseEnterEvent>(_ =>
+                {
+                    targetLabel.style.color = PreviewEditorColors.ToStateHighlight;
+                    row.style.backgroundColor = new Color(0.3f, 0.3f, 0.3f, 0.3f);
+                });
+                targetLabel.RegisterCallback<MouseLeaveEvent>(_ =>
+                {
+                    targetLabel.style.color = PreviewEditorColors.ToState;
+                    row.style.backgroundColor = Color.clear;
+                });
+                
+                // Click to navigate to transition
+                targetLabel.RegisterCallback<MouseDownEvent>(evt =>
+                {
+                    AnimationPreviewEvents.RaiseNavigateToTransition(fromState, toState, false);
+                    evt.StopPropagation();
+                });
+            }
+            else
+            {
+                targetLabel.style.color = PreviewEditorColors.DimText;
+            }
+            row.Add(targetLabel);
+            
+            // Duration info
+            var durationLabel = new Label($" ({transition.TransitionDuration:F2}s)");
+            durationLabel.style.color = PreviewEditorColors.DimText;
+            row.Add(durationLabel);
+            
+            // Conditions count (if any)
+            if (transition.Conditions != null && transition.Conditions.Count > 0)
+            {
+                var conditionsLabel = new Label($" [{transition.Conditions.Count} condition{(transition.Conditions.Count > 1 ? "s" : "")}]");
+                conditionsLabel.style.color = new Color(0.5f, 0.5f, 0.5f);
+                conditionsLabel.style.fontSize = 10;
+                row.Add(conditionsLabel);
+            }
+            
+            return row;
         }
         
         #endregion
