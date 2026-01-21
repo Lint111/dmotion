@@ -113,12 +113,11 @@ namespace DMotion.Editor
             var container = new VisualElement();
             container.AddToClassList("state-inspector");
             
-            // Simple header (type + name)
-            var header = CreateSectionHeader(GetStateTypeLabel(state), state.name);
+            // Header with type, name, and duration
+            var duration = GetStateDuration(state);
+            var durationText = duration > 0 ? $" ({duration:F2}s)" : "";
+            var header = CreateSectionHeader(GetStateTypeLabel(state), $"{state.name}{durationText}");
             container.Add(header);
-            
-            // Navigation section (collapsible, with sub-foldouts)
-            BuildNavigationSection(container, stateMachine, state);
             
             // Common properties section
             BuildCommonProperties(container, state);
@@ -128,6 +127,9 @@ namespace DMotion.Editor
             
             // Timeline section
             BuildTimeline(container, state);
+            
+            // Navigation section at bottom (collapsible)
+            BuildNavigationSection(container, stateMachine, state);
             
             // Bind serialized object
             container.Bind(serializedObject);
@@ -333,9 +335,9 @@ namespace DMotion.Editor
                 });
             propertiesSection.Add(loopContainer);
             
-            // Speed Parameter (optional)
+            // Speed Parameter (only show if assigned)
             var speedParamProp = serializedObject.FindProperty("SpeedParameter");
-            if (speedParamProp != null)
+            if (speedParamProp != null && speedParamProp.objectReferenceValue != null)
             {
                 var speedParamContainer = new VisualElement();
                 speedParamContainer.AddToClassList("property-row");
@@ -346,12 +348,12 @@ namespace DMotion.Editor
                 speedParamLabel.AddToClassList("property-label");
                 speedParamLabel.style.width = 100;
                 speedParamLabel.style.minWidth = 100;
+                speedParamLabel.tooltip = "Parameter that controls playback speed at runtime";
                 speedParamContainer.Add(speedParamLabel);
                 
-                var speedParamField = new PropertyField(speedParamProp, "");
-                speedParamField.AddToClassList("property-field");
-                speedParamField.BindProperty(speedParamProp);
-                speedParamContainer.Add(speedParamField);
+                var speedParamValue = new Label(speedParamProp.objectReferenceValue.name);
+                speedParamValue.style.color = PreviewEditorColors.DimText;
+                speedParamContainer.Add(speedParamValue);
                 
                 propertiesSection.Add(speedParamContainer);
             }
@@ -614,6 +616,45 @@ namespace DMotion.Editor
                 SubStateMachineStateAsset => "Sub-State Machine",
                 _ => "State"
             };
+        }
+        
+        /// <summary>
+        /// Gets the duration of the state's animation (longest clip for blend states).
+        /// </summary>
+        private static float GetStateDuration(AnimationStateAsset state)
+        {
+            switch (state)
+            {
+                case SingleClipStateAsset singleClip:
+                    return singleClip.Clip?.Clip != null ? singleClip.Clip.Clip.length : 0f;
+                    
+                case LinearBlendStateAsset linearBlend:
+                    float maxDuration1D = 0f;
+                    if (linearBlend.BlendClips != null)
+                    {
+                        foreach (var clip in linearBlend.BlendClips)
+                        {
+                            if (clip.Clip?.Clip != null)
+                                maxDuration1D = Mathf.Max(maxDuration1D, clip.Clip.Clip.length);
+                        }
+                    }
+                    return maxDuration1D;
+                    
+                case Directional2DBlendStateAsset blend2D:
+                    float maxDuration2D = 0f;
+                    if (blend2D.BlendClips != null)
+                    {
+                        foreach (var clip in blend2D.BlendClips)
+                        {
+                            if (clip.Clip?.Clip != null)
+                                maxDuration2D = Mathf.Max(maxDuration2D, clip.Clip.Clip.length);
+                        }
+                    }
+                    return maxDuration2D;
+                    
+                default:
+                    return 0f;
+            }
         }
         
         #endregion

@@ -539,7 +539,7 @@ namespace DMotion.Editor
             StateOutTransition transition,
             SerializedProperty transitionProperty)
         {
-            // Duration
+            // Duration (editable)
             if (transitionProperty != null)
             {
                 var durationProp = transitionProperty.FindPropertyRelative("TransitionDuration");
@@ -560,23 +560,7 @@ namespace DMotion.Editor
                 section.Add(CreatePropertyRow("Duration", transition?.TransitionDuration.ToString("F2") + "s" ?? "?"));
             }
             
-            // State speeds (read-only info)
-            float fromSpeed = transitionFrom?.Speed ?? 1f;
-            float toSpeed = transitionTo?.Speed ?? 1f;
-            section.Add(CreatePropertyRow("From Speed", $"{fromSpeed:F2}x"));
-            section.Add(CreatePropertyRow("To Speed", $"{toSpeed:F2}x"));
-            
-            // Loop toggle (preview-only)
-            var loopRow = CreateToggleRow("Loop", false,
-                newValue =>
-                {
-                    cachedIsLooping = newValue;
-                    if (timeline != null)
-                        timeline.IsLooping = newValue;
-                });
-            section.Add(loopRow);
-            
-            // Exit Time (always shown - controlled by To bar position in timeline)
+            // Exit Time with tooltip (editable)
             if (transitionProperty != null)
             {
                 var endTimeProp = transitionProperty.FindPropertyRelative("EndTime");
@@ -589,25 +573,49 @@ namespace DMotion.Editor
                             if (timeline != null)
                                 timeline.ExitTime = newValue;
                         });
+                    exitTimeRow.tooltip = "Time in the From state (seconds) when the transition begins. Drag the To bar in the timeline to adjust visually.";
                     section.Add(exitTimeRow);
                 }
             }
             
-            // Conditions (read-only)
+            // Loop toggle (preview-only)
+            var loopRow = CreateToggleRow("Loop Preview", false,
+                newValue =>
+                {
+                    cachedIsLooping = newValue;
+                    if (timeline != null)
+                        timeline.IsLooping = newValue;
+                });
+            loopRow.tooltip = "Loop the transition preview playback";
+            section.Add(loopRow);
+            
+            // State Info (collapsed foldout for read-only info)
+            float fromSpeed = transitionFrom?.Speed ?? 1f;
+            float toSpeed = transitionTo?.Speed ?? 1f;
+            float fromDuration = GetStateDuration(transitionFrom);
+            float toDuration = GetStateDuration(transitionTo);
+            
+            var stateInfoFoldout = new Foldout { text = "State Info", value = false };
+            stateInfoFoldout.style.marginTop = 4;
+            stateInfoFoldout.Add(CreatePropertyRow("From Speed", $"{fromSpeed:F2}x"));
+            stateInfoFoldout.Add(CreatePropertyRow("To Speed", $"{toSpeed:F2}x"));
+            if (fromDuration > 0) stateInfoFoldout.Add(CreatePropertyRow("From Duration", $"{fromDuration:F2}s"));
+            if (toDuration > 0) stateInfoFoldout.Add(CreatePropertyRow("To Duration", $"{toDuration:F2}s"));
+            section.Add(stateInfoFoldout);
+            
+            // Conditions (collapsed foldout, read-only)
             if (transition != null && transition.Conditions != null && transition.Conditions.Count > 0)
             {
-                var conditionsLabel = new Label($"Conditions: {transition.Conditions.Count}");
-                conditionsLabel.style.marginTop = 8;
-                conditionsLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
-                section.Add(conditionsLabel);
+                var conditionsFoldout = new Foldout { text = $"Conditions ({transition.Conditions.Count})", value = false };
+                conditionsFoldout.style.marginTop = 4;
                 
-                for (int i = 0; i < transition.Conditions.Count; i++)
+                foreach (var condition in transition.Conditions)
                 {
-                    var condition = transition.Conditions[i];
                     var paramName = condition.Parameter?.name ?? "(none)";
                     var conditionDesc = GetConditionDescription(condition);
-                    section.Add(CreatePropertyRow($"  {paramName}", conditionDesc));
+                    conditionsFoldout.Add(CreatePropertyRow(paramName, conditionDesc));
                 }
+                section.Add(conditionsFoldout);
             }
             
             // Blend Curve - uses custom editor window with correct presets
@@ -1131,6 +1139,47 @@ namespace DMotion.Editor
         #endregion
         
         #region Private - Helpers
+        
+        /// <summary>
+        /// Gets the duration of the state's animation (longest clip for blend states).
+        /// </summary>
+        private static float GetStateDuration(AnimationStateAsset state)
+        {
+            if (state == null) return 0f;
+            
+            switch (state)
+            {
+                case SingleClipStateAsset singleClip:
+                    return singleClip.Clip?.Clip != null ? singleClip.Clip.Clip.length : 0f;
+                    
+                case LinearBlendStateAsset linearBlend:
+                    float maxDuration1D = 0f;
+                    if (linearBlend.BlendClips != null)
+                    {
+                        foreach (var clip in linearBlend.BlendClips)
+                        {
+                            if (clip.Clip?.Clip != null)
+                                maxDuration1D = Mathf.Max(maxDuration1D, clip.Clip.Clip.length);
+                        }
+                    }
+                    return maxDuration1D;
+                    
+                case Directional2DBlendStateAsset blend2D:
+                    float maxDuration2D = 0f;
+                    if (blend2D.BlendClips != null)
+                    {
+                        foreach (var clip in blend2D.BlendClips)
+                        {
+                            if (clip.Clip?.Clip != null)
+                                maxDuration2D = Mathf.Max(maxDuration2D, clip.Clip.Clip.length);
+                        }
+                    }
+                    return maxDuration2D;
+                    
+                default:
+                    return 0f;
+            }
+        }
         
         private static string GetConditionDescription(TransitionCondition condition)
         {
