@@ -113,9 +113,12 @@ namespace DMotion.Editor
             var container = new VisualElement();
             container.AddToClassList("state-inspector");
             
-            // Header with transition links (like transition preview)
-            var header = CreateStateHeader(stateMachine, state);
+            // Simple header (type + name)
+            var header = CreateSectionHeader(GetStateTypeLabel(state), state.name);
             container.Add(header);
+            
+            // Navigation section (collapsible, with sub-foldouts)
+            BuildNavigationSection(container, stateMachine, state);
             
             // Common properties section
             BuildCommonProperties(container, state);
@@ -410,198 +413,130 @@ namespace DMotion.Editor
         }
         
         /// <summary>
-        /// Creates a state header with clickable transition links (outgoing, incoming, any state).
+        /// Builds a collapsible navigation section with sub-foldouts for Out/In transitions.
         /// </summary>
-        private VisualElement CreateStateHeader(StateMachineAsset stateMachine, AnimationStateAsset state)
+        private void BuildNavigationSection(VisualElement container, StateMachineAsset stateMachine, AnimationStateAsset state)
         {
-            var header = new VisualElement();
-            header.AddToClassList("section-header");
-            header.style.paddingBottom = 4;
-            header.style.borderBottomWidth = 1;
-            header.style.borderBottomColor = PreviewEditorColors.Border;
-            header.style.marginBottom = 8;
-
-            // First row: Type + Name
-            var titleRow = new VisualElement();
-            titleRow.style.flexDirection = FlexDirection.Row;
-            titleRow.style.marginBottom = 4;
-
-            var typeLabel = new Label(GetStateTypeLabel(state));
-            typeLabel.AddToClassList("header-type");
-            typeLabel.style.color = PreviewEditorColors.DimText;
-            typeLabel.style.marginRight = 8;
-            titleRow.Add(typeLabel);
-
-            var nameLabel = new Label(state.name);
-            nameLabel.AddToClassList("header-name");
+            // Collect transitions
+            var outTransitions = state.OutTransitions ?? new System.Collections.Generic.List<StateOutTransition>();
+            var incomingStates = stateMachine != null ? FindIncomingTransitions(stateMachine, state) : new System.Collections.Generic.List<AnimationStateAsset>();
+            var anyStateTransitions = stateMachine != null ? FindAnyStateTransitionsTo(stateMachine, state) : new System.Collections.Generic.List<StateOutTransition>();
+            
+            // Don't show section if no transitions
+            int totalCount = outTransitions.Count + incomingStates.Count + anyStateTransitions.Count;
+            if (totalCount == 0) return;
+            
+            // Main navigation foldout
+            var navigationFoldout = new Foldout { text = $"Navigation ({totalCount})", value = false };
+            navigationFoldout.AddToClassList("navigation-foldout");
+            
+            // Out Transitions sub-foldout
+            if (outTransitions.Count > 0)
+            {
+                var outFoldout = new Foldout { text = $"Out Transitions ({outTransitions.Count})", value = true };
+                outFoldout.AddToClassList("navigation-sub-foldout");
+                outFoldout.style.marginLeft = 8;
+                
+                foreach (var transition in outTransitions)
+                {
+                    var row = CreateTransitionRow(
+                        "\u2192", // →
+                        transition.ToState?.name ?? "(exit)",
+                        $"{transition.TransitionDuration:F2}s",
+                        transition.ToState != null ? $"Click to preview transition to {transition.ToState.name}" : null,
+                        PreviewEditorColors.ToState,
+                        PreviewEditorColors.ToStateHighlight,
+                        transition.ToState != null ? () => AnimationPreviewEvents.RaiseNavigateToTransition(state, transition.ToState, false) : null);
+                    outFoldout.Add(row);
+                }
+                
+                navigationFoldout.Add(outFoldout);
+            }
+            
+            // In Transitions sub-foldout (incoming from other states + any state)
+            int inCount = incomingStates.Count + anyStateTransitions.Count;
+            if (inCount > 0)
+            {
+                var inFoldout = new Foldout { text = $"In Transitions ({inCount})", value = true };
+                inFoldout.AddToClassList("navigation-sub-foldout");
+                inFoldout.style.marginLeft = 8;
+                
+                // Regular incoming transitions
+                foreach (var fromState in incomingStates)
+                {
+                    var row = CreateTransitionRow(
+                        "\u2190", // ←
+                        fromState.name,
+                        null,
+                        $"Click to preview transition from {fromState.name}",
+                        PreviewEditorColors.FromState,
+                        PreviewEditorColors.FromStateHighlight,
+                        () => AnimationPreviewEvents.RaiseNavigateToTransition(fromState, state, false));
+                    inFoldout.Add(row);
+                }
+                
+                // Any State transitions
+                foreach (var transition in anyStateTransitions)
+                {
+                    var row = CreateTransitionRow(
+                        "\u2190", // ←
+                        "Any State",
+                        $"{transition.TransitionDuration:F2}s",
+                        "Click to preview Any State transition",
+                        new Color(0.7f, 0.5f, 0.8f), // Purple
+                        new Color(0.9f, 0.7f, 1f),
+                        () => AnimationPreviewEvents.RaiseNavigateToTransition(null, state, true));
+                    inFoldout.Add(row);
+                }
+                
+                navigationFoldout.Add(inFoldout);
+            }
+            
+            container.Add(navigationFoldout);
+        }
+        
+        /// <summary>
+        /// Creates a single clickable transition row.
+        /// </summary>
+        private VisualElement CreateTransitionRow(
+            string arrow, string stateName, string duration, string tooltip,
+            Color normalColor, Color hoverColor, Action onClick)
+        {
+            var row = new VisualElement();
+            row.AddToClassList("transition-row");
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.paddingTop = 2;
+            row.style.paddingBottom = 2;
+            row.style.paddingLeft = 4;
+            
+            // Arrow
+            var arrowLabel = new Label(arrow);
+            arrowLabel.style.color = PreviewEditorColors.DimText;
+            arrowLabel.style.marginRight = 6;
+            arrowLabel.style.width = 14;
+            row.Add(arrowLabel);
+            
+            // State name (clickable)
+            var nameLabel = new Label(stateName);
             nameLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
-            titleRow.Add(nameLabel);
-
-            header.Add(titleRow);
-
-            // Collect all transitions
-            var hasTransitions = false;
-            
-            // Outgoing transitions
-            if (state.OutTransitions != null && state.OutTransitions.Count > 0)
-            {
-                hasTransitions = true;
-                var outRow = CreateTransitionLinksRow("\u2192", "To:", state.OutTransitions, 
-                    t => (state, t.ToState, false), PreviewEditorColors.ToState, PreviewEditorColors.ToStateHighlight);
-                header.Add(outRow);
-            }
-            
-            // Incoming transitions (from other states)
-            if (stateMachine != null)
-            {
-                var incomingTransitions = FindIncomingTransitions(stateMachine, state);
-                if (incomingTransitions.Count > 0)
-                {
-                    hasTransitions = true;
-                    var inRow = CreateTransitionLinksRowFromStates("\u2190", "From:", incomingTransitions,
-                        PreviewEditorColors.FromState, PreviewEditorColors.FromStateHighlight);
-                    header.Add(inRow);
-                }
-                
-                // Any State transitions targeting this state
-                var anyStateTransitions = FindAnyStateTransitionsTo(stateMachine, state);
-                if (anyStateTransitions.Count > 0)
-                {
-                    hasTransitions = true;
-                    var anyRow = CreateAnyStateTransitionRow(anyStateTransitions, state);
-                    header.Add(anyRow);
-                }
-            }
-            
-            if (!hasTransitions)
-            {
-                var noTransitionsLabel = new Label("No transitions");
-                noTransitionsLabel.style.color = PreviewEditorColors.DimText;
-                noTransitionsLabel.style.fontSize = 10;
-                noTransitionsLabel.style.marginTop = 2;
-                header.Add(noTransitionsLabel);
-            }
-
-            return header;
-        }
-        
-        private VisualElement CreateTransitionLinksRow(
-            string arrow, string prefix, 
-            System.Collections.Generic.IReadOnlyList<StateOutTransition> transitions,
-            Func<StateOutTransition, (AnimationStateAsset from, AnimationStateAsset to, bool isAnyState)> getNavInfo,
-            Color normalColor, Color hoverColor)
-        {
-            var row = new VisualElement();
-            row.style.flexDirection = FlexDirection.Row;
-            row.style.flexWrap = Wrap.Wrap;
-            row.style.marginTop = 2;
-
-            var arrowLabel = new Label(arrow);
-            arrowLabel.style.color = PreviewEditorColors.DimText;
-            arrowLabel.style.marginRight = 4;
-            arrowLabel.style.width = 16;
-            row.Add(arrowLabel);
-
-            for (int i = 0; i < transitions.Count; i++)
-            {
-                var transition = transitions[i];
-                var navInfo = getNavInfo(transition);
-                var targetState = navInfo.to;
-                
-                var link = CreateClickableStateLink(
-                    targetState?.name ?? "(exit)", 
-                    targetState != null ? $"Click to preview transition" : null,
-                    normalColor, hoverColor,
-                    targetState != null ? () => AnimationPreviewEvents.RaiseNavigateToTransition(navInfo.from, navInfo.to, navInfo.isAnyState) : null);
-                row.Add(link);
-                
-                if (i < transitions.Count - 1)
-                {
-                    var separator = new Label(", ");
-                    separator.style.color = PreviewEditorColors.DimText;
-                    row.Add(separator);
-                }
-            }
-
-            return row;
-        }
-        
-        private VisualElement CreateTransitionLinksRowFromStates(
-            string arrow, string prefix,
-            System.Collections.Generic.List<AnimationStateAsset> fromStates,
-            Color normalColor, Color hoverColor)
-        {
-            var row = new VisualElement();
-            row.style.flexDirection = FlexDirection.Row;
-            row.style.flexWrap = Wrap.Wrap;
-            row.style.marginTop = 2;
-
-            var arrowLabel = new Label(arrow);
-            arrowLabel.style.color = PreviewEditorColors.DimText;
-            arrowLabel.style.marginRight = 4;
-            arrowLabel.style.width = 16;
-            row.Add(arrowLabel);
-
-            for (int i = 0; i < fromStates.Count; i++)
-            {
-                var fromState = fromStates[i];
-                var toState = currentState;
-                
-                var link = CreateClickableStateLink(
-                    fromState.name,
-                    $"Click to preview transition from {fromState.name}",
-                    normalColor, hoverColor,
-                    () => AnimationPreviewEvents.RaiseNavigateToTransition(fromState, toState, false));
-                row.Add(link);
-                
-                if (i < fromStates.Count - 1)
-                {
-                    var separator = new Label(", ");
-                    separator.style.color = PreviewEditorColors.DimText;
-                    row.Add(separator);
-                }
-            }
-
-            return row;
-        }
-        
-        private VisualElement CreateAnyStateTransitionRow(
-            System.Collections.Generic.List<StateOutTransition> anyStateTransitions, 
-            AnimationStateAsset targetState)
-        {
-            var row = new VisualElement();
-            row.style.flexDirection = FlexDirection.Row;
-            row.style.marginTop = 2;
-
-            var arrowLabel = new Label("\u2190");
-            arrowLabel.style.color = PreviewEditorColors.DimText;
-            arrowLabel.style.marginRight = 4;
-            arrowLabel.style.width = 16;
-            row.Add(arrowLabel);
-            
-            var link = CreateClickableStateLink(
-                "Any State",
-                "Click to preview Any State transition",
-                new Color(0.7f, 0.5f, 0.8f), // Purple for Any State
-                new Color(0.9f, 0.7f, 1f),
-                () => AnimationPreviewEvents.RaiseNavigateToTransition(null, targetState, true));
-            row.Add(link);
-
-            return row;
-        }
-        
-        private Label CreateClickableStateLink(string text, string tooltip, Color normalColor, Color hoverColor, Action onClick)
-        {
-            var label = new Label(text);
-            label.style.unityFontStyleAndWeight = FontStyle.Bold;
             
             if (onClick != null)
             {
-                label.style.color = normalColor;
-                label.tooltip = tooltip;
-                label.RegisterCallback<MouseEnterEvent>(_ => label.style.color = hoverColor);
-                label.RegisterCallback<MouseLeaveEvent>(_ => label.style.color = normalColor);
-                label.RegisterCallback<MouseDownEvent>(evt =>
+                nameLabel.style.color = normalColor;
+                nameLabel.tooltip = tooltip;
+                
+                // Hover effects on entire row
+                row.RegisterCallback<MouseEnterEvent>(_ =>
+                {
+                    nameLabel.style.color = hoverColor;
+                    row.style.backgroundColor = new Color(0.3f, 0.3f, 0.3f, 0.3f);
+                });
+                row.RegisterCallback<MouseLeaveEvent>(_ =>
+                {
+                    nameLabel.style.color = normalColor;
+                    row.style.backgroundColor = Color.clear;
+                });
+                row.RegisterCallback<MouseDownEvent>(evt =>
                 {
                     onClick();
                     evt.StopPropagation();
@@ -609,10 +544,20 @@ namespace DMotion.Editor
             }
             else
             {
-                label.style.color = PreviewEditorColors.DimText;
+                nameLabel.style.color = PreviewEditorColors.DimText;
+            }
+            row.Add(nameLabel);
+            
+            // Duration (if provided)
+            if (!string.IsNullOrEmpty(duration))
+            {
+                var durationLabel = new Label($" ({duration})");
+                durationLabel.style.color = PreviewEditorColors.DimText;
+                durationLabel.style.fontSize = 10;
+                row.Add(durationLabel);
             }
             
-            return label;
+            return row;
         }
         
         private static System.Collections.Generic.List<AnimationStateAsset> FindIncomingTransitions(StateMachineAsset stateMachine, AnimationStateAsset targetState)
