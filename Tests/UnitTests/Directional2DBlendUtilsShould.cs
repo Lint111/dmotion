@@ -471,6 +471,168 @@ namespace DMotion.Tests
 
         #endregion
 
+        #region 8-Way Locomotion Tests
+
+        [Test]
+        public void Handle8WaySetup_CardinalDirections()
+        {
+            using (var test = new Test2DBlend(9))
+            {
+                // Standard 8-way + idle setup
+                test.Positions[0] = new float2(0, 0);      // Idle
+                test.Positions[1] = new float2(0, 1);      // N
+                test.Positions[2] = new float2(1, 1);      // NE
+                test.Positions[3] = new float2(1, 0);      // E
+                test.Positions[4] = new float2(1, -1);     // SE
+                test.Positions[5] = new float2(0, -1);     // S
+                test.Positions[6] = new float2(-1, -1);    // SW
+                test.Positions[7] = new float2(-1, 0);     // W
+                test.Positions[8] = new float2(-1, 1);     // NW
+
+                // Test North direction - should primarily use North clip
+                test.Calculate(new float2(0, 1));
+                Assert.AreEqual(1f, test.Weights[1], 0.01f, "North input should use North clip");
+
+                // Weights should sum to 1
+                float sum = 0;
+                for (int i = 0; i < 9; i++) sum += test.Weights[i];
+                Assert.AreEqual(1f, sum, 0.01f);
+            }
+        }
+
+        [Test]
+        public void Handle8WaySetup_DiagonalDirections()
+        {
+            using (var test = new Test2DBlend(9))
+            {
+                // Standard 8-way + idle setup
+                test.Positions[0] = new float2(0, 0);      // Idle
+                test.Positions[1] = new float2(0, 1);      // N
+                test.Positions[2] = new float2(1, 1);      // NE
+                test.Positions[3] = new float2(1, 0);      // E
+                test.Positions[4] = new float2(1, -1);     // SE
+                test.Positions[5] = new float2(0, -1);     // S
+                test.Positions[6] = new float2(-1, -1);    // SW
+                test.Positions[7] = new float2(-1, 0);     // W
+                test.Positions[8] = new float2(-1, 1);     // NW
+
+                // Test NE direction - should primarily use NE clip
+                test.Calculate(math.normalize(new float2(1, 1)));
+                Assert.Greater(test.Weights[2], 0.8f, "NE input should primarily use NE clip");
+
+                // Weights should sum to 1
+                float sum = 0;
+                for (int i = 0; i < 9; i++) sum += test.Weights[i];
+                Assert.AreEqual(1f, sum, 0.01f);
+            }
+        }
+
+        #endregion
+
+        #region Non-Unit Distance Tests
+
+        [Test]
+        public void HandleClips_At_VaryingDistances()
+        {
+            using (var test = new Test2DBlend(4))
+            {
+                // Clips at different distances from origin
+                test.Positions[0] = new float2(2, 0);      // East at distance 2
+                test.Positions[1] = new float2(0, 0.5f);   // North at distance 0.5
+                test.Positions[2] = new float2(-1, 0);     // West at distance 1
+                test.Positions[3] = new float2(0, -3);     // South at distance 3
+
+                test.Calculate(new float2(1, 0));
+
+                // Should still work - East clip should have most weight
+                Assert.Greater(test.Weights[0], 0.5f, "East direction should use East clip");
+                
+                float sum = 0;
+                for (int i = 0; i < 4; i++) sum += test.Weights[i];
+                Assert.AreEqual(1f, sum, 0.01f);
+            }
+        }
+
+        [Test]
+        public void HandleClips_WithIdleAndVaryingDistances()
+        {
+            using (var test = new Test2DBlend(3))
+            {
+                test.Positions[0] = new float2(0, 0);      // Idle
+                test.Positions[1] = new float2(2, 0);      // East at distance 2
+                test.Positions[2] = new float2(0, 0.5f);   // North at distance 0.5
+
+                // Small magnitude pointing East - should blend with idle
+                test.Calculate(new float2(0.5f, 0));
+                
+                Assert.Greater(test.Weights[0], 0.5f, "Small magnitude should have significant idle weight");
+                Assert.Greater(test.Weights[1], 0.1f, "Should have some East weight");
+                
+                float sum = 0;
+                for (int i = 0; i < 3; i++) sum += test.Weights[i];
+                Assert.AreEqual(1f, sum, 0.01f);
+            }
+        }
+
+        #endregion
+
+        #region Degenerate Case Tests
+
+        [Test]
+        public void HandleClips_AllAtSameAngle()
+        {
+            using (var test = new Test2DBlend(3))
+            {
+                // All clips in East direction at different distances
+                test.Positions[0] = new float2(1, 0);
+                test.Positions[1] = new float2(2, 0);
+                test.Positions[2] = new float2(3, 0);
+
+                test.Calculate(new float2(1, 0));
+
+                // Should still sum to 1 and not crash
+                float sum = 0;
+                for (int i = 0; i < 3; i++) sum += test.Weights[i];
+                Assert.AreEqual(1f, sum, 0.01f, "Weights should sum to 1 even with degenerate setup");
+            }
+        }
+
+        [Test]
+        public void HandleClips_VeryCloseAngles()
+        {
+            using (var test = new Test2DBlend(3))
+            {
+                // Clips very close together in angle
+                test.Positions[0] = new float2(1, 0);
+                test.Positions[1] = new float2(1, 0.01f);  // Almost East
+                test.Positions[2] = new float2(1, -0.01f); // Almost East
+
+                test.Calculate(new float2(1, 0.005f));
+
+                // Should handle gracefully
+                float sum = 0;
+                for (int i = 0; i < 3; i++)
+                {
+                    sum += test.Weights[i];
+                    Assert.GreaterOrEqual(test.Weights[i], 0f, $"Weight {i} should not be negative");
+                }
+                Assert.AreEqual(1f, sum, 0.01f);
+            }
+        }
+
+        [Test]
+        public void HandleEmptyPositionsArray()
+        {
+            using (var test = new Test2DBlend(0))
+            {
+                // Should not crash with empty array
+                test.Calculate(new float2(1, 0));
+                // No assertions needed - just verify no crash
+            }
+        }
+
+        #endregion
+
         /// <summary>
         /// Test helper - manages allocation/deallocation for each individual test.
         /// Allocates exactly the required array sizes, properly disposes after use.

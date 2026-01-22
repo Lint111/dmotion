@@ -193,6 +193,42 @@ namespace DMotion.Tests
             );
         }
 
+        internal static Directional2DBlendStateMachineState CreateDirectional2DBlendForStateMachine(short stateIndex,
+            EntityManager manager, Entity entity)
+        {
+            Assert.GreaterOrEqual(stateIndex, 0);
+            var stateMachine = manager.GetComponentData<AnimationStateMachine>(entity);
+            Assert.IsTrue(stateIndex < stateMachine.StateMachineBlob.Value.States.Length);
+            Assert.AreEqual(StateType.Directional2DBlend, stateMachine.StateMachineBlob.Value.States[stateIndex].Type);
+            var directional2DBlend = manager.GetBuffer<Directional2DBlendStateMachineState>(entity);
+            var animationStates = manager.GetBuffer<AnimationState>(entity);
+            var samplers = manager.GetBuffer<ClipSampler>(entity);
+            return Directional2DBlendStateUtils.NewForStateMachine(stateIndex,
+                stateMachine.StateMachineBlob,
+                stateMachine.ClipsBlob,
+                stateMachine.ClipEventsBlob,
+                ref directional2DBlend,
+                ref animationStates,
+                ref samplers,
+                1.0f // default speed
+            );
+        }
+
+        internal static void SetBlendParameter2D(in Directional2DBlendStateMachineState directional2DState,
+            EntityManager manager, Entity entity, float x, float y)
+        {
+            var blendParams = manager.GetBuffer<FloatParameter>(entity);
+            ref var blob = ref directional2DState.Directional2DBlob;
+            
+            var paramX = blendParams[blob.BlendParameterIndexX];
+            paramX.Value = x;
+            blendParams[blob.BlendParameterIndexX] = paramX;
+            
+            var paramY = blendParams[blob.BlendParameterIndexY];
+            paramY.Value = y;
+            blendParams[blob.BlendParameterIndexY] = paramY;
+        }
+
         internal static SingleClipState CreateSingleClipState(EntityManager manager, Entity entity,
             BlobAssetReference<ClipEventsBlob> clipEvents,
             float speed = 1.0f,
