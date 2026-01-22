@@ -605,7 +605,7 @@ namespace DMotion.Editor
         private void OnPointerDown(PointerDownEvent evt)
         {
             var rect = contentRect;
-            var mousePos = evt.localPosition;
+            var mousePos = (Vector2)evt.localPosition;
             
             Focus();
             
@@ -679,7 +679,7 @@ namespace DMotion.Editor
         private void OnPointerMove(PointerMoveEvent evt)
         {
             var rect = contentRect;
-            var mousePos = evt.localPosition;
+            var mousePos = (Vector2)evt.localPosition;
             
             // Update mode button hover state
             bool wasHovered = isModeButtonHovered;
@@ -735,7 +735,7 @@ namespace DMotion.Editor
         private void OnWheel(WheelEvent evt)
         {
             var rect = contentRect;
-            var mousePos = evt.localPosition;
+            var mousePos = evt.localMousePosition;
             
             // Only zoom if mouse is in bounds
             if (!rect.Contains(mousePos)) return;

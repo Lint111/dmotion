@@ -58,6 +58,11 @@ namespace DMotion.Editor
         private Action<Vector2> fromBlendPositionHandler;
         private Action<Vector2> toBlendPositionHandler;
         
+        // Cached arrays for curve preview IMGUI drawing (still used for curve preview)
+        private const int CurvePreviewSegments = 30;
+        private static readonly Vector3[] cachedCurvePreviewPoints = new Vector3[CurvePreviewSegments + 1];
+        private static GUIStyle cachedCurvePreviewLabelStyle;
+        
         #endregion
         
         #region Events
