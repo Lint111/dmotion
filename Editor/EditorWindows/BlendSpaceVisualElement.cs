@@ -163,8 +163,9 @@ namespace DMotion.Editor
             // Enable custom drawing
             generateVisualContent += OnGenerateVisualContent;
             
-            // Set focusable for keyboard input
+            // Ensure this element receives pointer/wheel events
             focusable = true;
+            pickingMode = PickingMode.Position;
             
             // Register event handlers
             RegisterCallback<PointerDownEvent>(OnPointerDown);
@@ -172,8 +173,8 @@ namespace DMotion.Editor
             RegisterCallback<PointerUpEvent>(OnPointerUp);
             RegisterCallback<PointerEnterEvent>(OnPointerEnter);
             RegisterCallback<PointerLeaveEvent>(OnPointerLeave);
-            // Register wheel event in TrickleDown phase to capture BEFORE parent ScrollView
-            RegisterCallback<WheelEvent>(OnWheel, TrickleDown.TrickleDown);
+            // Wheel event for zoom - StopPropagation + PreventDefault prevents parent ScrollView from scrolling
+            RegisterCallback<WheelEvent>(OnWheel);
             RegisterCallback<GeometryChangedEvent>(OnGeometryChanged);
         }
         
@@ -727,8 +728,17 @@ namespace DMotion.Editor
         
         private void OnPointerEnter(PointerEnterEvent evt)
         {
-            // Focus the element to capture wheel events before parent ScrollView
+            // Focus the element to capture wheel events
             Focus();
+            
+            // Disable parent ScrollView's wheel scrolling while mouse is over this element
+            var scrollView = GetFirstAncestorOfType<ScrollView>();
+            if (scrollView != null)
+            {
+                // Store the original value and set to 0 to disable wheel scrolling
+                scrollView.userData = scrollView.mouseWheelScrollSize;
+                scrollView.mouseWheelScrollSize = 0;
+            }
         }
         
         private void OnPointerLeave(PointerLeaveEvent evt)
@@ -737,6 +747,14 @@ namespace DMotion.Editor
             {
                 isModeButtonHovered = false;
                 MarkDirtyRepaint();
+            }
+            
+            // Restore parent ScrollView's wheel scrolling
+            var scrollView = GetFirstAncestorOfType<ScrollView>();
+            if (scrollView != null && scrollView.userData is float originalSize)
+            {
+                scrollView.mouseWheelScrollSize = originalSize;
+                scrollView.userData = null;
             }
         }
         
@@ -753,8 +771,8 @@ namespace DMotion.Editor
             
             MarkDirtyRepaint();
             
-            // Stop propagation AND prevent default to block parent ScrollView
-            evt.StopPropagation();
+            // Use all available methods to prevent parent ScrollView from handling this event
+            evt.StopImmediatePropagation();
             evt.PreventDefault();
         }
         
