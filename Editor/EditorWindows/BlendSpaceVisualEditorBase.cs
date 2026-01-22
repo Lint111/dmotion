@@ -26,7 +26,7 @@ namespace DMotion.Editor
         // Scroll ownership - prevents scroll hijacking when scrolling from outside
         private bool wasMouseInRect;
         private double mouseEnteredTime;
-        private const double ScrollOwnershipDelay = 0.25; // Seconds to wait after mouse enters before accepting scroll
+        private const double ScrollOwnershipDelay = 0.05; // Reduced from 0.25 - just enough to prevent accidental hijacking
         
         // Preview indicator state
         protected Vector2 previewPosition;

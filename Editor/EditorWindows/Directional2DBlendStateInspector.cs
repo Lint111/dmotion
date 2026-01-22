@@ -9,6 +9,7 @@ namespace DMotion.Editor
         private SerializedProperty clipsProperty;
         private SerializedProperty parameterXProperty;
         private SerializedProperty parameterYProperty;
+        private SerializedProperty algorithmProperty;
         private SubAssetReferencePopupSelector<AnimationParameterAsset> blendParametersSelector;
         
         // Visual editor
@@ -57,6 +58,7 @@ namespace DMotion.Editor
             clipsProperty = serializedObject.FindProperty(nameof(Directional2DBlendStateAsset.BlendClips));
             parameterXProperty = serializedObject.FindProperty(nameof(Directional2DBlendStateAsset.BlendParameterX));
             parameterYProperty = serializedObject.FindProperty(nameof(Directional2DBlendStateAsset.BlendParameterY));
+            algorithmProperty = serializedObject.FindProperty(nameof(Directional2DBlendStateAsset.Algorithm));
             
             blendParametersSelector = new SubAssetReferencePopupSelector<AnimationParameterAsset>(
                 parameterXProperty.serializedObject.targetObject,
@@ -142,6 +144,7 @@ namespace DMotion.Editor
                 EditorGUI.indentLevel++;
                 blendParametersSelector.OnGUI(EditorGUILayout.GetControlRect(), parameterXProperty, new GUIContent("Parameter X"));
                 blendParametersSelector.OnGUI(EditorGUILayout.GetControlRect(), parameterYProperty, new GUIContent("Parameter Y"));
+                EditorGUILayout.PropertyField(algorithmProperty, new GUIContent("Algorithm"));
                 EditorGUI.indentLevel--;
                 EditorGUILayout.Space(5);
             }

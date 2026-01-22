@@ -948,7 +948,12 @@ namespace DMotion.Editor
                         blendSpaceContainer.MarkDirtyRepaint();
                     }
                 });
-                blendSpaceContainer.RegisterCallback<WheelEvent>(evt => blendSpaceContainer.MarkDirtyRepaint());
+                blendSpaceContainer.RegisterCallback<WheelEvent>(evt =>
+                {
+                    // Stop propagation to prevent parent ScrollView from capturing zoom
+                    evt.StopPropagation();
+                    blendSpaceContainer.MarkDirtyRepaint();
+                });
             }
             
             section.Add(blendSpaceContainer);

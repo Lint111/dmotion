@@ -309,7 +309,12 @@ namespace DMotion.Editor
                     container.MarkDirtyRepaint();
                 }
             });
-            container.RegisterCallback<WheelEvent>(evt => container.MarkDirtyRepaint());
+            container.RegisterCallback<WheelEvent>(evt =>
+            {
+                // Stop propagation to prevent parent ScrollView from capturing zoom
+                evt.StopPropagation();
+                container.MarkDirtyRepaint();
+            });
             
             return container;
         }
