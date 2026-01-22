@@ -51,6 +51,7 @@ namespace DMotion.Authoring
         internal UnsafeList<Directional2DClipData> ClipData;
         internal ushort BlendParameterIndexX;
         internal ushort BlendParameterIndexY;
+        internal Blend2DAlgorithm Algorithm;
     }
 
     internal struct StateOutTransitionConversionData
@@ -208,7 +209,8 @@ namespace DMotion.Authoring
                     directional2DStates[i] = new Directional2DBlendStateBlob
                     {
                         BlendParameterIndexX = data.BlendParameterIndexX,
-                        BlendParameterIndexY = data.BlendParameterIndexY
+                        BlendParameterIndexY = data.BlendParameterIndexY,
+                        Algorithm = data.Algorithm
                     };
                     
                     var count = data.ClipData.Length;

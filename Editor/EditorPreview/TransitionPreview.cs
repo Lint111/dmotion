@@ -46,8 +46,13 @@ namespace DMotion.Editor
         // Cached arrays to avoid per-frame allocations
         private float[] cachedFromWeights;
         private float[] cachedToWeights;
-        private float[] cachedDistances;
+        private float2[] cachedFromPositions;
+        private float2[] cachedToPositions;
         private List<AnimationClip> cachedClips;
+        
+        // Algorithm for 2D blend states
+        private readonly Blend2DAlgorithm fromAlgorithm;
+        private readonly Blend2DAlgorithm toAlgorithm;
         
         #endregion
         
@@ -184,6 +189,12 @@ namespace DMotion.Editor
             // Initialize blend data for blend states
             fromClipData = GetBlendClipData(fromState);
             toClipData = GetBlendClipData(toState);
+            
+            // Cache positions and algorithms for 2D blend weight calculation
+            cachedFromPositions = fromClipData?.Select(c => c.Position).ToArray();
+            cachedToPositions = toClipData?.Select(c => c.Position).ToArray();
+            fromAlgorithm = GetAlgorithm(fromState);
+            toAlgorithm = GetAlgorithm(toState);
         }
         
         #endregion
@@ -317,7 +328,8 @@ namespace DMotion.Editor
             
             // Ensure cached array is correct size
             EnsureArraySize(ref cachedFromWeights, fromClipData.Length);
-            CalculateBlendWeights(fromClipData, fromBlendPosition, IsState2D(fromState), cachedFromWeights);
+            CalculateBlendWeightsForState(fromClipData, fromBlendPosition, IsState2D(fromState), 
+                cachedFromWeights, cachedFromPositions, fromAlgorithm);
             ApplyWeightsToMixer(fromMixer, cachedFromWeights, fromClipData.Length);
         }
         
@@ -327,7 +339,8 @@ namespace DMotion.Editor
             
             // Ensure cached array is correct size
             EnsureArraySize(ref cachedToWeights, toClipData.Length);
-            CalculateBlendWeights(toClipData, toBlendPosition, IsState2D(toState), cachedToWeights);
+            CalculateBlendWeightsForState(toClipData, toBlendPosition, IsState2D(toState), 
+                cachedToWeights, cachedToPositions, toAlgorithm);
             ApplyWeightsToMixer(toMixer, cachedToWeights, toClipData.Length);
         }
         
@@ -352,7 +365,8 @@ namespace DMotion.Editor
         /// Calculates blend weights for a set of clips at a given blend position.
         /// Fills the provided weights array in-place to avoid allocation.
         /// </summary>
-        private void CalculateBlendWeights(BlendedClipPreview.BlendClipData[] clipData, float2 blendPosition, bool is2D, float[] weights)
+        private void CalculateBlendWeightsForState(BlendedClipPreview.BlendClipData[] clipData, float2 blendPosition, bool is2D, 
+            float[] weights, float2[] cachedPositions, Blend2DAlgorithm algorithm)
         {
             if (clipData == null || clipData.Length == 0) return;
             
@@ -368,7 +382,7 @@ namespace DMotion.Editor
             
             if (is2D)
             {
-                Calculate2DWeights(clipData, blendPosition, weights);
+                Calculate2DWeights(clipData, blendPosition, weights, cachedPositions, algorithm);
             }
             else
             {
@@ -432,46 +446,13 @@ namespace DMotion.Editor
             weights[upperIndex] = t;
         }
         
-        private void Calculate2DWeights(BlendedClipPreview.BlendClipData[] clipData, float2 blendPosition, float[] weights)
+        private void Calculate2DWeights(BlendedClipPreview.BlendClipData[] clipData, float2 blendPosition, float[] weights, 
+            float2[] cachedPositions, Blend2DAlgorithm algorithm)
         {
-            // Inverse distance weighting - use cached distances array
-            EnsureArraySize(ref cachedDistances, clipData.Length);
+            if (cachedPositions == null || cachedPositions.Length == 0) return;
             
-            float totalWeight = 0;
-            
-            for (int i = 0; i < clipData.Length; i++)
-            {
-                float distance = math.distance(blendPosition, clipData[i].Position);
-                
-                if (distance < 0.0001f)
-                {
-                    // Exactly on this clip position
-                    for (int j = 0; j < clipData.Length; j++)
-                    {
-                        weights[j] = (j == i) ? 1 : 0;
-                    }
-                    return;
-                }
-                
-                cachedDistances[i] = distance;
-            }
-            
-            const float power = 2f;
-            for (int i = 0; i < clipData.Length; i++)
-            {
-                float weight = 1f / math.pow(cachedDistances[i], power);
-                weights[i] = weight;
-                totalWeight += weight;
-            }
-            
-            // Normalize
-            if (totalWeight > 0.0001f)
-            {
-                for (int i = 0; i < clipData.Length; i++)
-                {
-                    weights[i] /= totalWeight;
-                }
-            }
+            // Use the shared utility with the correct algorithm
+            Directional2DBlendUtils.CalculateWeights(blendPosition, cachedPositions, weights, algorithm);
         }
         
         #endregion
@@ -643,6 +624,13 @@ namespace DMotion.Editor
         private static bool IsState2D(AnimationStateAsset state)
         {
             return state is Directional2DBlendStateAsset;
+        }
+        
+        private static Blend2DAlgorithm GetAlgorithm(AnimationStateAsset state)
+        {
+            return state is Directional2DBlendStateAsset blend2D 
+                ? blend2D.Algorithm 
+                : Blend2DAlgorithm.SimpleDirectional;
         }
         
         #endregion

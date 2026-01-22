@@ -14,6 +14,26 @@ namespace DMotion
         LinearBlend = 1,
         Directional2DBlend = 2,
     }
+    
+    /// <summary>
+    /// Algorithm used for 2D blend weight calculation.
+    /// </summary>
+    public enum Blend2DAlgorithm : byte
+    {
+        /// <summary>
+        /// Simple Directional: Finds 2 angle neighbors and interpolates between them.
+        /// Best for radial clip arrangements (8-way locomotion). Max 2-3 clips active.
+        /// Matches Unity's "Simple Directional 2D" blend tree.
+        /// </summary>
+        SimpleDirectional = 0,
+        
+        /// <summary>
+        /// Inverse Distance Weighting: All clips contribute based on distance from input.
+        /// Better for arbitrary clip placements. All clips can be active.
+        /// Similar to Unity's "Freeform Directional 2D" blend tree.
+        /// </summary>
+        InverseDistanceWeighting = 1,
+    }
 
     internal struct AnimationStateBlob
     {
@@ -68,5 +88,6 @@ namespace DMotion
         internal BlobArray<float> ClipSpeeds;
         internal ushort BlendParameterIndexX;
         internal ushort BlendParameterIndexY;
+        internal Blend2DAlgorithm Algorithm;
     }
 }

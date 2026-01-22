@@ -632,6 +632,113 @@ namespace DMotion.Tests
         }
 
         #endregion
+        
+        #region IDW Algorithm Tests
+        
+        [Test]
+        public void IDW_ReturnFullWeight_For_SingleClip()
+        {
+            using (var test = new Test2DBlend(1, Blend2DAlgorithm.InverseDistanceWeighting))
+            {
+                test.Positions[0] = new float2(1, 0);
+                test.Calculate(new float2(0.5f, 0.5f));
+                Assert.AreEqual(1f, test.Weights[0], 0.0001f);
+            }
+        }
+        
+        [Test]
+        public void IDW_AllClipsContribute_For_DiagonalInput()
+        {
+            using (var test = new Test2DBlend(4, Blend2DAlgorithm.InverseDistanceWeighting))
+            {
+                test.Positions[0] = new float2(1, 0);   // East
+                test.Positions[1] = new float2(0, 1);   // North
+                test.Positions[2] = new float2(-1, 0);  // West
+                test.Positions[3] = new float2(0, -1);  // South
+                
+                test.Calculate(new float2(0.5f, 0.5f)); // NE diagonal
+                
+                // All clips should have some weight (unlike SimpleDirectional which only uses 2)
+                Assert.Greater(test.Weights[0], 0.1f, "East should have weight");
+                Assert.Greater(test.Weights[1], 0.1f, "North should have weight");
+                Assert.Greater(test.Weights[2], 0f, "West should have some weight");
+                Assert.Greater(test.Weights[3], 0f, "South should have some weight");
+                
+                // North and East should have more weight (closer)
+                Assert.Greater(test.Weights[0], test.Weights[2], "East should have more weight than West");
+                Assert.Greater(test.Weights[1], test.Weights[3], "North should have more weight than South");
+            }
+        }
+        
+        [Test]
+        public void IDW_ExactPosition_Returns_FullWeight()
+        {
+            using (var test = new Test2DBlend(4, Blend2DAlgorithm.InverseDistanceWeighting))
+            {
+                test.Positions[0] = new float2(1, 0);
+                test.Positions[1] = new float2(0, 1);
+                test.Positions[2] = new float2(-1, 0);
+                test.Positions[3] = new float2(0, -1);
+                
+                test.Calculate(new float2(1, 0)); // Exactly on East
+                
+                Assert.AreEqual(1f, test.Weights[0], 0.0001f, "East should have 100%");
+                Assert.AreEqual(0f, test.Weights[1], 0.0001f);
+                Assert.AreEqual(0f, test.Weights[2], 0.0001f);
+                Assert.AreEqual(0f, test.Weights[3], 0.0001f);
+            }
+        }
+        
+        [Test]
+        public void IDW_WeightsSumToOne()
+        {
+            using (var test = new Test2DBlend(4, Blend2DAlgorithm.InverseDistanceWeighting))
+            {
+                test.Positions[0] = new float2(1, 0);
+                test.Positions[1] = new float2(0, 1);
+                test.Positions[2] = new float2(-1, 0);
+                test.Positions[3] = new float2(0, -1);
+                
+                var inputs = new[]
+                {
+                    new float2(0.1f, 0.1f),
+                    new float2(0.5f, 0.5f),
+                    new float2(-0.3f, 0.7f),
+                    new float2(0, 0),
+                };
+                
+                foreach (var input in inputs)
+                {
+                    test.Calculate(input);
+                    float sum = 0;
+                    for (int i = 0; i < 4; i++) sum += test.Weights[i];
+                    Assert.AreEqual(1f, sum, 0.0001f, $"Weights should sum to 1 for input {input}");
+                }
+            }
+        }
+        
+        [Test]
+        public void IDW_CenterInput_DistributesEvenly()
+        {
+            using (var test = new Test2DBlend(4, Blend2DAlgorithm.InverseDistanceWeighting))
+            {
+                // All clips at same distance from origin
+                test.Positions[0] = new float2(1, 0);
+                test.Positions[1] = new float2(0, 1);
+                test.Positions[2] = new float2(-1, 0);
+                test.Positions[3] = new float2(0, -1);
+                
+                test.Calculate(new float2(0, 0)); // Center
+                
+                // All should have equal weight (25% each)
+                Assert.AreEqual(0.25f, test.Weights[0], 0.01f);
+                Assert.AreEqual(0.25f, test.Weights[1], 0.01f);
+                Assert.AreEqual(0.25f, test.Weights[2], 0.01f);
+                Assert.AreEqual(0.25f, test.Weights[3], 0.01f);
+            }
+        }
+        
+        #endregion
 
         /// <summary>
         /// Test helper - manages allocation/deallocation for each individual test.
@@ -641,16 +748,18 @@ namespace DMotion.Tests
         {
             public NativeArray<float2> Positions;
             public NativeArray<float> Weights;
+            private readonly Blend2DAlgorithm algorithm;
 
-            public Test2DBlend(int clipCount)
+            public Test2DBlend(int clipCount, Blend2DAlgorithm algorithm = Blend2DAlgorithm.SimpleDirectional)
             {
                 Positions = new NativeArray<float2>(clipCount, Allocator.TempJob);
                 Weights = new NativeArray<float>(clipCount, Allocator.TempJob);
+                this.algorithm = algorithm;
             }
 
             public void Calculate(float2 input)
             {
-                Directional2DBlendUtils.CalculateWeights(input, Positions, Weights);
+                Directional2DBlendUtils.CalculateWeights(input, Positions, Weights, algorithm);
             }
 
             public void Dispose()

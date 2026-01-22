@@ -34,6 +34,8 @@ namespace DMotion.Editor
         
         private readonly BlendClipData[] clipData;
         private readonly bool is2D;
+        private readonly Blend2DAlgorithm algorithm;
+        private readonly float2[] cachedPositions; // Cached positions for weight calculation
         private AnimationMixerPlayable mixer;
         private AnimationClipPlayable[] clipPlayables; // Store references to set individual clip times
         private float2 currentBlendPosition;
@@ -116,25 +118,27 @@ namespace DMotion.Editor
         /// <summary>
         /// Creates a 1D blend preview from a LinearBlendStateAsset.
         /// </summary>
-        public BlendedClipPreview(LinearBlendStateAsset state) : this(ConvertToBlendData(state), false)
+        public BlendedClipPreview(LinearBlendStateAsset state) : this(ConvertToBlendData(state), false, Blend2DAlgorithm.SimpleDirectional)
         {
         }
         
         /// <summary>
         /// Creates a 2D blend preview from a Directional2DBlendStateAsset.
         /// </summary>
-        public BlendedClipPreview(Directional2DBlendStateAsset state) : this(ConvertToBlendData(state), true)
+        public BlendedClipPreview(Directional2DBlendStateAsset state) : this(ConvertToBlendData(state), true, state.Algorithm)
         {
         }
         
         /// <summary>
         /// Creates a blend preview from raw clip data.
         /// </summary>
-        public BlendedClipPreview(BlendClipData[] clips, bool is2D)
+        public BlendedClipPreview(BlendClipData[] clips, bool is2D, Blend2DAlgorithm algorithm = Blend2DAlgorithm.SimpleDirectional)
         {
             clipData = clips ?? Array.Empty<BlendClipData>();
             this.is2D = is2D;
+            this.algorithm = algorithm;
             cachedWeights = new float[clipData.Length];
+            cachedPositions = clipData.Select(c => c.Position).ToArray();
             clipPlayables = null; // Initialized in BuildGraph
             normalizedSampleTime = 0;
             currentBlendPosition = float2.zero;
@@ -508,65 +512,15 @@ namespace DMotion.Editor
         }
         
         /// <summary>
-        /// Calculates 2D blend weights using gradient band interpolation.
-        /// This is a simplified version - for exact Unity behavior, use polar coordinates.
+        /// Calculates 2D blend weights using the shared utility.
+        /// Uses the algorithm specified by the asset (SimpleDirectional or InverseDistanceWeighting).
         /// </summary>
         private void Calculate2DWeights()
         {
-            // Reset all weights
-            for (int i = 0; i < cachedWeights.Length; i++)
-            {
-                cachedWeights[i] = 0;
-            }
-            
             if (clipData.Length == 0) return;
             
-            if (clipData.Length == 1)
-            {
-                cachedWeights[0] = 1;
-                return;
-            }
-            
-            // Use inverse distance weighting (simple but effective)
-            float totalWeight = 0;
-            float[] distances = new float[clipData.Length];
-            
-            for (int i = 0; i < clipData.Length; i++)
-            {
-                float2 clipPos = clipData[i].Position;
-                float distance = math.distance(currentBlendPosition, clipPos);
-                
-                // Avoid division by zero
-                if (distance < 0.0001f)
-                {
-                    // Exactly on this clip position
-                    for (int j = 0; j < cachedWeights.Length; j++)
-                    {
-                        cachedWeights[j] = (j == i) ? 1 : 0;
-                    }
-                    return;
-                }
-                
-                distances[i] = distance;
-            }
-            
-            // Calculate inverse distance weights with power factor for sharper falloff
-            const float power = 2f;
-            for (int i = 0; i < clipData.Length; i++)
-            {
-                float weight = 1f / math.pow(distances[i], power);
-                cachedWeights[i] = weight;
-                totalWeight += weight;
-            }
-            
-            // Normalize
-            if (totalWeight > 0.0001f)
-            {
-                for (int i = 0; i < cachedWeights.Length; i++)
-                {
-                    cachedWeights[i] /= totalWeight;
-                }
-            }
+            // Use the shared utility with the algorithm from the asset
+            Directional2DBlendUtils.CalculateWeights(currentBlendPosition, cachedPositions, cachedWeights, algorithm);
         }
         
         /// <summary>

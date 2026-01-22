@@ -22,6 +22,11 @@ namespace DMotion.Authoring
         [Tooltip("The Y-axis parameter used to control vertical blending.")]
         public FloatParameterAsset BlendParameterY;
         
+        [Tooltip("Algorithm used for weight calculation.\n\n" +
+                 "Simple Directional: Best for radial/locomotion setups. Only 2-3 clips active at a time.\n\n" +
+                 "Inverse Distance: All clips can contribute. Better for arbitrary clip placement.")]
+        public Blend2DAlgorithm Algorithm = Blend2DAlgorithm.SimpleDirectional;
+        
         public Directional2DClipWithPosition[] BlendClips = Array.Empty<Directional2DClipWithPosition>();
 
         public override StateType Type => StateType.Directional2DBlend;

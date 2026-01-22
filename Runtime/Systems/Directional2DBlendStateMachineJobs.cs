@@ -39,7 +39,8 @@ namespace DMotion
                     }
                     
                     var activeWeights = weights.GetSubArray(0, positions.Length);
-                    Directional2DBlendUtils.CalculateWeights(input, positions, activeWeights);
+                    var algorithm = state.Directional2DBlob.Algorithm;
+                    Directional2DBlendUtils.CalculateWeights(input, positions, activeWeights, algorithm);
 
                     Directional2DBlendStateUtils.UpdateSamplers(
                         DeltaTime,

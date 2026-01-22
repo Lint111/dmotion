@@ -210,6 +210,7 @@ namespace DMotion.Authoring
                         {
                             BlendParameterIndexX = (ushort)blendParamIndexX,
                             BlendParameterIndexY = (ushort)blendParamIndexY,
+                            Algorithm = directional2DAsset.Algorithm,
                             ClipData = new UnsafeList<Directional2DClipData>(directional2DAsset.BlendClips.Length, allocator)
                         };
                         dir2DConvData.ClipData.Resize(directional2DAsset.BlendClips.Length);
