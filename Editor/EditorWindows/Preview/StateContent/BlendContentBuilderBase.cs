@@ -309,12 +309,14 @@ namespace DMotion.Editor
                     container.MarkDirtyRepaint();
                 }
             });
+            // Register in TrickleDown phase to capture wheel events before parent ScrollView
             container.RegisterCallback<WheelEvent>(evt =>
             {
-                // Stop propagation to prevent parent ScrollView from capturing zoom
+                // Stop propagation and prevent default to ensure zoom works
                 evt.StopPropagation();
+                evt.PreventDefault();
                 container.MarkDirtyRepaint();
-            });
+            }, TrickleDown.TrickleDown);
             
             return container;
         }

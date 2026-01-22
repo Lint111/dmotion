@@ -219,12 +219,18 @@ namespace DMotion.Editor
         protected override void HandlePan(Event e, Rect rect)
         {
             var delta = e.mousePosition - lastMousePos;
-            panOffset -= delta / (100f * zoom);
+            // X: subtract to follow mouse (drag right = view moves right)
+            // Y: add because screen Y is inverted (drag down = view moves down)
+            panOffset.x -= delta.x / (100f * zoom);
+            panOffset.y += delta.y / (100f * zoom);
         }
         
         protected override void ApplyExternalPanDelta(Rect rect, Vector2 delta)
         {
-            panOffset -= delta / (100f * zoom);
+            // X: subtract to follow mouse (drag right = view moves right)
+            // Y: add because screen Y is inverted (drag down = view moves down)
+            panOffset.x -= delta.x / (100f * zoom);
+            panOffset.y += delta.y / (100f * zoom);
         }
 
         #endregion

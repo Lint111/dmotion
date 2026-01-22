@@ -948,12 +948,14 @@ namespace DMotion.Editor
                         blendSpaceContainer.MarkDirtyRepaint();
                     }
                 });
+                // Register in TrickleDown phase to capture wheel events before parent ScrollView
                 blendSpaceContainer.RegisterCallback<WheelEvent>(evt =>
                 {
-                    // Stop propagation to prevent parent ScrollView from capturing zoom
+                    // Stop propagation and prevent default to ensure zoom works
                     evt.StopPropagation();
+                    evt.PreventDefault();
                     blendSpaceContainer.MarkDirtyRepaint();
-                });
+                }, TrickleDown.TrickleDown);
             }
             
             section.Add(blendSpaceContainer);
