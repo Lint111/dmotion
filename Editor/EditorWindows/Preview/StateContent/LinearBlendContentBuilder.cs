@@ -9,8 +9,9 @@ namespace DMotion.Editor
     /// <summary>
     /// Builds inspector content for LinearBlendStateAsset.
     /// Shows 1D blend space visualizer with preview controls.
+    /// Uses pure UIToolkit for consistent event handling.
     /// </summary>
-    internal class LinearBlendContentBuilder : BlendContentBuilderBase<LinearBlendStateAsset, BlendSpace1DVisualEditor>
+    internal class LinearBlendContentBuilder : BlendContentBuilderBase<LinearBlendStateAsset, BlendSpace1DVisualElement>
     {
         #region State
         
@@ -39,16 +40,16 @@ namespace DMotion.Editor
         
         protected override string ClipsPropertyName => "BlendClips";
         
-        protected override BlendSpace1DVisualEditor GetOrCreateEditor()
+        protected override BlendSpace1DVisualElement GetOrCreateVisualElement()
         {
-            blendSpaceEditor ??= new BlendSpace1DVisualEditor();
-            blendSpaceEditor.SetTarget(state);
+            blendSpaceElement ??= new BlendSpace1DVisualElement();
+            blendSpaceElement.SetTarget(state);
             
             // Restore persisted blend value for this state
             previewBlendValue = PreviewSettings.instance.GetBlendValue1D(state, previewBlendValue);
-            blendSpaceEditor.PreviewPosition = new Vector2(previewBlendValue, 0);
+            blendSpaceElement.PreviewPosition = new Vector2(previewBlendValue, 0);
             
-            return blendSpaceEditor;
+            return blendSpaceElement;
         }
         
         protected override void BuildParameterInfo(VisualElement section, StateContentContext context)
@@ -95,7 +96,7 @@ namespace DMotion.Editor
                 cachedBlendSlider?.SetValueWithoutNotify(pos.x);
                 cachedBlendField?.SetValueWithoutNotify(pos.x);
             };
-            blendSpaceEditor.OnPreviewPositionChanged += cachedPreviewPositionHandler;
+            blendSpaceElement.OnPreviewPositionChanged += cachedPreviewPositionHandler;
         }
         
         private void SetBlendValue(float value, StateContentContext context)
@@ -105,10 +106,10 @@ namespace DMotion.Editor
             // Persist to settings (shared across all previews of this state)
             PreviewSettings.instance.SetBlendValue1D(state, value);
             
-            // Update visual editor
-            if (blendSpaceEditor != null)
+            // Update visual element
+            if (blendSpaceElement != null)
             {
-                blendSpaceEditor.PreviewPosition = new Vector2(value, 0);
+                blendSpaceElement.PreviewPosition = new Vector2(value, 0);
             }
             
             // Notify listeners (timeline duration updates via OnBlendStateChanged event)
@@ -143,15 +144,83 @@ namespace DMotion.Editor
             if (maxDuration > 0) duration = maxDuration;
         }
         
-        protected override void DrawSelectedClipFields(SerializedProperty clipsProperty)
+        protected override void BuildClipEditContent(VisualElement container, StateContentContext context)
         {
-            if (state?.BlendClips != null)
+            // Create a container that updates based on selection
+            var selectionInfo = new Label("Click a clip on the track to select it.");
+            selectionInfo.AddToClassList("clip-edit-hint");
+            selectionInfo.style.color = new Color(0.6f, 0.6f, 0.6f);
+            selectionInfo.style.unityFontStyleAndWeight = FontStyle.Italic;
+            container.Add(selectionInfo);
+            
+            var clipFields = new VisualElement();
+            clipFields.AddToClassList("clip-edit-fields");
+            clipFields.style.display = DisplayStyle.None;
+            container.Add(clipFields);
+            
+            // Threshold field
+            var thresholdRow = new VisualElement();
+            thresholdRow.AddToClassList("property-row");
+            thresholdRow.style.flexDirection = FlexDirection.Row;
+            var thresholdLabel = new Label("Threshold");
+            thresholdLabel.AddToClassList("property-label");
+            thresholdLabel.style.width = 80;
+            var thresholdField = new FloatField();
+            thresholdField.style.flexGrow = 1;
+            thresholdRow.Add(thresholdLabel);
+            thresholdRow.Add(thresholdField);
+            clipFields.Add(thresholdRow);
+            
+            // Update fields when selection changes
+            blendSpaceElement.OnSelectionChanged += clipIndex =>
             {
-                if (blendSpaceEditor.DrawSelectedClipFields(state.BlendClips, clipsProperty))
+                if (clipIndex >= 0 && state?.BlendClips != null && clipIndex < state.BlendClips.Length)
                 {
-                    serializedObject.ApplyModifiedProperties();
+                    selectionInfo.style.display = DisplayStyle.None;
+                    clipFields.style.display = DisplayStyle.Flex;
+                    
+                    var clip = state.BlendClips[clipIndex];
+                    thresholdField.SetValueWithoutNotify(clip.Threshold);
                 }
-            }
+                else
+                {
+                    selectionInfo.style.display = DisplayStyle.Flex;
+                    clipFields.style.display = DisplayStyle.None;
+                }
+            };
+            
+            // Handle threshold changes from field
+            thresholdField.RegisterValueChangedCallback(evt =>
+            {
+                if (blendSpaceElement.SelectedClipIndex >= 0 && serializedObject != null)
+                {
+                    var clipsProperty = serializedObject.FindProperty("BlendClips");
+                    var clipProperty = clipsProperty.GetArrayElementAtIndex(blendSpaceElement.SelectedClipIndex);
+                    var thresholdProperty = clipProperty.FindPropertyRelative("Threshold");
+                    thresholdProperty.floatValue = evt.newValue;
+                    serializedObject.ApplyModifiedProperties();
+                    blendSpaceElement.RefreshClips();
+                }
+            });
+            
+            // Handle threshold changes from drag
+            blendSpaceElement.OnClipThresholdChanged += (clipIndex, newThreshold) =>
+            {
+                if (serializedObject != null && clipIndex >= 0)
+                {
+                    var clipsProperty = serializedObject.FindProperty("BlendClips");
+                    var clipProperty = clipsProperty.GetArrayElementAtIndex(clipIndex);
+                    var thresholdProperty = clipProperty.FindPropertyRelative("Threshold");
+                    thresholdProperty.floatValue = newThreshold;
+                    serializedObject.ApplyModifiedProperties();
+                    
+                    // Update field if this is the selected clip
+                    if (clipIndex == blendSpaceElement.SelectedClipIndex)
+                    {
+                        thresholdField.SetValueWithoutNotify(newThreshold);
+                    }
+                }
+            };
         }
         
         protected override void ClearCachedUIReferences()

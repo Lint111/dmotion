@@ -50,20 +50,13 @@ namespace DMotion.Editor
         // Cached blend curve for timeline
         private AnimationCurve cachedBlendCurve;
         
-        // Blend space editors - using base class references (polymorphism)
-        private BlendSpaceVisualEditorBase fromBlendSpaceEditor;
-        private BlendSpaceVisualEditorBase toBlendSpaceEditor;
+        // Blend space visual elements - using base class references (polymorphism)
+        private BlendSpaceVisualElement fromBlendSpaceElement;
+        private BlendSpaceVisualElement toBlendSpaceElement;
         
         // Cached event handlers for cleanup
         private Action<Vector2> fromBlendPositionHandler;
         private Action<Vector2> toBlendPositionHandler;
-        private Action fromRepaintHandler;
-        private Action toRepaintHandler;
-        
-        // Cached arrays to avoid per-frame allocation in IMGUI callbacks
-        private const int CurvePreviewSegments = 30;
-        private static readonly Vector3[] cachedCurvePreviewPoints = new Vector3[CurvePreviewSegments + 1];
-        private static GUIStyle cachedCurvePreviewLabelStyle;
         
         #endregion
         
@@ -186,15 +179,12 @@ namespace DMotion.Editor
                 timeline = null;
             }
 
-            // Cleanup blend space editors
-
-            CleanupBlendSpaceEditor(ref fromBlendSpaceEditor, fromBlendPositionHandler, fromRepaintHandler);
-            CleanupBlendSpaceEditor(ref toBlendSpaceEditor, toBlendPositionHandler, toRepaintHandler);
+            // Cleanup blend space elements
+            CleanupBlendSpaceElement(ref fromBlendSpaceElement, fromBlendPositionHandler);
+            CleanupBlendSpaceElement(ref toBlendSpaceElement, toBlendPositionHandler);
             
             fromBlendPositionHandler = null;
             toBlendPositionHandler = null;
-            fromRepaintHandler = null;
-            toRepaintHandler = null;
             
             // Clear cached serialized data
             cachedSerializedObject = null;
@@ -818,26 +808,27 @@ namespace DMotion.Editor
         
         /// <summary>
         /// Builds blend controls for a state using polymorphism.
-        /// Creates the appropriate editor type based on state type.
+        /// Creates the appropriate visual element type based on state type.
+        /// Uses pure UIToolkit for consistent event handling.
         /// </summary>
         private void BuildBlendControls(VisualElement section, AnimationStateAsset state, bool isFromState)
         {
             if (state == null) return;
             
-            // Create the appropriate editor based on state type
-            var (editor, blendInfo) = CreateBlendSpaceEditor(state);
-            if (editor == null) return;
+            // Create the appropriate visual element based on state type
+            var (element, blendInfo) = CreateBlendSpaceElement(state);
+            if (element == null) return;
             
             // Store reference
             if (isFromState)
-                fromBlendSpaceEditor = editor;
+                fromBlendSpaceElement = element;
             else
-                toBlendSpaceEditor = editor;
+                toBlendSpaceElement = element;
             
-            // Configure editor
-            editor.ShowPreviewIndicator = true;
-            editor.EditMode = false;
-            editor.ShowModeToggle = false;
+            // Configure element
+            element.ShowPreviewIndicator = true;
+            element.EditMode = false;
+            element.ShowModeToggle = false;
             
             // Build parameter info
             foreach (var (label, name) in blendInfo.ParameterNames)
@@ -854,7 +845,7 @@ namespace DMotion.Editor
             Vector2 currentPosition = blendInfo.Is2D 
                 ? PreviewSettings.instance.GetBlendValue2D(state) 
                 : new Vector2(PreviewSettings.instance.GetBlendValue1D(state), 0);
-            editor.PreviewPosition = currentPosition;
+            element.PreviewPosition = currentPosition;
             
             if (blendInfo.Is2D)
             {
@@ -864,7 +855,7 @@ namespace DMotion.Editor
                     newValue =>
                     {
                         currentPosition.x = newValue;
-                        editor.PreviewPosition = currentPosition;
+                        element.PreviewPosition = currentPosition;
                         SaveAndRaiseBlendPositionChanged(state, currentPosition, isFromState, true);
                     });
                 section.Add(xRow);
@@ -875,7 +866,7 @@ namespace DMotion.Editor
                     newValue =>
                     {
                         currentPosition.y = newValue;
-                        editor.PreviewPosition = currentPosition;
+                        element.PreviewPosition = currentPosition;
                         SaveAndRaiseBlendPositionChanged(state, currentPosition, isFromState, true);
                     });
                 section.Add(yRow);
@@ -888,84 +879,24 @@ namespace DMotion.Editor
                     newValue =>
                     {
                         currentPosition = new Vector2(newValue, 0);
-                        editor.PreviewPosition = currentPosition;
+                        element.PreviewPosition = currentPosition;
                         SaveAndRaiseBlendPositionChanged(state, currentPosition, isFromState, false);
                     });
                 section.Add(sliderRow);
             }
             
-            // Create IMGUI container for visual editor
-            var serializedObject = new SerializedObject(state);
-            float editorHeight = blendInfo.Is2D ? BlendSpace2DHeight : BlendSpace1DHeight;
+            // Add UIToolkit visual element directly (no IMGUIContainer wrapper needed)
+            float elementHeight = blendInfo.Is2D ? BlendSpace2DHeight : BlendSpace1DHeight;
+            element.style.height = elementHeight;
+            element.style.marginTop = 8;
+            section.Add(element);
             
-            IMGUIContainer blendSpaceContainer = null;
-            blendSpaceContainer = new IMGUIContainer(() =>
-            {
-                if (state != null)
-                {
-                    var rect = new Rect(0, 0, blendSpaceContainer.contentRect.width, editorHeight);
-                    if (rect.width > 10)
-                    {
-                        editor.Draw(rect, serializedObject);
-                    }
-                }
-            });
-            blendSpaceContainer.style.height = editorHeight;
-            blendSpaceContainer.style.marginTop = 8;
-            blendSpaceContainer.focusable = true;
-            
-            // Handle mouse events for panning (2D only)
-            if (blendInfo.Is2D)
-            {
-                blendSpaceContainer.RegisterCallback<MouseDownEvent>(evt =>
-                {
-                    blendSpaceContainer.Focus();
-                    if (evt.button == 2 || (evt.button == 0 && evt.altKey))
-                    {
-                        editor.StartExternalPan(evt.localMousePosition);
-                        evt.StopPropagation();
-                    }
-                    blendSpaceContainer.MarkDirtyRepaint();
-                });
-                blendSpaceContainer.RegisterCallback<MouseMoveEvent>(evt =>
-                {
-                    if (editor.IsExternalPanning)
-                    {
-                        editor.UpdateExternalPan(evt.localMousePosition);
-                        blendSpaceContainer.MarkDirtyRepaint();
-                        evt.StopPropagation();
-                    }
-                    else if (evt.pressedButtons != 0)
-                    {
-                        blendSpaceContainer.MarkDirtyRepaint();
-                    }
-                });
-                blendSpaceContainer.RegisterCallback<MouseUpEvent>(evt =>
-                {
-                    if (editor.IsExternalPanning)
-                    {
-                        editor.EndExternalPan();
-                        blendSpaceContainer.MarkDirtyRepaint();
-                    }
-                });
-                // Register in TrickleDown phase to capture wheel events before parent ScrollView
-                blendSpaceContainer.RegisterCallback<WheelEvent>(evt =>
-                {
-                    // Stop propagation and prevent default to ensure zoom works
-                    evt.StopPropagation();
-                    evt.PreventDefault();
-                    blendSpaceContainer.MarkDirtyRepaint();
-                }, TrickleDown.TrickleDown);
-            }
-            
-            section.Add(blendSpaceContainer);
-            
-            // Wire up position change from visual editor (bidirectional sync)
+            // Wire up position change from visual element (bidirectional sync)
             Action<Vector2> positionHandler = pos =>
             {
                 currentPosition = pos;
                 
-                // Sync sliders with new position from visual editor
+                // Sync sliders with new position from visual element
                 xSlider?.SetValueWithoutNotify(pos.x);
                 xField?.SetValueWithoutNotify(pos.x);
                 ySlider?.SetValueWithoutNotify(pos.y);
@@ -974,40 +905,36 @@ namespace DMotion.Editor
                 SaveAndRaiseBlendPositionChanged(state, pos, isFromState, blendInfo.Is2D);
                 OnRepaintRequested?.Invoke();
             };
-            editor.OnPreviewPositionChanged += positionHandler;
+            element.OnPreviewPositionChanged += positionHandler;
             
-            Action repaintHandler = () => OnRepaintRequested?.Invoke();
-            editor.OnRepaintRequested += repaintHandler;
-            
-            // Store handlers for cleanup
+            // Store handler for cleanup
             if (isFromState)
             {
                 fromBlendPositionHandler = positionHandler;
-                fromRepaintHandler = repaintHandler;
             }
             else
             {
                 toBlendPositionHandler = positionHandler;
-                toRepaintHandler = repaintHandler;
             }
         }
         
         /// <summary>
-        /// Creates the appropriate blend space editor and extracts blend info from the state.
+        /// Creates the appropriate blend space visual element and extracts blend info from the state.
+        /// Uses pure UIToolkit elements for consistent event handling.
         /// </summary>
-        private static (BlendSpaceVisualEditorBase editor, BlendInfo info) CreateBlendSpaceEditor(AnimationStateAsset state)
+        private static (BlendSpaceVisualElement element, BlendInfo info) CreateBlendSpaceElement(AnimationStateAsset state)
         {
             switch (state)
             {
                 case LinearBlendStateAsset linearBlend:
-                    var editor1D = new BlendSpace1DVisualEditor();
-                    editor1D.SetTarget(linearBlend);
-                    return (editor1D, GetBlendInfo(linearBlend));
+                    var element1D = new BlendSpace1DVisualElement();
+                    element1D.SetTarget(linearBlend);
+                    return (element1D, GetBlendInfo(linearBlend));
                     
                 case Directional2DBlendStateAsset blend2D:
-                    var editor2D = new BlendSpace2DVisualEditor();
-                    editor2D.SetTarget(blend2D);
-                    return (editor2D, GetBlendInfo(blend2D));
+                    var element2D = new BlendSpace2DVisualElement();
+                    element2D.SetTarget(blend2D);
+                    return (element2D, GetBlendInfo(blend2D));
                     
                 default:
                     return (null, default);
@@ -1101,13 +1028,12 @@ namespace DMotion.Editor
                 AnimationPreviewEvents.RaiseTransitionToBlendPositionChanged(state, position);
         }
         
-        private static void CleanupBlendSpaceEditor(ref BlendSpaceVisualEditorBase editor, Action<Vector2> positionHandler, Action repaintHandler)
+        private static void CleanupBlendSpaceElement(ref BlendSpaceVisualElement element, Action<Vector2> positionHandler)
         {
-            if (editor != null)
+            if (element != null)
             {
-                if (positionHandler != null) editor.OnPreviewPositionChanged -= positionHandler;
-                if (repaintHandler != null) editor.OnRepaintRequested -= repaintHandler;
-                editor = null;
+                if (positionHandler != null) element.OnPreviewPositionChanged -= positionHandler;
+                element = null;
             }
         }
         

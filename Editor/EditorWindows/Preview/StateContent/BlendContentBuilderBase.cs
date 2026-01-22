@@ -9,10 +9,11 @@ namespace DMotion.Editor
     /// <summary>
     /// Base class for blend state content builders.
     /// Provides shared functionality for 1D and 2D blend space UI.
+    /// Uses UIToolkit-based BlendSpaceVisualElement for consistent event handling.
     /// </summary>
-    internal abstract class BlendContentBuilderBase<TState, TEditor> : IStateContentBuilder
+    internal abstract class BlendContentBuilderBase<TState, TVisualElement> : IStateContentBuilder
         where TState : AnimationStateAsset
-        where TEditor : BlendSpaceVisualEditorBase
+        where TVisualElement : BlendSpaceVisualElement
     {
         #region Constants
         
@@ -36,7 +37,7 @@ namespace DMotion.Editor
         #region State
         
         protected TState state;
-        protected TEditor blendSpaceEditor;
+        protected TVisualElement blendSpaceElement;
         protected SerializedObject serializedObject;
         protected int selectedClipForPreview = -1;
         
@@ -47,7 +48,6 @@ namespace DMotion.Editor
         protected Action<Vector2> cachedPreviewPositionHandler;
         protected Action<int> cachedClipSelectedHandler;
         protected Action<bool> cachedEditModeHandler;
-        protected Action cachedRepaintHandler;
         protected Action<AnimationStateAsset, Vector2> cachedBlendStateChangedHandler;
         
         #endregion
@@ -79,9 +79,9 @@ namespace DMotion.Editor
         protected abstract string ClipsPropertyName { get; }
         
         /// <summary>
-        /// Creates or gets the blend space editor instance.
+        /// Creates or gets the blend space visual element instance.
         /// </summary>
-        protected abstract TEditor GetOrCreateEditor();
+        protected abstract TVisualElement GetOrCreateVisualElement();
         
         /// <summary>
         /// Builds the parameter info rows for the section.
@@ -129,10 +129,10 @@ namespace DMotion.Editor
             // Parameter info (abstract - implemented by subclasses)
             BuildParameterInfo(blendSection, context);
             
-            // Initialize blend space editor
-            blendSpaceEditor = GetOrCreateEditor();
-            blendSpaceEditor.ShowPreviewIndicator = true;
-            blendSpaceEditor.EditMode = false;
+            // Initialize blend space visual element (UIToolkit-based)
+            blendSpaceElement = GetOrCreateVisualElement();
+            blendSpaceElement.ShowPreviewIndicator = true;
+            blendSpaceElement.EditMode = false;
             
             // Preview sliders (abstract - implemented by subclasses)
             var slidersContainer = BuildPreviewSliders(context);
@@ -148,26 +148,23 @@ namespace DMotion.Editor
                 AnimationPreviewEvents.RaiseClipSelectedForPreview(state, clipIndex);
                 context.RequestRepaint?.Invoke();
             };
-            blendSpaceEditor.OnClipSelectedForPreview += cachedClipSelectedHandler;
+            blendSpaceElement.OnClipSelectedForPreview += cachedClipSelectedHandler;
             
-            // Repaint handler
-            cachedRepaintHandler = () => context.RequestRepaint?.Invoke();
-            blendSpaceEditor.OnRepaintRequested += cachedRepaintHandler;
+            // Add blend space visual element directly (no IMGUIContainer wrapper needed)
+            blendSpaceElement.style.height = BlendSpaceHeight;
+            blendSpaceElement.style.marginTop = SpacingLarge;
+            blendSection.Add(blendSpaceElement);
             
-            // Blend space visualizer
-            var blendSpaceContainer = CreateBlendSpaceContainer(context);
-            blendSection.Add(blendSpaceContainer);
+            // Help text (pure UIToolkit Label)
+            var helpLabel = CreateHelpTextLabel();
+            blendSection.Add(helpLabel);
             
-            // Help text
-            var helpContainer = CreateHelpTextContainer();
-            blendSection.Add(helpContainer);
-            
-            // Clip editing
+            // Clip editing (pure UIToolkit)
             var clipEditContainer = CreateClipEditContainer(context);
             blendSection.Add(clipEditContainer);
             
             // Edit mode visibility handler
-            SetupEditModeHandler(slidersContainer, clipEditContainer, context);
+            SetupEditModeHandler(slidersContainer, clipEditContainer, helpLabel, context);
             
             container.Add(blendSection);
         }
@@ -222,27 +219,22 @@ namespace DMotion.Editor
                 cachedBlendStateChangedHandler = null;
             }
             
-            if (blendSpaceEditor != null)
+            if (blendSpaceElement != null)
             {
                 if (cachedPreviewPositionHandler != null)
                 {
-                    blendSpaceEditor.OnPreviewPositionChanged -= cachedPreviewPositionHandler;
+                    blendSpaceElement.OnPreviewPositionChanged -= cachedPreviewPositionHandler;
                     cachedPreviewPositionHandler = null;
                 }
                 if (cachedClipSelectedHandler != null)
                 {
-                    blendSpaceEditor.OnClipSelectedForPreview -= cachedClipSelectedHandler;
+                    blendSpaceElement.OnClipSelectedForPreview -= cachedClipSelectedHandler;
                     cachedClipSelectedHandler = null;
                 }
                 if (cachedEditModeHandler != null)
                 {
-                    blendSpaceEditor.OnEditModeChanged -= cachedEditModeHandler;
+                    blendSpaceElement.OnEditModeChanged -= cachedEditModeHandler;
                     cachedEditModeHandler = null;
-                }
-                if (cachedRepaintHandler != null)
-                {
-                    blendSpaceEditor.OnRepaintRequested -= cachedRepaintHandler;
-                    cachedRepaintHandler = null;
                 }
             }
             
@@ -256,122 +248,73 @@ namespace DMotion.Editor
         
         #region Protected - Shared UI Creation
         
-        protected IMGUIContainer CreateBlendSpaceContainer(StateContentContext context)
+        /// <summary>
+        /// Creates the help text label (pure UIToolkit).
+        /// </summary>
+        protected Label CreateHelpTextLabel()
         {
-            IMGUIContainer container = null;
-            var height = BlendSpaceHeight;
+            var label = new Label();
+            label.AddToClassList("blend-space-help");
+            label.style.marginTop = SpacingSmall;
+            label.style.color = HelpTextColor;
+            label.style.fontSize = 10;
+            label.style.whiteSpace = WhiteSpace.Normal;
             
-            container = new IMGUIContainer(() =>
+            // Update text when element is attached
+            label.RegisterCallback<AttachToPanelEvent>(evt =>
             {
-                if (state != null && serializedObject != null)
+                if (blendSpaceElement != null)
                 {
-                    var rect = new Rect(0, 0, container.contentRect.width, height);
-                    if (rect.width > 10)
-                    {
-                        blendSpaceEditor.Draw(rect, serializedObject);
-                    }
+                    label.text = blendSpaceElement.GetHelpText();
                 }
             });
-            container.style.height = height;
-            container.style.marginTop = SpacingLarge;
-            container.focusable = true;
-            container.pickingMode = PickingMode.Position;
             
-            // Mouse event handlers for pan
-            container.RegisterCallback<MouseDownEvent>(evt =>
-            {
-                container.Focus();
-                if (evt.button == 2 || (evt.button == 0 && evt.altKey))
-                {
-                    blendSpaceEditor?.StartExternalPan(evt.localMousePosition);
-                    evt.StopPropagation();
-                }
-                container.MarkDirtyRepaint();
-            });
-            container.RegisterCallback<MouseMoveEvent>(evt =>
-            {
-                if (blendSpaceEditor?.IsExternalPanning == true)
-                {
-                    blendSpaceEditor.UpdateExternalPan(evt.localMousePosition);
-                    container.MarkDirtyRepaint();
-                    evt.StopPropagation();
-                }
-                else if (evt.pressedButtons != 0)
-                {
-                    container.MarkDirtyRepaint();
-                }
-            });
-            container.RegisterCallback<MouseUpEvent>(evt =>
-            {
-                if (blendSpaceEditor?.IsExternalPanning == true)
-                {
-                    blendSpaceEditor.EndExternalPan();
-                    container.MarkDirtyRepaint();
-                }
-            });
-            // Register in TrickleDown phase to capture wheel events before parent ScrollView
-            container.RegisterCallback<WheelEvent>(evt =>
-            {
-                // Stop propagation and prevent default to ensure zoom works
-                evt.StopPropagation();
-                evt.PreventDefault();
-                container.MarkDirtyRepaint();
-            }, TrickleDown.TrickleDown);
-            
-            return container;
+            return label;
         }
         
-        protected IMGUIContainer CreateHelpTextContainer()
+        /// <summary>
+        /// Creates the clip edit container (pure UIToolkit).
+        /// Override BuildClipEditContent in subclass to provide clip-specific UI.
+        /// </summary>
+        protected VisualElement CreateClipEditContainer(StateContentContext context)
         {
-            var container = new IMGUIContainer(() =>
-            {
-                if (blendSpaceEditor != null)
-                {
-                    var helpStyle = new GUIStyle(EditorStyles.miniLabel)
-                    {
-                        normal = { textColor = HelpTextColor },
-                        wordWrap = true
-                    };
-                    GUILayout.Label(blendSpaceEditor.GetHelpText(), helpStyle);
-                }
-            });
-            container.style.marginTop = SpacingSmall;
-            return container;
-        }
-        
-        protected IMGUIContainer CreateClipEditContainer(StateContentContext context)
-        {
-            var clipsProperty = serializedObject.FindProperty(ClipsPropertyName);
-            var container = new IMGUIContainer(() =>
-            {
-                if (blendSpaceEditor != null && blendSpaceEditor.EditMode)
-                {
-                    DrawSelectedClipFields(clipsProperty);
-                }
-            });
+            var container = new VisualElement();
+            container.AddToClassList("clip-edit-container");
             container.style.marginTop = SpacingMedium;
             container.style.display = DisplayStyle.None;
+            
+            // Subclasses populate this via BuildClipEditContent
+            BuildClipEditContent(container, context);
+            
             return container;
         }
         
         /// <summary>
-        /// Draws the selected clip fields. Override in subclass to call the correct method.
+        /// Builds the clip edit UI content. Override in subclass to provide clip-specific fields.
         /// </summary>
-        protected abstract void DrawSelectedClipFields(SerializedProperty clipsProperty);
+        protected abstract void BuildClipEditContent(VisualElement container, StateContentContext context);
         
         protected void SetupEditModeHandler(
             VisualElement slidersContainer,
             VisualElement clipEditContainer,
+            Label helpLabel,
             StateContentContext context)
         {
             cachedEditModeHandler = isEditMode =>
             {
                 slidersContainer.style.display = isEditMode ? DisplayStyle.None : DisplayStyle.Flex;
                 clipEditContainer.style.display = isEditMode ? DisplayStyle.Flex : DisplayStyle.None;
+                
+                // Update help text for current mode
+                if (blendSpaceElement != null && helpLabel != null)
+                {
+                    helpLabel.text = blendSpaceElement.GetHelpText();
+                }
+                
                 AnimationPreviewEvents.RaiseBlendSpaceEditModeChanged(state, isEditMode);
                 context.RequestRepaint?.Invoke();
             };
-            blendSpaceEditor.OnEditModeChanged += cachedEditModeHandler;
+            blendSpaceElement.OnEditModeChanged += cachedEditModeHandler;
         }
         
         /// <summary>

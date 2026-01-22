@@ -9,8 +9,9 @@ namespace DMotion.Editor
     /// <summary>
     /// Builds inspector content for Directional2DBlendStateAsset.
     /// Shows 2D blend space visualizer with X/Y preview controls.
+    /// Uses pure UIToolkit for consistent event handling.
     /// </summary>
-    internal class Directional2DBlendContentBuilder : BlendContentBuilderBase<Directional2DBlendStateAsset, BlendSpace2DVisualEditor>
+    internal class Directional2DBlendContentBuilder : BlendContentBuilderBase<Directional2DBlendStateAsset, BlendSpace2DVisualElement>
     {
         #region State
         
@@ -43,16 +44,16 @@ namespace DMotion.Editor
         
         protected override string ClipsPropertyName => "BlendClips";
         
-        protected override BlendSpace2DVisualEditor GetOrCreateEditor()
+        protected override BlendSpace2DVisualElement GetOrCreateVisualElement()
         {
-            blendSpaceEditor ??= new BlendSpace2DVisualEditor();
-            blendSpaceEditor.SetTarget(state);
+            blendSpaceElement ??= new BlendSpace2DVisualElement();
+            blendSpaceElement.SetTarget(state);
             
             // Restore persisted blend value for this state
             previewBlendValue = PreviewSettings.instance.GetBlendValue2D(state, previewBlendValue);
-            blendSpaceEditor.PreviewPosition = previewBlendValue;
+            blendSpaceElement.PreviewPosition = previewBlendValue;
             
-            return blendSpaceEditor;
+            return blendSpaceElement;
         }
         
         protected override void BuildParameterInfo(VisualElement section, StateContentContext context)
@@ -128,7 +129,7 @@ namespace DMotion.Editor
                 cachedYSlider?.SetValueWithoutNotify(pos.y);
                 cachedYField?.SetValueWithoutNotify(pos.y);
             };
-            blendSpaceEditor.OnPreviewPositionChanged += cachedPreviewPositionHandler;
+            blendSpaceElement.OnPreviewPositionChanged += cachedPreviewPositionHandler;
         }
         
         private void SetBlendValueX(float x, StateContentContext context)
@@ -150,10 +151,10 @@ namespace DMotion.Editor
             // Persist to settings (shared across all previews of this state)
             PreviewSettings.instance.SetBlendValue2D(state, value);
             
-            // Update visual editor
-            if (blendSpaceEditor != null)
+            // Update visual element
+            if (blendSpaceElement != null)
             {
-                blendSpaceEditor.PreviewPosition = value;
+                blendSpaceElement.PreviewPosition = value;
             }
             
             // Notify listeners (timeline duration updates via OnBlendStateChanged event)
@@ -188,15 +189,112 @@ namespace DMotion.Editor
             if (maxDuration > 0) duration = maxDuration;
         }
         
-        protected override void DrawSelectedClipFields(SerializedProperty clipsProperty)
+        protected override void BuildClipEditContent(VisualElement container, StateContentContext context)
         {
-            if (state?.BlendClips != null)
+            // Create a container that updates based on selection
+            var selectionInfo = new Label("Click a clip in the blend space to select it.");
+            selectionInfo.AddToClassList("clip-edit-hint");
+            selectionInfo.style.color = new Color(0.6f, 0.6f, 0.6f);
+            selectionInfo.style.unityFontStyleAndWeight = FontStyle.Italic;
+            container.Add(selectionInfo);
+            
+            var clipFields = new VisualElement();
+            clipFields.AddToClassList("clip-edit-fields");
+            clipFields.style.display = DisplayStyle.None;
+            container.Add(clipFields);
+            
+            // Position X field
+            var posXRow = new VisualElement();
+            posXRow.AddToClassList("property-row");
+            posXRow.style.flexDirection = FlexDirection.Row;
+            var posXLabel = new Label("Position X");
+            posXLabel.AddToClassList("property-label");
+            posXLabel.style.width = 80;
+            var posXField = new FloatField();
+            posXField.style.flexGrow = 1;
+            posXRow.Add(posXLabel);
+            posXRow.Add(posXField);
+            clipFields.Add(posXRow);
+            
+            // Position Y field
+            var posYRow = new VisualElement();
+            posYRow.AddToClassList("property-row");
+            posYRow.style.flexDirection = FlexDirection.Row;
+            var posYLabel = new Label("Position Y");
+            posYLabel.AddToClassList("property-label");
+            posYLabel.style.width = 80;
+            var posYField = new FloatField();
+            posYField.style.flexGrow = 1;
+            posYRow.Add(posYLabel);
+            posYRow.Add(posYField);
+            clipFields.Add(posYRow);
+            
+            // Update fields when selection changes
+            blendSpaceElement.OnSelectionChanged += clipIndex =>
             {
-                if (blendSpaceEditor.DrawSelectedClipFields(state.BlendClips, clipsProperty))
+                if (clipIndex >= 0 && state?.BlendClips != null && clipIndex < state.BlendClips.Length)
                 {
-                    serializedObject.ApplyModifiedProperties();
+                    selectionInfo.style.display = DisplayStyle.None;
+                    clipFields.style.display = DisplayStyle.Flex;
+                    
+                    var clip = state.BlendClips[clipIndex];
+                    posXField.SetValueWithoutNotify(clip.Position.x);
+                    posYField.SetValueWithoutNotify(clip.Position.y);
                 }
-            }
+                else
+                {
+                    selectionInfo.style.display = DisplayStyle.Flex;
+                    clipFields.style.display = DisplayStyle.None;
+                }
+            };
+            
+            // Handle position changes from fields
+            posXField.RegisterValueChangedCallback(evt =>
+            {
+                if (blendSpaceElement.SelectedClipIndex >= 0 && serializedObject != null)
+                {
+                    var clipsProperty = serializedObject.FindProperty("BlendClips");
+                    var clipProperty = clipsProperty.GetArrayElementAtIndex(blendSpaceElement.SelectedClipIndex);
+                    var positionProperty = clipProperty.FindPropertyRelative("Position");
+                    positionProperty.FindPropertyRelative("x").floatValue = evt.newValue;
+                    serializedObject.ApplyModifiedProperties();
+                    blendSpaceElement.RefreshClips();
+                }
+            });
+            
+            posYField.RegisterValueChangedCallback(evt =>
+            {
+                if (blendSpaceElement.SelectedClipIndex >= 0 && serializedObject != null)
+                {
+                    var clipsProperty = serializedObject.FindProperty("BlendClips");
+                    var clipProperty = clipsProperty.GetArrayElementAtIndex(blendSpaceElement.SelectedClipIndex);
+                    var positionProperty = clipProperty.FindPropertyRelative("Position");
+                    positionProperty.FindPropertyRelative("y").floatValue = evt.newValue;
+                    serializedObject.ApplyModifiedProperties();
+                    blendSpaceElement.RefreshClips();
+                }
+            });
+            
+            // Handle clip position changes from drag
+            blendSpaceElement.OnClipPositionChanged += (clipIndex, newPos) =>
+            {
+                if (serializedObject != null && clipIndex >= 0)
+                {
+                    var clipsProperty = serializedObject.FindProperty("BlendClips");
+                    var clipProperty = clipsProperty.GetArrayElementAtIndex(clipIndex);
+                    var positionProperty = clipProperty.FindPropertyRelative("Position");
+                    positionProperty.FindPropertyRelative("x").floatValue = newPos.x;
+                    positionProperty.FindPropertyRelative("y").floatValue = newPos.y;
+                    serializedObject.ApplyModifiedProperties();
+                    
+                    // Update fields if this is the selected clip
+                    if (clipIndex == blendSpaceElement.SelectedClipIndex)
+                    {
+                        posXField.SetValueWithoutNotify(newPos.x);
+                        posYField.SetValueWithoutNotify(newPos.y);
+                    }
+                }
+            };
         }
         
         protected override void ClearCachedUIReferences()
