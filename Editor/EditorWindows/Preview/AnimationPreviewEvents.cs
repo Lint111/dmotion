@@ -64,6 +64,16 @@ namespace DMotion.Editor
         #region Blend Space Events
 
         /// <summary>
+        /// Fired when any blend state's position changes (unified event for 1D and 2D).
+        /// Args: (state, blendPosition) - For 1D states, Y component is 0.
+        /// </summary>
+        /// <remarks>
+        /// Subscribe to this event to react to blend position changes regardless of state type.
+        /// Components can use this to update effective duration, weights, or other blend-dependent values.
+        /// </remarks>
+        public static event Action<AnimationStateAsset, Vector2> OnBlendStateChanged;
+
+        /// <summary>
         /// Fired when the 1D blend position changes.
         /// Args: (state, blendValue)
         /// </summary>
@@ -189,15 +199,18 @@ namespace DMotion.Editor
 
         #region Raise Methods - Blend Space
 
-        /// <summary>Raises <see cref="OnBlendPosition1DChanged"/>.</summary>
+        /// <summary>Raises <see cref="OnBlendPosition1DChanged"/> and <see cref="OnBlendStateChanged"/>.</summary>
         public static void RaiseBlendPosition1DChanged(LinearBlendStateAsset state, float blendValue)
         {
+            var blendPos = new Vector2(blendValue, 0);
+            OnBlendStateChanged?.Invoke(state, blendPos);
             OnBlendPosition1DChanged?.Invoke(state, blendValue);
         }
 
-        /// <summary>Raises <see cref="OnBlendPosition2DChanged"/>.</summary>
+        /// <summary>Raises <see cref="OnBlendPosition2DChanged"/> and <see cref="OnBlendStateChanged"/>.</summary>
         public static void RaiseBlendPosition2DChanged(Directional2DBlendStateAsset state, Vector2 blendPosition)
         {
+            OnBlendStateChanged?.Invoke(state, blendPosition);
             OnBlendPosition2DChanged?.Invoke(state, blendPosition);
         }
 
@@ -233,15 +246,19 @@ namespace DMotion.Editor
             OnTransitionTimeChanged?.Invoke(fromState, toState, normalizedTime);
         }
 
-        /// <summary>Raises <see cref="OnTransitionFromBlendPositionChanged"/>.</summary>
+        /// <summary>Raises <see cref="OnTransitionFromBlendPositionChanged"/> and <see cref="OnBlendStateChanged"/>.</summary>
         public static void RaiseTransitionFromBlendPositionChanged(AnimationStateAsset fromState, Vector2 blendPosition)
         {
+            // Also fire unified event so all blend-dependent UI updates
+            OnBlendStateChanged?.Invoke(fromState, blendPosition);
             OnTransitionFromBlendPositionChanged?.Invoke(fromState, blendPosition);
         }
 
-        /// <summary>Raises <see cref="OnTransitionToBlendPositionChanged"/>.</summary>
+        /// <summary>Raises <see cref="OnTransitionToBlendPositionChanged"/> and <see cref="OnBlendStateChanged"/>.</summary>
         public static void RaiseTransitionToBlendPositionChanged(AnimationStateAsset toState, Vector2 blendPosition)
         {
+            // Also fire unified event so all blend-dependent UI updates
+            OnBlendStateChanged?.Invoke(toState, blendPosition);
             OnTransitionToBlendPositionChanged?.Invoke(toState, blendPosition);
         }
 

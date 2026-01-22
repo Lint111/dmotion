@@ -214,6 +214,8 @@ namespace DMotion.Editor
         /// </summary>
         public void Tick(float deltaTime)
         {
+            // PlaybackSpeed is set by AnimationPreviewWindow.Update() 
+            // which has access to PreviewRenderer for weighted clip speeds
             timeline?.Tick(deltaTime);
         }
         
@@ -590,10 +592,13 @@ namespace DMotion.Editor
             section.Add(loopRow);
             
             // State Info (collapsed foldout for read-only info)
-            float fromSpeed = transitionFrom?.Speed ?? 1f;
-            float toSpeed = transitionTo?.Speed ?? 1f;
-            float fromDuration = GetStateDuration(transitionFrom);
-            float toDuration = GetStateDuration(transitionTo);
+            // Use effective speed/duration at current blend position
+            var fromBlendPos = PreviewSettings.GetBlendPosition(transitionFrom);
+            var toBlendPos = PreviewSettings.GetBlendPosition(transitionTo);
+            float fromSpeed = transitionFrom?.GetEffectiveSpeed(fromBlendPos) ?? 1f;
+            float toSpeed = transitionTo?.GetEffectiveSpeed(toBlendPos) ?? 1f;
+            float fromDuration = transitionFrom?.GetEffectiveDuration(fromBlendPos) ?? 0f;
+            float toDuration = transitionTo?.GetEffectiveDuration(toBlendPos) ?? 0f;
             
             var stateInfoFoldout = new Foldout { text = "State Info", value = false };
             stateInfoFoldout.style.marginTop = 4;
@@ -760,9 +765,15 @@ namespace DMotion.Editor
         {
             if (cachedExitTimeProperty != null && cachedSerializedObject != null)
             {
+                // Record undo and mark dirty for proper save/undo support
+                Undo.RecordObject(cachedSerializedObject.targetObject, "Change Transition Exit Time");
+                
                 cachedSerializedObject.Update();
                 cachedExitTimeProperty.floatValue = newExitTime;
                 cachedSerializedObject.ApplyModifiedProperties();
+                
+                // Ensure asset is marked dirty for saving
+                EditorUtility.SetDirty(cachedSerializedObject.targetObject);
                 
                 transitionExitTime = newExitTime;
             }
@@ -773,9 +784,15 @@ namespace DMotion.Editor
         {
             if (cachedDurationProperty != null && cachedSerializedObject != null)
             {
+                // Record undo and mark dirty for proper save/undo support
+                Undo.RecordObject(cachedSerializedObject.targetObject, "Change Transition Duration");
+                
                 cachedSerializedObject.Update();
                 cachedDurationProperty.floatValue = newDuration;
                 cachedSerializedObject.ApplyModifiedProperties();
+                
+                // Ensure asset is marked dirty for saving
+                EditorUtility.SetDirty(cachedSerializedObject.targetObject);
                 
                 transitionDuration = newDuration;
             }
@@ -832,43 +849,47 @@ namespace DMotion.Editor
             // Track slider/field references for bidirectional sync
             Slider xSlider = null, ySlider = null;
             FloatField xField = null, yField = null;
-            Vector2 currentPosition = Vector2.zero;
+            
+            // Restore persisted blend position for this state
+            Vector2 currentPosition = blendInfo.Is2D 
+                ? PreviewSettings.instance.GetBlendValue2D(state) 
+                : new Vector2(PreviewSettings.instance.GetBlendValue1D(state), 0);
+            editor.PreviewPosition = currentPosition;
             
             if (blendInfo.Is2D)
             {
-                // X slider
-                var xRow = CreateSliderWithField("X", blendInfo.MinX, blendInfo.MaxX, 0f,
+                // X slider - use persisted value
+                var xRow = CreateSliderWithField("X", blendInfo.MinX, blendInfo.MaxX, currentPosition.x,
                     out xSlider, out xField,
                     newValue =>
                     {
                         currentPosition.x = newValue;
                         editor.PreviewPosition = currentPosition;
-                        RaiseBlendPositionChanged(state, currentPosition, isFromState);
+                        SaveAndRaiseBlendPositionChanged(state, currentPosition, isFromState, true);
                     });
                 section.Add(xRow);
                 
-                // Y slider
-                var yRow = CreateSliderWithField("Y", blendInfo.MinY, blendInfo.MaxY, 0f,
+                // Y slider - use persisted value
+                var yRow = CreateSliderWithField("Y", blendInfo.MinY, blendInfo.MaxY, currentPosition.y,
                     out ySlider, out yField,
                     newValue =>
                     {
                         currentPosition.y = newValue;
                         editor.PreviewPosition = currentPosition;
-                        RaiseBlendPositionChanged(state, currentPosition, isFromState);
+                        SaveAndRaiseBlendPositionChanged(state, currentPosition, isFromState, true);
                     });
                 section.Add(yRow);
             }
             else
             {
-                // Single blend value slider
-                float defaultValue = (blendInfo.MinX + blendInfo.MaxX) / 2f;
-                var sliderRow = CreateSliderWithField("Blend Value", blendInfo.MinX, blendInfo.MaxX, defaultValue,
+                // Single blend value slider - use persisted value
+                var sliderRow = CreateSliderWithField("Blend Value", blendInfo.MinX, blendInfo.MaxX, currentPosition.x,
                     out xSlider, out xField,
                     newValue =>
                     {
                         currentPosition = new Vector2(newValue, 0);
                         editor.PreviewPosition = currentPosition;
-                        RaiseBlendPositionChanged(state, currentPosition, isFromState);
+                        SaveAndRaiseBlendPositionChanged(state, currentPosition, isFromState, false);
                     });
                 section.Add(sliderRow);
             }
@@ -943,7 +964,7 @@ namespace DMotion.Editor
                 ySlider?.SetValueWithoutNotify(pos.y);
                 yField?.SetValueWithoutNotify(pos.y);
                 
-                RaiseBlendPositionChanged(state, pos, isFromState);
+                SaveAndRaiseBlendPositionChanged(state, pos, isFromState, blendInfo.Is2D);
                 OnRepaintRequested?.Invoke();
             };
             editor.OnPreviewPositionChanged += positionHandler;
@@ -1058,8 +1079,15 @@ namespace DMotion.Editor
             };
         }
         
-        private void RaiseBlendPositionChanged(AnimationStateAsset state, Vector2 position, bool isFromState)
+        private void SaveAndRaiseBlendPositionChanged(AnimationStateAsset state, Vector2 position, bool isFromState, bool is2D)
         {
+            // Persist to settings (shared across all previews of this state)
+            if (is2D)
+                PreviewSettings.instance.SetBlendValue2D(state, position);
+            else
+                PreviewSettings.instance.SetBlendValue1D(state, position.x);
+            
+            // Raise the appropriate event
             if (isFromState)
                 AnimationPreviewEvents.RaiseTransitionFromBlendPositionChanged(state, position);
             else
@@ -1180,6 +1208,8 @@ namespace DMotion.Editor
                     return 0f;
             }
         }
+        
+
         
         private static string GetConditionDescription(TransitionCondition condition)
         {

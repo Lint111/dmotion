@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using DMotion.Authoring;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -9,11 +10,15 @@ namespace DMotion.Editor
     /// A timeline control for transition preview with interactive editing.
     /// Shows full clip bars that can be positioned to create overlap (transition duration).
     /// 
-    /// Visual model:
-    /// - From State bar: Full clip duration, positioned at timeline start (top row)
-    /// - To State bar: Full clip duration, can slide left/right (bottom row)
-    /// - Overlap region: Drawn BETWEEN the bars showing the blend curve
-    /// - Transition duration = overlap between the bars
+    /// Visual layout (vertical):
+    /// - From State bar: Top row, fixed at timeline start
+    /// - To State bar: Bottom row, draggable left/right to change exit time
+    /// - Overlap region: Sits ON TOP of both bars covering the intersection
+    /// 
+    /// The overlap gradient transitions from From color (blue) to To color (green),
+    /// clearly showing the transition/blend region.
+    /// 
+    /// Drag the To bar horizontally to adjust exit time and transition duration.
     /// 
     /// Uses pure UIElements for consistent behavior with TimelineScrubber.
     /// </summary>
@@ -22,9 +27,12 @@ namespace DMotion.Editor
     {
         #region Constants
         
-        private const float HandleWidth = 10f;
+        private const float BarHeight = 20f;
+        private const float BarSpacing = 4f;      // Vertical gap between bars
+        private const float TrackPadding = 8f;    // Vertical padding in track
         private const float ScrubberWidth = 2f;
         private const float Padding = 12f;
+        private const float ToBarHitZone = 10f;   // Pixels around To bar for hit detection
         
         /// <summary>Epsilon for float comparisons to detect meaningful changes.</summary>
         private const float ValueChangeEpsilon = 0.0001f;
@@ -37,59 +45,72 @@ namespace DMotion.Editor
         {
             None,
             Scrubber,
-            ExitTimeHandle,
             ToBar
         }
         
         private DragTarget currentDragTarget = DragTarget.None;
-        private DragTarget hoveredTarget = DragTarget.None;
         private float dragStartValue;
         private float dragStartMouseX;
+        private bool isToBarHovered;
         
         #endregion
         
         #region State
         
-        // Transition parameters
-        private float exitTime = 0.75f;
-        private float transitionDuration = 0.25f;
-        private float transitionOffset;
+        // State references for type checking and duration calculation
+        private AnimationStateAsset fromStateAsset;
+        private AnimationStateAsset toStateAsset;
         
-        // Clip durations
+        // Cached effective durations (updated when blend position changes)
         private float fromStateDuration = 1f;
         private float toStateDuration = 1f;
+        
+        // Transition offset (for starting to-state at a specific point)
+        private float transitionOffset;
         
         // Display names
         private string fromStateName = "From State";
         private string toStateName = "To State";
         
-        // Blend curve (default linear)
+        // Cached blend curve (read from asset on configure)
         private AnimationCurve blendCurve = AnimationCurve.Linear(0f, 1f, 1f, 0f);
+        
+        // Min/max bounds
+        private const float MinTransitionDuration = 0.05f;
+        private const float MaxTransitionDuration = 2f;
+        private const int MaxVisualCycles = 4;
+        
+        // Transition timing values (requested = user intent, effective = clamped for logic)
+        private float requestedExitTime = 0.75f;
+        private float exitTime = 0.75f;
+        private float requestedTransitionDuration = 0.25f;
+        private float transitionDuration = 0.25f;
         
         #endregion
         
         #region UI Elements
         
-        // Header
+        // Header (state names + durations)
         private readonly Label fromStateLabel;
+        private readonly Label fromDurationLabel;
         private readonly Label toStateLabel;
+        private readonly Label toDurationLabel;
         
         // Track area
         private readonly VisualElement trackArea;
         private readonly VisualElement fromBar;
-        private readonly VisualElement fromBarOverlap;
-        private readonly Label fromBarLabel;
-        private readonly Label fromBarDuration;
-        private readonly VisualElement exitTimeHandle;
         private readonly VisualElement toBar;
-        private readonly VisualElement toBarOverlap;
-        private readonly Label toBarLabel;
-        private readonly Label toBarDuration;
         private readonly VisualElement overlapArea;
         private readonly VisualElement blendCurveElement;
         private readonly Label overlapDurationLabel;
         private readonly VisualElement scrubber;
         private readonly VisualElement timeGridContainer;
+        
+        // Ghost cycle bars for visualizing context (preview only)
+        // fromGhostBars: LEFT of from-bar (when exitTime==0 or from-duration shrunk)
+        // toGhostBars: RIGHT of to-bar (when to-duration shrunk below transition duration)
+        private readonly List<VisualElement> fromGhostBars = new List<VisualElement>();
+        private readonly List<VisualElement> toGhostBars = new List<VisualElement>();
         
         // Footer
         private readonly Button playButton;
@@ -132,17 +153,21 @@ namespace DMotion.Editor
         public new bool IsDragging => currentDragTarget != DragTarget.None;
         
         /// <summary>
-        /// The exit time (0-1 normalized) when the transition starts.
+        /// The exit time in seconds (when the transition starts).
+        /// The value is stored as requestedExitTime (can exceed duration for ghost bar display),
+        /// but exitTime is clamped to [0, fromStateDuration] for actual logic.
         /// </summary>
         public float ExitTime
         {
             get => exitTime;
             set
             {
-                var newValue = Mathf.Clamp01(value);
-                if (Math.Abs(newValue - exitTime) > ValueChangeEpsilon)
+                var newValue = Mathf.Max(0f, value);
+                if (Math.Abs(newValue - requestedExitTime) > ValueChangeEpsilon)
                 {
-                    exitTime = newValue;
+                    requestedExitTime = newValue;
+                    // Clamp for logic - always within one cycle
+                    exitTime = Mathf.Clamp(requestedExitTime, 0f, fromStateDuration);
                     RecalculateTransitionDuration();
                     UpdateDuration();
                     UpdateLayout();
@@ -158,10 +183,11 @@ namespace DMotion.Editor
             get => transitionDuration;
             set
             {
-                var newValue = Mathf.Max(0.01f, value);
-                if (Math.Abs(newValue - transitionDuration) > ValueChangeEpsilon)
+                var newValue = Mathf.Clamp(value, MinTransitionDuration, MaxTransitionDuration);
+                if (Math.Abs(newValue - requestedTransitionDuration) > ValueChangeEpsilon)
                 {
-                    transitionDuration = newValue;
+                    requestedTransitionDuration = newValue;
+                    transitionDuration = Mathf.Clamp(newValue, MinTransitionDuration, toStateDuration);
                     UpdateDuration();
                     UpdateLayout();
                 }
@@ -225,7 +251,6 @@ namespace DMotion.Editor
             {
                 fromStateName = value ?? "From State";
                 if (fromStateLabel != null) fromStateLabel.text = fromStateName;
-                if (fromBarLabel != null) fromBarLabel.text = fromStateName;
             }
         }
         
@@ -239,7 +264,6 @@ namespace DMotion.Editor
             {
                 toStateName = value ?? "To State";
                 if (toStateLabel != null) toStateLabel.text = toStateName;
-                if (toBarLabel != null) toBarLabel.text = toStateName;
             }
         }
         
@@ -257,24 +281,204 @@ namespace DMotion.Editor
         }
         
         /// <summary>
+        /// Computed property: number of FROM bar cycles to display.
+        /// Shows ghost bars (cycles > 1) when:
+        /// - exitTime == 0 (context ghost to show previous cycle)
+        /// - requestedExitTime > fromStateDuration (from-duration shrunk below exit time)
+        /// </summary>
+        private int FromVisualCycles
+        {
+            get
+            {
+                if (fromStateDuration <= 0.001f) return 1;
+                
+                float minExitTime = Mathf.Max(0f, fromStateDuration - toStateDuration);
+                float clampedExitTime = Mathf.Clamp(requestedExitTime, minExitTime, fromStateDuration);
+                
+                // Case 1: Duration shrunk - requestedExitTime exceeds fromStateDuration
+                if (requestedExitTime > fromStateDuration)
+                {
+                    float cyclesNeeded = requestedExitTime / fromStateDuration;
+                    return Mathf.Clamp(Mathf.CeilToInt(cyclesNeeded), 1, MaxVisualCycles);
+                }
+                
+                // Case 2: Context ghost - exitTime is at zero (full overlap)
+                if (clampedExitTime < 0.001f && minExitTime < 0.001f)
+                {
+                    return 2; // Show one previous cycle for context
+                }
+                
+                // Normal case - no ghost
+                return 1;
+            }
+        }
+        
+        /// <summary>
+        /// Computed property: number of TO bar cycles to display.
+        /// Shows ghost bars (cycles > 1) when:
+        /// - transitionDuration > toStateDuration (to-duration shrunk)
+        /// - bars end together (context ghost to show continuation)
+        /// </summary>
+        private int ToVisualCycles
+        {
+            get
+            {
+                if (toStateDuration <= 0.001f) return 1;
+                
+                // Case 1: Duration shrunk - transitionDuration exceeds toStateDuration
+                if (requestedTransitionDuration > toStateDuration)
+                {
+                    float cyclesNeeded = requestedTransitionDuration / toStateDuration;
+                    return Mathf.Clamp(Mathf.CeilToInt(cyclesNeeded), 1, MaxVisualCycles);
+                }
+                
+                // Case 2: Context ghost - bars end together
+                float clampedExitTime = EffectiveExitTime;
+                bool barsEndTogether = (clampedExitTime + toStateDuration) <= (fromStateDuration + 0.001f);
+                if (barsEndTogether)
+                {
+                    return 2; // Show one continuation cycle for context
+                }
+                
+                // Normal case - no ghost
+                return 1;
+            }
+        }
+        
+        /// <summary>
+        /// Computed property: whether the FROM ghost is due to duration shrink (vs context).
+        /// This affects how the to-bar position is calculated.
+        /// </summary>
+        private bool IsFromGhostDurationShrink => requestedExitTime > fromStateDuration;
+        
+        /// <summary>
+        /// Computed property: the effective exit time clamped to valid range.
+        /// </summary>
+        private float EffectiveExitTime
+        {
+            get
+            {
+                float minExitTime = Mathf.Max(0f, fromStateDuration - toStateDuration);
+                return Mathf.Clamp(requestedExitTime, minExitTime, fromStateDuration);
+            }
+        }
+        
+        /// <summary>
         /// Gets the current transition progress (0 before exit, 0-1 during transition, 1 after).
+        /// Uses MAX(visualOverlap, transitionDuration) so:
+        /// - When transitionDuration is small, blend fills the visual overlap (prevents jump to high %)
+        /// - When visualOverlap is small, blend takes the configured transition time (prevents too-fast transition)
         /// </summary>
         public float TransitionProgress
         {
             get
             {
                 float totalDuration = GetTotalTimelineDuration();
-                float exitTimeSeconds = exitTime * fromStateDuration;
                 float currentSeconds = NormalizedTime * totalDuration;
                 
-                if (currentSeconds < exitTimeSeconds)
+                // Calculate effective exit time on the timeline
+                // - Duration shrink ghost: use requestedExitTime directly
+                // - Context ghost or no ghost: use ghostOffset + exitTime
+                float effectiveExitTime;
+                if (IsFromGhostDurationShrink)
+                {
+                    effectiveExitTime = requestedExitTime;
+                }
+                else
+                {
+                    float fromGhostOffset = (FromVisualCycles - 1) * fromStateDuration;
+                    effectiveExitTime = fromGhostOffset + exitTime;
+                }
+                
+                // Progress is 0 before exit time, then ramps 0-1 during transition
+                if (currentSeconds < effectiveExitTime)
                     return 0f;
                 
-                if (transitionDuration <= 0.001f)
-                    return currentSeconds >= exitTimeSeconds ? 1f : 0f;
+                // Calculate VISUAL overlap duration (same calculation as UpdateLayout)
+                // Total from-bar end = all cycles * duration
+                float totalFromEnd = FromVisualCycles * fromStateDuration;
+                float toBarEnd = effectiveExitTime + toStateDuration;
+                float visualOverlapDuration = Mathf.Min(totalFromEnd, toBarEnd) - effectiveExitTime;
                 
-                float progress = (currentSeconds - exitTimeSeconds) / transitionDuration;
+                // Use MAX of visual overlap and configured transition duration:
+                // - This ensures blend fills the visual overlap (prevents jump to high %)
+                // - But also respects configured transition time (prevents too-fast when overlap shrinks)
+                float effectiveTransitionDuration = Mathf.Max(visualOverlapDuration, requestedTransitionDuration);
+                
+                if (effectiveTransitionDuration <= 0.001f)
+                    return currentSeconds >= effectiveExitTime ? 1f : 0f;
+                
+                float progress = (currentSeconds - effectiveExitTime) / effectiveTransitionDuration;
                 return Mathf.Clamp01(progress);
+            }
+        }
+        
+        /// <summary>
+        /// Gets the normalized time (0-1) within the "from" state's clip.
+        /// This is the position the from-state animation should be sampled at.
+        /// Accounts for ghost bars - scrubber in ghost region shows animation wrapping.
+        /// </summary>
+        public float FromStateNormalizedTime
+        {
+            get
+            {
+                if (fromStateDuration <= 0.001f) return 0f;
+                
+                float totalDuration = GetTotalTimelineDuration();
+                float currentSeconds = NormalizedTime * totalDuration;
+                
+                // Clamp to total from cycles (ghost + main)
+                float totalFromTime = FromVisualCycles * fromStateDuration;
+                float timeInFromCycles = Mathf.Min(currentSeconds, totalFromTime);
+                
+                // Wrap within single cycle for normalized time (handles ghost bar looping)
+                float normalizedTime = (timeInFromCycles % fromStateDuration) / fromStateDuration;
+                return Mathf.Clamp01(normalizedTime);
+            }
+        }
+        
+        /// <summary>
+        /// Gets the normalized time (0-1) within the "to" state's clip.
+        /// This is the position the to-state animation should be sampled at.
+        /// Accounts for transition offset and TO ghost bars.
+        /// </summary>
+        public float ToStateNormalizedTime
+        {
+            get
+            {
+                if (toStateDuration <= 0.001f) return 0f;
+                
+                float totalDuration = GetTotalTimelineDuration();
+                float currentSeconds = NormalizedTime * totalDuration;
+                
+                // Calculate effective exit time on the timeline (same logic as TransitionProgress)
+                float toStateStartInTimeline;
+                if (IsFromGhostDurationShrink)
+                {
+                    toStateStartInTimeline = requestedExitTime;
+                }
+                else
+                {
+                    float fromGhostOffset = (FromVisualCycles - 1) * fromStateDuration;
+                    toStateStartInTimeline = fromGhostOffset + exitTime;
+                }
+                
+                float toStateElapsed = currentSeconds - toStateStartInTimeline;
+                
+                if (toStateElapsed < 0) return transitionOffset; // Before transition, at offset position
+                
+                // Time into the to-state clip = offset + elapsed time since transition start
+                float toClipTime = transitionOffset * toStateDuration + toStateElapsed;
+                
+                // Handle TO ghost bars - wrap if we exceed single cycle
+                if (ToVisualCycles > 1)
+                {
+                    float totalToTime = ToVisualCycles * toStateDuration;
+                    toClipTime = Mathf.Min(toClipTime, totalToTime);
+                    return Mathf.Clamp01((toClipTime % toStateDuration) / toStateDuration);
+                }
+                
+                return Mathf.Clamp01(toClipTime / toStateDuration);
             }
         }
         
@@ -286,19 +490,42 @@ namespace DMotion.Editor
         {
             AddToClassList("transition-timeline");
             
-            // Header
+            // Header with state names and durations
             var header = new VisualElement();
             header.AddToClassList("transition-timeline__header");
+            
+            // Left side: From state info
+            var fromInfo = new VisualElement();
+            fromInfo.AddToClassList("transition-timeline__header-info");
             
             fromStateLabel = new Label(fromStateName);
             fromStateLabel.AddToClassList("transition-timeline__state-label");
             fromStateLabel.AddToClassList("transition-timeline__state-label--from");
-            header.Add(fromStateLabel);
+            fromInfo.Add(fromStateLabel);
+            
+            fromDurationLabel = new Label();
+            fromDurationLabel.AddToClassList("transition-timeline__duration-label");
+            fromDurationLabel.AddToClassList("transition-timeline__duration-label--from");
+            fromInfo.Add(fromDurationLabel);
+            
+            header.Add(fromInfo);
+            
+            // Right side: To state info
+            var toInfo = new VisualElement();
+            toInfo.AddToClassList("transition-timeline__header-info");
+            toInfo.AddToClassList("transition-timeline__header-info--right");
             
             toStateLabel = new Label(toStateName);
             toStateLabel.AddToClassList("transition-timeline__state-label");
             toStateLabel.AddToClassList("transition-timeline__state-label--to");
-            header.Add(toStateLabel);
+            toInfo.Add(toStateLabel);
+            
+            toDurationLabel = new Label();
+            toDurationLabel.AddToClassList("transition-timeline__duration-label");
+            toDurationLabel.AddToClassList("transition-timeline__duration-label--to");
+            toInfo.Add(toDurationLabel);
+            
+            header.Add(toInfo);
             
             Add(header);
             
@@ -311,63 +538,34 @@ namespace DMotion.Editor
             timeGridContainer.AddToClassList("transition-timeline__grid");
             trackArea.Add(timeGridContainer);
             
-            // From bar
+            // From bar (top row)
             fromBar = new VisualElement();
             fromBar.AddToClassList("transition-timeline__bar");
             fromBar.AddToClassList("transition-timeline__bar--from");
-            
-            fromBarOverlap = new VisualElement();
-            fromBarOverlap.AddToClassList("transition-timeline__bar-overlap");
-            fromBarOverlap.AddToClassList("transition-timeline__bar-overlap--from");
-            fromBar.Add(fromBarOverlap);
-            
-            fromBarLabel = new Label(fromStateName);
-            fromBarLabel.AddToClassList("transition-timeline__bar-label");
-            fromBar.Add(fromBarLabel);
-            
-            fromBarDuration = new Label();
-            fromBarDuration.AddToClassList("transition-timeline__bar-duration");
-            fromBar.Add(fromBarDuration);
-            
-            exitTimeHandle = new VisualElement();
-            exitTimeHandle.AddToClassList("transition-timeline__handle");
-            exitTimeHandle.AddToClassList("transition-timeline__handle--exit-time");
-            fromBar.Add(exitTimeHandle);
-            
             trackArea.Add(fromBar);
             
-            // To bar (added before overlap so overlap draws on top)
+            // To bar (bottom row, draggable to change exit time)
             toBar = new VisualElement();
             toBar.AddToClassList("transition-timeline__bar");
             toBar.AddToClassList("transition-timeline__bar--to");
-            
-            toBarOverlap = new VisualElement();
-            toBarOverlap.AddToClassList("transition-timeline__bar-overlap");
-            toBarOverlap.AddToClassList("transition-timeline__bar-overlap--to");
-            toBar.Add(toBarOverlap);
-            
-            toBarLabel = new Label(toStateName);
-            toBarLabel.AddToClassList("transition-timeline__bar-label");
-            toBar.Add(toBarLabel);
-            
-            toBarDuration = new Label();
-            toBarDuration.AddToClassList("transition-timeline__bar-duration");
-            toBar.Add(toBarDuration);
-            
             trackArea.Add(toBar);
             
-            // Overlap area (between bars - added after bars so it draws on top)
+            // Overlap/transition area - sits ON TOP of both bars (added last for z-order)
+            // Spans from top of From bar to bottom of To bar, covering intersection
             overlapArea = new VisualElement();
             overlapArea.AddToClassList("transition-timeline__overlap");
             overlapArea.generateVisualContent += DrawOverlapGradient;
+            overlapArea.pickingMode = PickingMode.Ignore; // Clicks pass through to bars
             
             blendCurveElement = new VisualElement();
             blendCurveElement.AddToClassList("transition-timeline__curve");
             blendCurveElement.generateVisualContent += DrawBlendCurve;
+            blendCurveElement.pickingMode = PickingMode.Ignore;
             overlapArea.Add(blendCurveElement);
             
             overlapDurationLabel = new Label();
             overlapDurationLabel.AddToClassList("transition-timeline__overlap-label");
+            overlapDurationLabel.pickingMode = PickingMode.Ignore;
             overlapArea.Add(overlapDurationLabel);
             
             trackArea.Add(overlapArea);
@@ -411,6 +609,10 @@ namespace DMotion.Editor
             trackArea.RegisterCallback<PointerUpEvent>(OnTrackPointerUp);
             trackArea.RegisterCallback<PointerLeaveEvent>(OnTrackPointerLeave);
             
+            // Hover effects for To bar - also highlight overlap
+            toBar.RegisterCallback<PointerEnterEvent>(OnToBarPointerEnter);
+            toBar.RegisterCallback<PointerLeaveEvent>(OnToBarPointerLeave);
+            
             // Initialize
             UpdateDuration();
         }
@@ -430,17 +632,101 @@ namespace DMotion.Editor
             float transitionOffset = 0f,
             AnimationCurve blendCurve = null)
         {
+            // Store state references for dynamic duration updates
+            fromStateAsset = fromState;
+            toStateAsset = toState;
+            
             FromStateName = fromState?.name ?? "Any State";
             ToStateName = toState?.name ?? "To State";
-            FromStateDuration = GetStateDuration(fromState);
-            ToStateDuration = GetStateDuration(toState);
-            this.exitTime = Mathf.Clamp01(exitTime);
-            this.transitionDuration = Mathf.Max(0.01f, transitionDuration);
+            
+            // Get initial durations using persisted blend positions
+            var fromBlendPos = PreviewSettings.GetBlendPosition(fromState);
+            var toBlendPos = PreviewSettings.GetBlendPosition(toState);
+            fromStateDuration = fromState?.GetEffectiveDuration(fromBlendPos) ?? 1f;
+            toStateDuration = toState?.GetEffectiveDuration(toBlendPos) ?? 1f;
+            
+            // Store requested values, clamp for logic
+            this.requestedExitTime = Mathf.Max(0f, exitTime);
+            this.exitTime = Mathf.Clamp(this.requestedExitTime, 0f, fromStateDuration);
+            this.requestedTransitionDuration = Mathf.Max(0.01f, transitionDuration);
+            this.transitionDuration = Mathf.Clamp(this.requestedTransitionDuration, 0f, toStateDuration);
             this.transitionOffset = Mathf.Clamp01(transitionOffset);
             this.blendCurve = blendCurve ?? AnimationCurve.Linear(0f, 1f, 1f, 0f);
             
             UpdateDuration();
             UpdateLayout();
+        }
+        
+        /// <summary>
+        /// Updates the from/to state durations based on blend positions.
+        /// Call this when blend positions change to reflect accurate clip durations.
+        /// 
+        /// Strategy: Keep transition duration constant (time-based), adjust exit time to fit.
+        /// This ensures transitions like walk→fall take the same time regardless of animation speed.
+        /// Only adjust transition duration if it exceeds min/max bounds.
+        /// </summary>
+        public void UpdateDurationsForBlendPosition(Vector2 fromBlendPos, Vector2 toBlendPos)
+        {
+            bool changed = false;
+            float oldFromDuration = fromStateDuration;
+            
+            if (fromStateAsset != null)
+            {
+                float newDuration = fromStateAsset.GetEffectiveDuration(fromBlendPos);
+                if (Mathf.Abs(newDuration - fromStateDuration) > 0.001f)
+                {
+                    FromStateDuration = newDuration;
+                    changed = true;
+                }
+            }
+            
+            if (toStateAsset != null)
+            {
+                float newDuration = toStateAsset.GetEffectiveDuration(toBlendPos);
+                if (Mathf.Abs(newDuration - toStateDuration) > 0.001f)
+                {
+                    ToStateDuration = newDuration;
+                    changed = true;
+                }
+            }
+            
+            if (changed)
+            {
+                // Recalculate layout while keeping transition duration constant
+                AdjustTimingsForDurationChange(oldFromDuration);
+                UpdateDuration();
+                UpdateLayout();
+            }
+        }
+        
+        /// <summary>
+        /// Adjusts exit time when state durations change.
+        /// TRANSITION DURATION is preserved (what users care about - how long the blend takes).
+        /// EXIT TIME is adjusted to maintain the overlap: exitTime = fromDuration - transitionDuration.
+        /// </summary>
+        private void AdjustTimingsForDurationChange(float oldFromDuration)
+        {
+            float oldExitTime = exitTime;
+            
+            // Preserve transition duration, adjust exit time to maintain overlap
+            // exitTime = fromStateDuration - transitionDuration (so overlap = transitionDuration)
+            float desiredExitTime = fromStateDuration - requestedTransitionDuration;
+            
+            // Minimum exit time ensures to-bar ends at or after from-bar
+            float minExitTime = Mathf.Max(0f, fromStateDuration - toStateDuration);
+            
+            // Clamp exit time to valid range
+            exitTime = Mathf.Clamp(desiredExitTime, minExitTime, fromStateDuration);
+            requestedExitTime = exitTime; // Update requested to match (no ghost bars from exit time)
+            
+            // Transition duration stays as requested, clamped to to-state duration
+            transitionDuration = Mathf.Clamp(requestedTransitionDuration, MinTransitionDuration, toStateDuration);
+            
+            // Notify listeners that exit time changed (so inspector updates)
+            if (Math.Abs(exitTime - oldExitTime) > ValueChangeEpsilon)
+            {
+                OnExitTimeChanged?.Invoke(exitTime);
+            }
         }
         
         #endregion
@@ -529,8 +815,28 @@ namespace DMotion.Editor
             const int strips = 20;
             float stripWidth = rect.width / strips;
             
-            var fromColor = new Color(0.27f, 0.43f, 0.63f, 0.7f);  // Blue-ish
-            var toColor = new Color(0.27f, 0.55f, 0.39f, 0.7f);    // Green-ish
+            // Determine colors based on hover/drag state
+            Color fromColor, toColor;
+            bool isDragging = currentDragTarget == DragTarget.ToBar;
+            
+            if (isDragging)
+            {
+                // Dragging: brightest colors - matches .transition-timeline__bar--dragging
+                fromColor = new Color(100f/255f, 140f/255f, 190f/255f, 1f);
+                toColor = new Color(100f/255f, 180f/255f, 130f/255f, 1f);
+            }
+            else if (isToBarHovered)
+            {
+                // Hover: brighter colors - matches .transition-timeline__bar--hover
+                fromColor = new Color(85f/255f, 125f/255f, 175f/255f, 1f);
+                toColor = new Color(85f/255f, 160f/255f, 115f/255f, 1f);
+            }
+            else
+            {
+                // Normal: matches bar USS exactly - rgb(70,110,160) and rgb(70,140,100)
+                fromColor = new Color(70f/255f, 110f/255f, 160f/255f, 1f);
+                toColor = new Color(70f/255f, 140f/255f, 100f/255f, 1f);
+            }
             
             for (int i = 0; i < strips; i++)
             {
@@ -566,42 +872,78 @@ namespace DMotion.Editor
             
             float pixelsPerSecond = trackWidth / totalDuration;
             
-            // Calculate positions
-            float exitTimeSeconds = exitTime * fromStateDuration;
+            // Calculate bar widths
             float fromBarWidthPx = fromStateDuration * pixelsPerSecond;
             float toBarWidthPx = toStateDuration * pixelsPerSecond;
-            float toBarLeftPx = Padding + exitTimeSeconds * pixelsPerSecond;
             
-            // Overlap region
-            float overlapStartPx = toBarLeftPx;
-            float overlapEndPx = Mathf.Min(Padding + fromBarWidthPx, toBarLeftPx + toBarWidthPx);
-            float overlapWidthPx = Mathf.Max(0, overlapEndPx - overlapStartPx);
+            // Vertical layout: From bar on top, To bar below
+            float fromBarTop = TrackPadding;
+            float toBarTop = fromBarTop + BarHeight + BarSpacing;
+            float totalBarsHeight = BarHeight * 2 + BarSpacing;  // Both bars stacked
             
-            // From bar (always starts at padding)
-            fromBar.style.left = Padding;
+            // Calculate FROM ghost bar offset (cycles BEFORE the main from-bar)
+            int fromGhostCount = FromVisualCycles - 1;
+            float fromGhostWidthPx = fromGhostCount * fromBarWidthPx;
+            
+            // Calculate TO ghost bar count (cycles AFTER the main to-bar)
+            int toGhostCount = ToVisualCycles - 1;
+            
+            // Update FROM ghost bars (LEFT of from-bar)
+            UpdateFromGhostBars(fromGhostCount, fromBarWidthPx, fromBarTop);
+            
+            // From bar (top row) - positioned after FROM ghost bars
+            fromBar.style.top = fromBarTop;
+            fromBar.style.height = BarHeight;
+            fromBar.style.left = Padding + fromGhostWidthPx;
             fromBar.style.width = fromBarWidthPx;
-            fromBarDuration.text = $"{fromStateDuration:F2}s";
             
-            // From bar overlap highlight
-            float fromOverlapStart = exitTimeSeconds * pixelsPerSecond;
-            fromBarOverlap.style.left = fromOverlapStart;
-            fromBarOverlap.style.width = fromBarWidthPx - fromOverlapStart;
-            
-            // Exit time handle position (relative to from bar)
-            exitTimeHandle.style.left = fromOverlapStart - HandleWidth / 2;
-            
-            // Overlap area
-            overlapArea.style.left = overlapStartPx;
-            overlapArea.style.width = overlapWidthPx;
-            overlapDurationLabel.text = $"{transitionDuration:F2}s";
-            
-            // To bar
+            // To bar (bottom row) positioning depends on ghost bar type:
+            // - Duration shrink ghost: use requestedExitTime (to-bar at original intended position)
+            // - Context ghost or no ghost: use ghostOffset + exitTime
+            float toBarLeftPx;
+            if (IsFromGhostDurationShrink)
+            {
+                // Duration shrink: position to-bar at the requestedExitTime on the timeline
+                // This places it within the appropriate cycle at the correct position
+                toBarLeftPx = Padding + requestedExitTime * pixelsPerSecond;
+            }
+            else
+            {
+                // Context ghost or no ghost: position relative to ghost offset + exit time
+                toBarLeftPx = Padding + fromGhostWidthPx + exitTime * pixelsPerSecond;
+            }
+            toBar.style.top = toBarTop;
+            toBar.style.height = BarHeight;
             toBar.style.left = toBarLeftPx;
             toBar.style.width = toBarWidthPx;
-            toBarDuration.text = $"{toStateDuration:F2}s";
             
-            // To bar overlap highlight
-            toBarOverlap.style.width = overlapWidthPx;
+            // Update TO ghost bars (RIGHT of to-bar)
+            float toBarRightPx = toBarLeftPx + toBarWidthPx;
+            UpdateToGhostBars(toGhostCount, toBarWidthPx, toBarTop, toBarRightPx);
+            
+            // Overlap region - intersection between from-bar (including ghosts) and to-bar
+            // For duration-shrink ghost: from-bar spans multiple cycles
+            float totalFromBarEndPx = Padding + FromVisualCycles * fromBarWidthPx;
+            float overlapStartPx = toBarLeftPx;
+            float naturalOverlapEndPx = Mathf.Min(totalFromBarEndPx, toBarLeftPx + toBarWidthPx);
+            float naturalOverlapWidthPx = Mathf.Max(0, naturalOverlapEndPx - overlapStartPx);
+            
+            // If transition duration exceeds natural overlap, extend the overlap bar
+            // This shows that the transition continues beyond what the bars naturally cover
+            float naturalOverlapDuration = naturalOverlapWidthPx / pixelsPerSecond;
+            float effectiveTransitionDuration = Mathf.Max(naturalOverlapDuration, requestedTransitionDuration);
+            float overlapWidthPx = effectiveTransitionDuration * pixelsPerSecond;
+            
+            // Overlap area - spans BOTH bars vertically, may extend past bars if transition is longer
+            overlapArea.style.top = fromBarTop;
+            overlapArea.style.height = totalBarsHeight;
+            overlapArea.style.left = overlapStartPx;
+            overlapArea.style.width = overlapWidthPx;
+            overlapDurationLabel.text = $"{effectiveTransitionDuration:F2}s";
+            
+            // Update header duration labels
+            if (fromDurationLabel != null) fromDurationLabel.text = $"({fromStateDuration:F2}s)";
+            if (toDurationLabel != null) toDurationLabel.text = $"({toStateDuration:F2}s)";
             
             // Update scrubber
             UpdateScrubberPosition();
@@ -609,8 +951,91 @@ namespace DMotion.Editor
             // Update time grid
             UpdateTimeGrid(trackWidth, totalDuration, pixelsPerSecond);
             
-            // Trigger curve redraw
+            // Trigger repaints
+            overlapArea?.MarkDirtyRepaint();
             blendCurveElement?.MarkDirtyRepaint();
+        }
+        
+        /// <summary>
+        /// Updates FROM ghost bar elements (LEFT of from-bar).
+        /// Shows previous cycles when exitTime==0 or from-duration shrunk below exit time.
+        /// </summary>
+        private void UpdateFromGhostBars(int count, float barWidthPx, float barTop)
+        {
+            // Ensure we have the right number of ghost bars
+            while (fromGhostBars.Count < count)
+            {
+                var ghostBar = new VisualElement();
+                ghostBar.AddToClassList("transition-timeline__bar");
+                ghostBar.AddToClassList("transition-timeline__bar--from");
+                ghostBar.AddToClassList("transition-timeline__bar--ghost");
+                
+                // Insert before the main fromBar to maintain z-order
+                int insertIndex = trackArea.IndexOf(fromBar);
+                if (insertIndex >= 0)
+                    trackArea.Insert(insertIndex, ghostBar);
+                else
+                    trackArea.Add(ghostBar);
+                    
+                fromGhostBars.Add(ghostBar);
+            }
+            
+            // Hide extra ghost bars if we have too many
+            for (int i = 0; i < fromGhostBars.Count; i++)
+            {
+                bool visible = i < count;
+                fromGhostBars[i].style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+                
+                if (visible)
+                {
+                    // Position ghost bar to the LEFT of main from-bar
+                    fromGhostBars[i].style.top = barTop;
+                    fromGhostBars[i].style.height = BarHeight;
+                    fromGhostBars[i].style.left = Padding + i * barWidthPx;
+                    fromGhostBars[i].style.width = barWidthPx;
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Updates TO ghost bar elements (RIGHT of to-bar).
+        /// Shows continuation cycles when to-duration shrunk below transition duration.
+        /// </summary>
+        private void UpdateToGhostBars(int count, float barWidthPx, float barTop, float toBarRightPx)
+        {
+            // Ensure we have the right number of ghost bars
+            while (toGhostBars.Count < count)
+            {
+                var ghostBar = new VisualElement();
+                ghostBar.AddToClassList("transition-timeline__bar");
+                ghostBar.AddToClassList("transition-timeline__bar--to");
+                ghostBar.AddToClassList("transition-timeline__bar--ghost");
+                
+                // Insert after the main toBar to maintain z-order
+                int insertIndex = trackArea.IndexOf(toBar);
+                if (insertIndex >= 0)
+                    trackArea.Insert(insertIndex + 1, ghostBar);
+                else
+                    trackArea.Add(ghostBar);
+                    
+                toGhostBars.Add(ghostBar);
+            }
+            
+            // Hide extra ghost bars if we have too many
+            for (int i = 0; i < toGhostBars.Count; i++)
+            {
+                bool visible = i < count;
+                toGhostBars[i].style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+                
+                if (visible)
+                {
+                    // Position ghost bar to the RIGHT of main to-bar
+                    toGhostBars[i].style.top = barTop;
+                    toGhostBars[i].style.height = BarHeight;
+                    toGhostBars[i].style.left = toBarRightPx + i * barWidthPx;
+                    toGhostBars[i].style.width = barWidthPx;
+                }
+            }
         }
         
         private void UpdateScrubberPosition()
@@ -662,46 +1087,51 @@ namespace DMotion.Editor
             
             var localPos = evt.localPosition;
             float trackWidth = trackArea.resolvedStyle.width - Padding * 2;
-            float totalDuration = GetTotalTimelineDuration();
-            float pixelsPerSecond = trackWidth / totalDuration;
             
-            // Check exit time handle (highest priority)
-            float exitTimeX = Padding + exitTime * fromStateDuration * pixelsPerSecond;
-            if (IsNearX(localPos.x, exitTimeX) && IsInBarVerticalRange(localPos.y, fromBar))
-            {
-                StartDrag(DragTarget.ExitTimeHandle, exitTime, localPos.x, evt.pointerId);
-                evt.StopPropagation();
-                return;
-            }
-            
-            // Check To bar drag
-            if (IsOverElement(localPos, toBar))
+            // Check if clicking on the To bar (for dragging to change exit time)
+            if (IsPointOverToBar(localPos))
             {
                 StartDrag(DragTarget.ToBar, exitTime, localPos.x, evt.pointerId);
+                toBar.AddToClassList("transition-timeline__bar--dragging");
+                overlapArea.AddToClassList("transition-timeline__overlap--dragging");
+                overlapArea.MarkDirtyRepaint();  // Redraw gradient with drag colors
                 evt.StopPropagation();
                 return;
             }
             
-            // Default: scrub timeline
+            // Otherwise scrub timeline
             StartDrag(DragTarget.Scrubber, NormalizedTime, localPos.x, evt.pointerId);
             float normalizedX = Mathf.Clamp01((localPos.x - Padding) / trackWidth);
             NormalizedTime = normalizedX;
             evt.StopPropagation();
         }
         
+        private bool IsPointOverToBar(Vector2 localPos)
+        {
+            // Get To bar bounds
+            float toBarLeft = toBar.resolvedStyle.left;
+            float toBarTop = toBar.resolvedStyle.top;
+            float toBarWidth = toBar.resolvedStyle.width;
+            float toBarHeight = toBar.resolvedStyle.height;
+            
+            // Expand hit zone slightly for easier grabbing
+            var hitRect = new Rect(
+                toBarLeft - ToBarHitZone / 2,
+                toBarTop,
+                toBarWidth + ToBarHitZone,
+                toBarHeight
+            );
+            
+            return hitRect.Contains(localPos);
+        }
+        
         private void OnTrackPointerMove(PointerMoveEvent evt)
         {
-            var localPos = evt.localPosition;
-            
             if (currentDragTarget != DragTarget.None)
             {
-                HandleDrag(localPos.x);
+                HandleDrag(evt.localPosition.x);
                 evt.StopPropagation();
-                return;
             }
-            
-            // Update hover state
-            UpdateHoverState(localPos);
         }
         
         private void OnTrackPointerUp(PointerUpEvent evt)
@@ -715,10 +1145,27 @@ namespace DMotion.Editor
         
         private void OnTrackPointerLeave(PointerLeaveEvent evt)
         {
-            if (hoveredTarget != DragTarget.None)
+            // No-op
+        }
+        
+        private void OnToBarPointerEnter(PointerEnterEvent evt)
+        {
+            // Highlight both To bar and overlap together
+            isToBarHovered = true;
+            toBar.AddToClassList("transition-timeline__bar--hover");
+            overlapArea.AddToClassList("transition-timeline__overlap--hover");
+            overlapArea.MarkDirtyRepaint();  // Redraw gradient with hover colors
+        }
+        
+        private void OnToBarPointerLeave(PointerLeaveEvent evt)
+        {
+            // Remove highlight from both (unless dragging)
+            if (currentDragTarget != DragTarget.ToBar)
             {
-                hoveredTarget = DragTarget.None;
-                UpdateHoverVisuals();
+                isToBarHovered = false;
+                toBar.RemoveFromClassList("transition-timeline__bar--hover");
+                overlapArea.RemoveFromClassList("transition-timeline__overlap--hover");
+                overlapArea.MarkDirtyRepaint();  // Redraw gradient with normal colors
             }
         }
         
@@ -732,6 +1179,17 @@ namespace DMotion.Editor
         
         private void EndDrag(int pointerId)
         {
+            if (currentDragTarget == DragTarget.ToBar)
+            {
+                toBar.RemoveFromClassList("transition-timeline__bar--dragging");
+                overlapArea.RemoveFromClassList("transition-timeline__overlap--dragging");
+                // Also remove hover since pointer might have left during drag
+                isToBarHovered = false;
+                toBar.RemoveFromClassList("transition-timeline__bar--hover");
+                overlapArea.RemoveFromClassList("transition-timeline__overlap--hover");
+                overlapArea.MarkDirtyRepaint();  // Redraw gradient with normal colors
+            }
+            
             currentDragTarget = DragTarget.None;
             trackArea.ReleasePointer(pointerId);
         }
@@ -741,111 +1199,77 @@ namespace DMotion.Editor
             float trackWidth = trackArea.resolvedStyle.width - Padding * 2;
             float totalDuration = GetTotalTimelineDuration();
             float pixelsPerSecond = trackWidth / totalDuration;
-            float deltaX = mouseX - dragStartMouseX;
             
-            switch (currentDragTarget)
+            if (currentDragTarget == DragTarget.Scrubber)
             {
-                case DragTarget.Scrubber:
-                    float normalizedX = Mathf.Clamp01((mouseX - Padding) / trackWidth);
-                    NormalizedTime = normalizedX;
-                    break;
+                float normalizedX = Mathf.Clamp01((mouseX - Padding) / trackWidth);
+                NormalizedTime = normalizedX;
+            }
+            else if (currentDragTarget == DragTarget.ToBar)
+            {
+                // Dragging To bar changes exit time AND transition duration
+                float deltaX = mouseX - dragStartMouseX;
+                float deltaSeconds = deltaX / pixelsPerSecond;
+                float newExitTime = dragStartValue + deltaSeconds;
+                
+                // Minimum exit time ensures to-bar ends at or after from-bar (must end in to-state)
+                float minExitTime = Mathf.Max(0f, fromStateDuration - toStateDuration);
+                newExitTime = Mathf.Clamp(newExitTime, minExitTime, fromStateDuration);
+                
+                if (Math.Abs(newExitTime - exitTime) > ValueChangeEpsilon)
+                {
+                    // Update exit time
+                    requestedExitTime = newExitTime;
+                    exitTime = newExitTime;
                     
-                case DragTarget.ExitTimeHandle:
-                case DragTarget.ToBar:
-                    float deltaSeconds = deltaX / pixelsPerSecond;
-                    float newExitTimeSeconds = dragStartValue * fromStateDuration + deltaSeconds;
-                    float newExitTime = Mathf.Clamp(newExitTimeSeconds / fromStateDuration, 0.05f, 0.95f);
+                    // Update transition duration to match the new overlap
+                    // Overlap = fromStateDuration - exitTime
+                    float newTransitionDuration = fromStateDuration - exitTime;
+                    requestedTransitionDuration = Mathf.Max(MinTransitionDuration, newTransitionDuration);
+                    transitionDuration = Mathf.Clamp(requestedTransitionDuration, MinTransitionDuration, toStateDuration);
                     
-                    if (Math.Abs(newExitTime - exitTime) > ValueChangeEpsilon)
-                    {
-                        exitTime = newExitTime;
-                        RecalculateTransitionDuration();
-                        UpdateDuration();
-                        UpdateLayout();
-                        OnExitTimeChanged?.Invoke(exitTime);
-                        OnTransitionDurationChanged?.Invoke(transitionDuration);
-                    }
-                    break;
+                    UpdateDuration();
+                    UpdateLayout();
+                    OnExitTimeChanged?.Invoke(exitTime);
+                    // Fire event with the actual overlap duration (not clamped)
+                    // This is what gets stored in the asset
+                    OnTransitionDurationChanged?.Invoke(requestedTransitionDuration);
+                }
             }
-        }
-        
-        private void UpdateHoverState(Vector2 localPos)
-        {
-            var previousHover = hoveredTarget;
-            hoveredTarget = DragTarget.None;
-            
-            float trackWidth = trackArea.resolvedStyle.width - Padding * 2;
-            float totalDuration = GetTotalTimelineDuration();
-            float pixelsPerSecond = trackWidth / totalDuration;
-            float exitTimeX = Padding + exitTime * fromStateDuration * pixelsPerSecond;
-            
-            if (IsNearX(localPos.x, exitTimeX) && IsInBarVerticalRange(localPos.y, fromBar))
-            {
-                hoveredTarget = DragTarget.ExitTimeHandle;
-            }
-            else if (IsOverElement(localPos, toBar))
-            {
-                hoveredTarget = DragTarget.ToBar;
-            }
-            
-            if (hoveredTarget != previousHover)
-            {
-                UpdateHoverVisuals();
-            }
-        }
-        
-        private void UpdateHoverVisuals()
-        {
-            // Update handle hover state
-            exitTimeHandle.EnableInClassList("transition-timeline__handle--hover", 
-                hoveredTarget == DragTarget.ExitTimeHandle || currentDragTarget == DragTarget.ExitTimeHandle);
-            
-            // Update To bar hover state
-            toBar.EnableInClassList("transition-timeline__bar--hover", 
-                hoveredTarget == DragTarget.ToBar || currentDragTarget == DragTarget.ToBar);
-        }
-        
-        private bool IsNearX(float mouseX, float targetX) => Mathf.Abs(mouseX - targetX) <= 10f;
-        
-        private bool IsInBarVerticalRange(float mouseY, VisualElement bar)
-        {
-            var barRect = bar.worldBound;
-            var trackRect = trackArea.worldBound;
-            float localTop = barRect.y - trackRect.y;
-            float localBottom = localTop + barRect.height;
-            return mouseY >= localTop - 5 && mouseY <= localBottom + 5;
-        }
-        
-        private bool IsOverElement(Vector2 localPos, VisualElement element)
-        {
-            var rect = element.worldBound;
-            var trackRect = trackArea.worldBound;
-            var localRect = new Rect(
-                rect.x - trackRect.x,
-                rect.y - trackRect.y,
-                rect.width,
-                rect.height
-            );
-            return localRect.Contains(localPos);
         }
         
         #endregion
         
         #region Helpers
         
+        /// <summary>
+        /// Checks if a state is a blend state (LinearBlend or Directional2D).
+        /// Blend states have their exit time derived from duration - transitionDuration.
+        /// Simple states (SingleClip) use the stored EndTime value.
+        /// </summary>
+        private static bool IsBlendState(AnimationStateAsset state)
+        {
+            return state is LinearBlendStateAsset or Directional2DBlendStateAsset;
+        }
+        
         private void RecalculateTransitionDuration()
         {
             if (fromStateDuration <= 0.001f || toStateDuration <= 0.001f)
             {
-                transitionDuration = 0.01f;
+                transitionDuration = MinTransitionDuration;
                 return;
             }
             
-            float exitTimeSeconds = exitTime * fromStateDuration;
+            // Calculate available overlap space
             float fromBarEnd = fromStateDuration;
-            float toBarEnd = exitTimeSeconds + toStateDuration;
+            float toBarEnd = exitTime + toStateDuration;
+            float maxPossibleTransition = Mathf.Max(0.01f, Mathf.Min(fromBarEnd, toBarEnd) - exitTime);
             
-            transitionDuration = Mathf.Max(0.01f, Mathf.Min(fromBarEnd, toBarEnd) - exitTimeSeconds);
+            // Try to maintain requested duration, but clamp to available space and bounds
+            // Note: transitionDuration is also clamped to toStateDuration for logic
+            // (TO ghost bars will show if requestedTransitionDuration > toStateDuration)
+            transitionDuration = Mathf.Clamp(requestedTransitionDuration, MinTransitionDuration, 
+                Mathf.Min(MaxTransitionDuration, Mathf.Min(maxPossibleTransition, toStateDuration)));
         }
         
         private void UpdateDuration()
@@ -865,64 +1289,37 @@ namespace DMotion.Editor
             
             if (blendLabel != null)
             {
-                blendLabel.text = $"Blend: {TransitionProgress:P0}";
+                // Apply blend curve: curve Y is "from" weight, so "to" weight = 1 - curve
+                float progress = TransitionProgress;
+                float curveValue = blendCurve?.Evaluate(progress) ?? (1f - progress);
+                float blendWeight = 1f - curveValue; // Convert from "from weight" to "to weight"
+                blendLabel.text = $"Blend: {blendWeight:P0}";
             }
         }
         
         private float GetTotalTimelineDuration()
         {
-            float exitTimeSeconds = exitTime * fromStateDuration;
-            float toBarEnd = exitTimeSeconds + toStateDuration;
-            return Mathf.Max(fromStateDuration, toBarEnd) + 0.1f;
-        }
-        
-        private static float GetStateDuration(AnimationStateAsset state)
-        {
-            if (state == null) return 1f;
+            // Total FROM bar end (all cycles)
+            float fromBarEnd = FromVisualCycles * fromStateDuration;
             
-            switch (state)
-            {
-                case SingleClipStateAsset singleClip:
-                    var clip = singleClip.Clip?.Clip;
-                    return clip != null ? clip.length : 1f;
-                    
-                case LinearBlendStateAsset linearBlend:
-                    return GetMaxClipDuration(linearBlend.BlendClips);
-                    
-                case Directional2DBlendStateAsset blend2D:
-                    return GetMaxClipDuration(blend2D.BlendClips);
-                    
-                default:
-                    return 1f;
-            }
-        }
-        
-        private static float GetMaxClipDuration(ClipWithThreshold[] clips)
-        {
-            if (clips == null || clips.Length == 0) return 1f;
+            // Account for TO ghost bars (RIGHT of to-bar)
+            float toGhostWidth = (ToVisualCycles - 1) * toStateDuration;
             
-            float maxDuration = 0f;
-            foreach (var blendClip in clips)
+            // Calculate to-bar start position (same logic as UpdateLayout)
+            float toBarStart;
+            if (IsFromGhostDurationShrink)
             {
-                var clip = blendClip.Clip?.Clip;
-                if (clip != null)
-                    maxDuration = Mathf.Max(maxDuration, clip.length);
+                toBarStart = requestedExitTime;
             }
-            return maxDuration > 0 ? maxDuration : 1f;
-        }
-        
-        private static float GetMaxClipDuration(Directional2DClipWithPosition[] clips)
-        {
-            if (clips == null || clips.Length == 0) return 1f;
+            else
+            {
+                float fromGhostWidth = (FromVisualCycles - 1) * fromStateDuration;
+                toBarStart = fromGhostWidth + exitTime;
+            }
             
-            float maxDuration = 0f;
-            foreach (var blendClip in clips)
-            {
-                var clip = blendClip.Clip?.Clip;
-                if (clip != null)
-                    maxDuration = Mathf.Max(maxDuration, clip.length);
-            }
-            return maxDuration > 0 ? maxDuration : 1f;
+            float toBarEnd = toBarStart + toStateDuration + toGhostWidth;
+            
+            return Mathf.Max(fromBarEnd, toBarEnd) + 0.1f;
         }
         
         #endregion

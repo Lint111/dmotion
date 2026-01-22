@@ -246,12 +246,6 @@ namespace DMotion.Editor
         public int SoloClipIndex => blendedPreview?.SoloClipIndex ?? -1;
         
         /// <summary>
-        /// Gets the weighted average speed based on current blend weights.
-        /// Returns 1.0 for non-blend previews or if not initialized.
-        /// </summary>
-        public float WeightedSpeed => blendedPreview?.WeightedSpeed ?? 1f;
-        
-        /// <summary>
         /// Creates a preview for a transition between two states.
         /// </summary>
         public void CreateTransitionPreview(AnimationStateAsset fromState, AnimationStateAsset toState, float transitionDuration)
@@ -301,6 +295,18 @@ namespace DMotion.Editor
                 blendedPreview = null;
                 previewInitialized = true;
                 RestoreCameraState();
+                
+                // Set initial blend positions from persisted settings
+                if (fromState != null)
+                {
+                    var fromBlend = PreviewSettings.GetBlendPosition(fromState);
+                    transitionPreview.FromBlendPosition = fromBlend;
+                }
+                if (toState != null)
+                {
+                    var toBlend = PreviewSettings.GetBlendPosition(toState);
+                    transitionPreview.ToBlendPosition = toBlend;
+                }
             }
             catch (Exception e)
             {
@@ -309,6 +315,8 @@ namespace DMotion.Editor
                 previewErrorMessage = $"Preview error:\n{e.Message}";
             }
         }
+        
+
         
         /// <summary>
         /// Sets the transition progress (0 = fully "from" state, 1 = fully "to" state).
@@ -369,14 +377,26 @@ namespace DMotion.Editor
         public AnimationStateAsset TransitionToState => transitionPreview?.ToState;
         
         /// <summary>
-        /// Sets the normalized sample time for transition previews.
-        /// This controls the animation playback time (0-1) within the transition.
+        /// Sets the normalized sample time for transition previews (legacy - same time for both states).
+        /// Prefer using SetTransitionStateNormalizedTimes for proper per-state timing.
         /// </summary>
         public void SetTransitionNormalizedTime(float normalizedTime)
         {
             if (transitionPreview != null && previewInitialized)
             {
                 transitionPreview.NormalizedSampleTime = normalizedTime;
+            }
+        }
+        
+        /// <summary>
+        /// Sets the normalized sample times for both states in a transition independently.
+        /// This allows proper time synchronization where each state advances at its own rate.
+        /// </summary>
+        public void SetTransitionStateNormalizedTimes(float fromNormalized, float toNormalized)
+        {
+            if (transitionPreview != null && previewInitialized)
+            {
+                transitionPreview.SetStateNormalizedTimes(fromNormalized, toNormalized);
             }
         }
         
@@ -575,6 +595,11 @@ namespace DMotion.Editor
                 blendedPreview = preview;
                 previewInitialized = true;
                 RestoreCameraState();
+                
+                // Set initial blend position from persisted settings
+                var initialBlend = PreviewSettings.instance.GetBlendValue1D(state);
+                blendedPreview.SetBlendPositionImmediate(new Unity.Mathematics.float2(initialBlend, 0));
+                
                 AnimationPreviewEvents.RaisePreviewCreated(state);
             }
             catch (Exception e)
@@ -638,6 +663,11 @@ namespace DMotion.Editor
                 blendedPreview = preview;
                 previewInitialized = true;
                 RestoreCameraState();
+                
+                // Set initial blend position from persisted settings
+                var initialBlend = PreviewSettings.instance.GetBlendValue2D(state);
+                blendedPreview.SetBlendPositionImmediate(new Unity.Mathematics.float2(initialBlend.x, initialBlend.y));
+                
                 AnimationPreviewEvents.RaisePreviewCreated(state);
             }
             catch (Exception e)

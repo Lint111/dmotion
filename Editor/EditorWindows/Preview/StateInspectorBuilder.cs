@@ -113,8 +113,10 @@ namespace DMotion.Editor
             var container = new VisualElement();
             container.AddToClassList("state-inspector");
             
-            // Header with type, name, and duration
-            var duration = GetStateDuration(state);
+            // Header with type, name, and duration (use effective duration at current blend position)
+            var blendPos = PreviewSettings.GetBlendPosition(state);
+            var duration = state.GetEffectiveDuration(blendPos);
+            if (duration <= 0) duration = GetStateDuration(state); // Fallback for states without effective duration
             var durationText = duration > 0 ? $" ({duration:F2}s)" : "";
             var header = CreateSectionHeader(GetStateTypeLabel(state), $"{state.name}{durationText}");
             container.Add(header);
@@ -656,6 +658,8 @@ namespace DMotion.Editor
                     return 0f;
             }
         }
+        
+
         
         #endregion
     }

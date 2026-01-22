@@ -47,7 +47,11 @@ namespace DMotion.Editor
         {
             blendSpaceEditor ??= new BlendSpace2DVisualEditor();
             blendSpaceEditor.SetTarget(state);
+            
+            // Restore persisted blend value for this state
+            previewBlendValue = PreviewSettings.instance.GetBlendValue2D(state, previewBlendValue);
             blendSpaceEditor.PreviewPosition = previewBlendValue;
+            
             return blendSpaceEditor;
         }
         
@@ -78,26 +82,14 @@ namespace DMotion.Editor
             
             xSlider.RegisterValueChangedCallback(evt =>
             {
-                previewBlendValue.x = evt.newValue;
+                SetBlendValueX(evt.newValue, context);
                 cachedXField?.SetValueWithoutNotify(evt.newValue);
-                if (blendSpaceEditor != null)
-                {
-                    blendSpaceEditor.PreviewPosition = previewBlendValue;
-                }
-                AnimationPreviewEvents.RaiseBlendPosition2DChanged(state, previewBlendValue);
-                context.RequestRepaint?.Invoke();
             });
             
             xField.RegisterValueChangedCallback(evt =>
             {
-                previewBlendValue.x = evt.newValue;
+                SetBlendValueX(evt.newValue, context);
                 cachedXSlider?.SetValueWithoutNotify(evt.newValue);
-                if (blendSpaceEditor != null)
-                {
-                    blendSpaceEditor.PreviewPosition = previewBlendValue;
-                }
-                AnimationPreviewEvents.RaiseBlendPosition2DChanged(state, previewBlendValue);
-                context.RequestRepaint?.Invoke();
             });
             
             container.Add(xContainer);
@@ -111,26 +103,14 @@ namespace DMotion.Editor
             
             ySlider.RegisterValueChangedCallback(evt =>
             {
-                previewBlendValue.y = evt.newValue;
+                SetBlendValueY(evt.newValue, context);
                 cachedYField?.SetValueWithoutNotify(evt.newValue);
-                if (blendSpaceEditor != null)
-                {
-                    blendSpaceEditor.PreviewPosition = previewBlendValue;
-                }
-                AnimationPreviewEvents.RaiseBlendPosition2DChanged(state, previewBlendValue);
-                context.RequestRepaint?.Invoke();
             });
             
             yField.RegisterValueChangedCallback(evt =>
             {
-                previewBlendValue.y = evt.newValue;
+                SetBlendValueY(evt.newValue, context);
                 cachedYSlider?.SetValueWithoutNotify(evt.newValue);
-                if (blendSpaceEditor != null)
-                {
-                    blendSpaceEditor.PreviewPosition = previewBlendValue;
-                }
-                AnimationPreviewEvents.RaiseBlendPosition2DChanged(state, previewBlendValue);
-                context.RequestRepaint?.Invoke();
             });
             
             container.Add(yContainer);
@@ -142,15 +122,48 @@ namespace DMotion.Editor
         {
             cachedPreviewPositionHandler = pos =>
             {
-                previewBlendValue = pos;
+                SetBlendValue(pos, context);
                 cachedXSlider?.SetValueWithoutNotify(pos.x);
                 cachedXField?.SetValueWithoutNotify(pos.x);
                 cachedYSlider?.SetValueWithoutNotify(pos.y);
                 cachedYField?.SetValueWithoutNotify(pos.y);
-                AnimationPreviewEvents.RaiseBlendPosition2DChanged(state, pos);
-                context.RequestRepaint?.Invoke();
             };
             blendSpaceEditor.OnPreviewPositionChanged += cachedPreviewPositionHandler;
+        }
+        
+        private void SetBlendValueX(float x, StateContentContext context)
+        {
+            previewBlendValue.x = x;
+            SetBlendValue(previewBlendValue, context);
+        }
+        
+        private void SetBlendValueY(float y, StateContentContext context)
+        {
+            previewBlendValue.y = y;
+            SetBlendValue(previewBlendValue, context);
+        }
+        
+        private void SetBlendValue(Vector2 value, StateContentContext context)
+        {
+            previewBlendValue = value;
+            
+            // Persist to settings (shared across all previews of this state)
+            PreviewSettings.instance.SetBlendValue2D(state, value);
+            
+            // Update visual editor
+            if (blendSpaceEditor != null)
+            {
+                blendSpaceEditor.PreviewPosition = value;
+            }
+            
+            // Notify listeners (timeline duration updates via OnBlendStateChanged event)
+            AnimationPreviewEvents.RaiseBlendPosition2DChanged(state, value);
+            context.RequestRepaint?.Invoke();
+        }
+        
+        protected override Vector2 GetCurrentBlendPosition()
+        {
+            return previewBlendValue;
         }
         
         protected override void GetLongestClipInfo(out float duration, out float frameRate)

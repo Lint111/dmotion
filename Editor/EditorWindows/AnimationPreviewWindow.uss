@@ -501,7 +501,7 @@
 /* Transition Timeline */
 
 .transition-timeline {
-    min-height: 180px;
+    min-height: 140px;
     background-color: rgb(45, 45, 50);
     border-radius: 4px;
     margin-top: 8px;
@@ -510,14 +510,23 @@
 .transition-timeline__header {
     flex-direction: row;
     justify-content: space-between;
-    height: 22px;
+    height: 24px;
     padding-left: 8px;
     padding-right: 8px;
-    padding-top: 2px;
-    padding-bottom: 2px;
+    padding-top: 4px;
+    padding-bottom: 4px;
     background-color: rgb(40, 40, 45);
     border-top-left-radius: 4px;
     border-top-right-radius: 4px;
+}
+
+.transition-timeline__header-info {
+    flex-direction: row;
+    align-items: center;
+}
+
+.transition-timeline__header-info--right {
+    flex-direction: row-reverse;
 }
 
 .transition-timeline__state-label {
@@ -533,9 +542,20 @@
     color: rgb(100, 200, 140);
 }
 
+.transition-timeline__duration-label {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-left: 6px;
+}
+
+.transition-timeline__duration-label--to {
+    margin-left: 0;
+    margin-right: 6px;
+}
+
 .transition-timeline__track {
     flex-grow: 1;
-    min-height: 120px;
+    min-height: 60px;
     position: relative;
     background-color: rgb(50, 50, 55);
     margin-left: 4px;
@@ -573,78 +593,48 @@
 
 .transition-timeline__bar {
     position: absolute;
-    height: 26px;
     border-radius: 3px;
-    overflow: hidden;
 }
 
 .transition-timeline__bar--from {
-    top: 12px;
     background-color: rgb(70, 110, 160);
 }
 
 .transition-timeline__bar--to {
-    bottom: 32px;
     background-color: rgb(70, 140, 100);
+    cursor: slide-arrow;
 }
 
-.transition-timeline__bar-overlap {
-    position: absolute;
-    top: 0;
-    height: 100%;
+.transition-timeline__bar--to:hover,
+.transition-timeline__bar--hover {
+    background-color: rgb(85, 160, 115);
 }
 
-.transition-timeline__bar-overlap--from {
-    background-color: rgba(100, 160, 220, 0.4);
+.transition-timeline__bar--dragging {
+    background-color: rgb(100, 180, 130);
 }
 
-.transition-timeline__bar-overlap--to {
-    left: 0;
-    background-color: rgba(100, 200, 140, 0.4);
-}
-
-.transition-timeline__bar-label {
-    position: absolute;
-    left: 6px;
-    top: 0;
-    bottom: 0;
-    font-size: 11px;
-    color: rgb(255, 255, 255);
-    -unity-font-style: bold;
-    -unity-text-align: middle-left;
-}
-
-.transition-timeline__bar-duration {
-    position: absolute;
-    right: 6px;
-    top: 0;
-    bottom: 0;
-    font-size: 10px;
-    color: rgba(255, 255, 255, 0.6);
-    -unity-text-align: middle-right;
-}
-
-.transition-timeline__handle {
-    position: absolute;
-    width: 10px;
-    top: -4px;
-    bottom: -4px;
-    background-color: rgba(255, 255, 255, 0.7);
-    border-radius: 2px;
-}
-
-.transition-timeline__handle--hover {
-    background-color: rgb(255, 180, 80);
+/* Ghost bars for visualizing animation cycles when exit time exceeds one cycle */
+.transition-timeline__bar--ghost {
+    opacity: 0.35;
 }
 
 .transition-timeline__overlap {
     position: absolute;
-    top: 42px;
-    height: 40px;
-    /* background drawn via generateVisualContent for gradient effect */
-    border-width: 1px;
-    border-color: rgba(255, 255, 255, 0.2);
-    border-radius: 2px;
+    /* top, height, left, width set dynamically in C# */
+    /* Gradient drawn via generateVisualContent covers this background */
+    background-color: rgb(70, 125, 130);
+    border-width: 0;
+    border-radius: 0;
+}
+
+.transition-timeline__overlap--hover {
+    /* Brighten the overlap on hover - adds white tint over the gradient */
+    background-color: rgb(90, 145, 150);
+}
+
+.transition-timeline__overlap--dragging {
+    background-color: rgb(110, 165, 170);
 }
 
 .transition-timeline__curve {
@@ -671,7 +661,7 @@
     position: absolute;
     width: 2px;
     top: 0;
-    bottom: 20px;
+    bottom: 0;
     background-color: rgb(220, 100, 100);
     border-radius: 1px;
 }

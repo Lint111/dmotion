@@ -43,7 +43,11 @@ namespace DMotion.Editor
         {
             blendSpaceEditor ??= new BlendSpace1DVisualEditor();
             blendSpaceEditor.SetTarget(state);
+            
+            // Restore persisted blend value for this state
+            previewBlendValue = PreviewSettings.instance.GetBlendValue1D(state, previewBlendValue);
             blendSpaceEditor.PreviewPosition = new Vector2(previewBlendValue, 0);
+            
             return blendSpaceEditor;
         }
         
@@ -69,27 +73,15 @@ namespace DMotion.Editor
             // Slider change handler
             slider.RegisterValueChangedCallback(evt =>
             {
-                previewBlendValue = evt.newValue;
+                SetBlendValue(evt.newValue, context);
                 cachedBlendField?.SetValueWithoutNotify(evt.newValue);
-                if (blendSpaceEditor != null)
-                {
-                    blendSpaceEditor.PreviewPosition = new Vector2(evt.newValue, 0);
-                }
-                AnimationPreviewEvents.RaiseBlendPosition1DChanged(state, evt.newValue);
-                context.RequestRepaint?.Invoke();
             });
             
             // Field change handler
             field.RegisterValueChangedCallback(evt =>
             {
-                previewBlendValue = evt.newValue;
+                SetBlendValue(evt.newValue, context);
                 cachedBlendSlider?.SetValueWithoutNotify(evt.newValue);
-                if (blendSpaceEditor != null)
-                {
-                    blendSpaceEditor.PreviewPosition = new Vector2(evt.newValue, 0);
-                }
-                AnimationPreviewEvents.RaiseBlendPosition1DChanged(state, evt.newValue);
-                context.RequestRepaint?.Invoke();
             });
             
             return container;
@@ -99,13 +91,34 @@ namespace DMotion.Editor
         {
             cachedPreviewPositionHandler = pos =>
             {
-                previewBlendValue = pos.x;
+                SetBlendValue(pos.x, context);
                 cachedBlendSlider?.SetValueWithoutNotify(pos.x);
                 cachedBlendField?.SetValueWithoutNotify(pos.x);
-                AnimationPreviewEvents.RaiseBlendPosition1DChanged(state, pos.x);
-                context.RequestRepaint?.Invoke();
             };
             blendSpaceEditor.OnPreviewPositionChanged += cachedPreviewPositionHandler;
+        }
+        
+        private void SetBlendValue(float value, StateContentContext context)
+        {
+            previewBlendValue = value;
+            
+            // Persist to settings (shared across all previews of this state)
+            PreviewSettings.instance.SetBlendValue1D(state, value);
+            
+            // Update visual editor
+            if (blendSpaceEditor != null)
+            {
+                blendSpaceEditor.PreviewPosition = new Vector2(value, 0);
+            }
+            
+            // Notify listeners (timeline duration updates via OnBlendStateChanged event)
+            AnimationPreviewEvents.RaiseBlendPosition1DChanged(state, value);
+            context.RequestRepaint?.Invoke();
+        }
+        
+        protected override Vector2 GetCurrentBlendPosition()
+        {
+            return new Vector2(previewBlendValue, 0);
         }
         
         protected override void GetLongestClipInfo(out float duration, out float frameRate)

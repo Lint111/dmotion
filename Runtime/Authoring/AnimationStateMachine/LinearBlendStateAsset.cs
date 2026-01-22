@@ -49,6 +49,104 @@ namespace DMotion.Authoring
         public override StateType Type => StateType.LinearBlend;
         public override int ClipCount => BlendClips.Length;
         public override IEnumerable<AnimationClipAsset> Clips => BlendClips.Select(b => b.Clip);
+        
+        /// <summary>
+        /// Gets the effective speed at the given blend position.
+        /// Calculates weighted average of clip speeds based on 1D blend weights.
+        /// </summary>
+        public override float GetEffectiveSpeed(Vector2 blendPosition)
+        {
+            if (BlendClips == null || BlendClips.Length == 0)
+                return Speed;
+            
+            float blendValue = blendPosition.x;
+            
+            // Find the two clips we're blending between
+            int lowerIndex = -1, upperIndex = -1;
+            
+            for (int i = 0; i < BlendClips.Length; i++)
+            {
+                float threshold = BlendClips[i].Threshold;
+                if (threshold <= blendValue)
+                    lowerIndex = i;
+                if (threshold >= blendValue && upperIndex == -1)
+                    upperIndex = i;
+            }
+            
+            // Handle edge cases
+            if (lowerIndex == -1) lowerIndex = 0;
+            if (upperIndex == -1) upperIndex = BlendClips.Length - 1;
+            
+            if (lowerIndex == upperIndex)
+            {
+                // Exactly on a threshold or outside range
+                float clipSpeed = BlendClips[lowerIndex].Speed > 0 ? BlendClips[lowerIndex].Speed : 1f;
+                return Speed * clipSpeed;
+            }
+            
+            // Interpolate between the two clips
+            float lowerThreshold = BlendClips[lowerIndex].Threshold;
+            float upperThreshold = BlendClips[upperIndex].Threshold;
+            float range = upperThreshold - lowerThreshold;
+            
+            float lowerSpeed = BlendClips[lowerIndex].Speed > 0 ? BlendClips[lowerIndex].Speed : 1f;
+            float upperSpeed = BlendClips[upperIndex].Speed > 0 ? BlendClips[upperIndex].Speed : 1f;
+            
+            if (range > 0.0001f)
+            {
+                float t = (blendValue - lowerThreshold) / range;
+                return Speed * Mathf.Lerp(lowerSpeed, upperSpeed, t);
+            }
+            
+            return Speed * lowerSpeed;
+        }
+        
+        /// <summary>
+        /// Gets the effective duration at the given blend position.
+        /// Interpolates between clip durations based on 1D blend weights.
+        /// </summary>
+        public override float GetEffectiveDuration(Vector2 blendPosition)
+        {
+            if (BlendClips == null || BlendClips.Length == 0)
+                return 1f;
+            
+            float blendValue = blendPosition.x;
+            
+            // Find the two clips we're blending between
+            int lowerIndex = -1, upperIndex = -1;
+            
+            for (int i = 0; i < BlendClips.Length; i++)
+            {
+                float threshold = BlendClips[i].Threshold;
+                if (threshold <= blendValue)
+                    lowerIndex = i;
+                if (threshold >= blendValue && upperIndex == -1)
+                    upperIndex = i;
+            }
+            
+            // Handle edge cases
+            if (lowerIndex == -1) lowerIndex = 0;
+            if (upperIndex == -1) upperIndex = BlendClips.Length - 1;
+            
+            float lowerDuration = BlendClips[lowerIndex].Clip?.Clip != null ? BlendClips[lowerIndex].Clip.Clip.length : 1f;
+            float upperDuration = BlendClips[upperIndex].Clip?.Clip != null ? BlendClips[upperIndex].Clip.Clip.length : 1f;
+            
+            if (lowerIndex == upperIndex)
+                return lowerDuration;
+            
+            // Interpolate between the two clips
+            float lowerThreshold = BlendClips[lowerIndex].Threshold;
+            float upperThreshold = BlendClips[upperIndex].Threshold;
+            float range = upperThreshold - lowerThreshold;
+            
+            if (range > 0.0001f)
+            {
+                float t = (blendValue - lowerThreshold) / range;
+                return Mathf.Lerp(lowerDuration, upperDuration, t);
+            }
+            
+            return lowerDuration;
+        }
 
 #if UNITY_EDITOR
         private void OnValidate()

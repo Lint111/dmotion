@@ -40,11 +40,15 @@ namespace DMotion.Editor
         protected SerializedObject serializedObject;
         protected int selectedClipForPreview = -1;
         
+        // Timeline scrubber reference for duration updates
+        protected TimelineScrubber timelineScrubber;
+        
         // Cached event handlers for cleanup
         protected Action<Vector2> cachedPreviewPositionHandler;
         protected Action<int> cachedClipSelectedHandler;
         protected Action<bool> cachedEditModeHandler;
         protected Action cachedRepaintHandler;
+        protected Action<AnimationStateAsset, Vector2> cachedBlendStateChangedHandler;
         
         #endregion
         
@@ -93,6 +97,11 @@ namespace DMotion.Editor
         /// Sets up preview position change handlers.
         /// </summary>
         protected abstract void SetupPreviewPositionHandler(StateContentContext context);
+        
+        /// <summary>
+        /// Gets the current blend position for this state type.
+        /// </summary>
+        protected abstract Vector2 GetCurrentBlendPosition();
         
         /// <summary>
         /// Gets the longest clip duration and frame rate from the state's clips.
@@ -168,15 +177,51 @@ namespace DMotion.Editor
             state = context.State as TState;
             if (state == null) return;
             
-            GetLongestClipInfo(out float duration, out float frameRate);
+            // Store reference for duration updates when blend position changes
+            timelineScrubber = scrubber;
             
-            scrubber.Duration = duration > 0 ? duration : 1f;
+            // Use effective duration at current blend position
+            var blendPos = GetCurrentBlendPosition();
+            float effectiveDuration = state.GetEffectiveDuration(blendPos);
+            
+            // Fallback to longest clip if effective duration is invalid
+            if (effectiveDuration <= 0)
+            {
+                GetLongestClipInfo(out effectiveDuration, out _);
+            }
+            
+            GetLongestClipInfo(out _, out float frameRate);
+            
+            scrubber.Duration = effectiveDuration > 0 ? effectiveDuration : 1f;
             scrubber.FrameRate = frameRate;
             scrubber.SetEventMarkers(null); // Blend states don't show events from individual clips
+            
+            // Subscribe to blend state changes for automatic duration updates
+            cachedBlendStateChangedHandler = OnBlendStateChanged;
+            AnimationPreviewEvents.OnBlendStateChanged += cachedBlendStateChangedHandler;
+        }
+        
+        private void OnBlendStateChanged(AnimationStateAsset changedState, Vector2 blendPos)
+        {
+            // Only update if the change is for our state
+            if (changedState != state || timelineScrubber == null) return;
+            
+            float effectiveDuration = state.GetEffectiveDuration(blendPos);
+            if (effectiveDuration > 0 && Mathf.Abs(effectiveDuration - timelineScrubber.Duration) > 0.001f)
+            {
+                timelineScrubber.Duration = effectiveDuration;
+            }
         }
         
         public void Cleanup()
         {
+            // Unsubscribe from global events
+            if (cachedBlendStateChangedHandler != null)
+            {
+                AnimationPreviewEvents.OnBlendStateChanged -= cachedBlendStateChangedHandler;
+                cachedBlendStateChangedHandler = null;
+            }
+            
             if (blendSpaceEditor != null)
             {
                 if (cachedPreviewPositionHandler != null)
@@ -202,6 +247,7 @@ namespace DMotion.Editor
             }
             
             ClearCachedUIReferences();
+            timelineScrubber = null;
             state = default;
             serializedObject = null;
         }

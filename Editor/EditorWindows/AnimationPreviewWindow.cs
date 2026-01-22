@@ -19,13 +19,18 @@ namespace DMotion.Editor
         private const float MinPreviewWidth = 200f;
         private const float MinPreviewHeight = 200f;
         private const float DefaultSplitPosition = 300f;
-        private const string SplitPositionPrefKey = "DMotion.AnimationPreview.SplitPosition";
         private const string PreviewModelPrefKeyPrefix = "DMotion.AnimationPreview.PreviewModel.";
 
         #region Serialized State
 
-        [SerializeField] private float splitPosition = DefaultSplitPosition;
         [SerializeField] private PlayableGraphPreview.CameraState savedCameraState;
+        
+        // Split position is stored in PreviewSettings singleton for cross-reload persistence
+        private float SplitPosition
+        {
+            get => PreviewSettings.instance.SplitPosition;
+            set => PreviewSettings.instance.SplitPosition = value;
+        }
 
         #endregion
 
@@ -104,9 +109,6 @@ namespace DMotion.Editor
 
         private void OnEnable()
         {
-            // Load persisted split position
-            splitPosition = EditorPrefs.GetFloat(SplitPositionPrefKey, DefaultSplitPosition);
-
             // Subscribe to state machine editor events
             StateMachineEditorEvents.OnStateSelected += OnGraphStateSelected;
             StateMachineEditorEvents.OnTransitionSelected += OnGraphTransitionSelected;
@@ -143,9 +145,6 @@ namespace DMotion.Editor
 
         private void OnDisable()
         {
-            // Save split position
-            EditorPrefs.SetFloat(SplitPositionPrefKey, splitPosition);
-
             // Unsubscribe from events
             StateMachineEditorEvents.OnStateSelected -= OnGraphStateSelected;
             StateMachineEditorEvents.OnTransitionSelected -= OnGraphTransitionSelected;
@@ -174,7 +173,7 @@ namespace DMotion.Editor
 
             // Save camera state before disposing
             if (previewRenderer != null)
-            {
+            { 
                 var camState = previewRenderer.CameraState;
                 if (camState.IsValid)
                 {
@@ -229,13 +228,12 @@ namespace DMotion.Editor
                 needsRepaint = true;
             }
             
-            // Update combined playback speed: stateSpeed × weightedClipSpeed
+            // Update state timeline playback speed using state's encapsulated calculation
             var stateTimeline = stateInspectorBuilder?.TimelineScrubber;
-            if (stateTimeline != null && previewRenderer != null)
+            if (stateTimeline != null && selectedState != null)
             {
-                float weightedClipSpeed = previewRenderer.WeightedSpeed;
-                float combinedSpeed = currentStateSpeed * weightedClipSpeed;
-                stateTimeline.PlaybackSpeed = combinedSpeed;
+                var blendPos = PreviewSettings.GetBlendPosition(selectedState);
+                stateTimeline.PlaybackSpeed = selectedState.GetEffectiveSpeed(blendPos);
             }
 
             // Update state timeline playback
@@ -245,7 +243,21 @@ namespace DMotion.Editor
                 needsRepaint = true;
             }
             
-            // Update transition timeline playback
+            // Update transition timeline playback speed using states' encapsulated calculations
+            var transitionTimeline = transitionInspectorBuilder?.Timeline;
+            if (transitionTimeline != null)
+            {
+                var fromBlendPos = PreviewSettings.GetBlendPosition(selectedTransitionFrom);
+                var toBlendPos = PreviewSettings.GetBlendPosition(selectedTransitionTo);
+                
+                float fromSpeed = selectedTransitionFrom?.GetEffectiveSpeed(fromBlendPos) ?? 1f;
+                float toSpeed = selectedTransitionTo?.GetEffectiveSpeed(toBlendPos) ?? 1f;
+                
+                // Lerp between from and to speeds based on transition progress
+                float progress = transitionTimeline.TransitionProgress;
+                transitionTimeline.PlaybackSpeed = Mathf.Lerp(fromSpeed, toSpeed, progress);
+            }
+            
             if (transitionInspectorBuilder != null && transitionInspectorBuilder.IsPlaying)
             {
                 transitionInspectorBuilder.Tick(deltaTime);
@@ -314,7 +326,7 @@ namespace DMotion.Editor
             mainContent.style.flexGrow = 1;
 
             // Create split view (horizontal: left = inspector, right = preview)
-            splitView = new TwoPaneSplitView(0, splitPosition, TwoPaneSplitViewOrientation.Horizontal);
+            splitView = new TwoPaneSplitView(0, SplitPosition, TwoPaneSplitViewOrientation.Horizontal);
             splitView.AddToClassList("main-split-view");
 
             // Left panel - Inspector
@@ -411,13 +423,13 @@ namespace DMotion.Editor
 
         private void OnSplitViewGeometryChanged(GeometryChangedEvent evt)
         {
-            // Save the split position when it changes
+            // Save the split position when it changes (auto-saved via PreviewSettings)
             if (splitView != null && inspectorPanel != null)
             {
                 var newPosition = inspectorPanel.resolvedStyle.width;
-                if (newPosition > 0 && Math.Abs(newPosition - splitPosition) > 1f)
+                if (newPosition > 0)
                 {
-                    splitPosition = newPosition;
+                    SplitPosition = newPosition;
                 }
             }
         }
@@ -644,13 +656,13 @@ namespace DMotion.Editor
             UpdateInspectorContent();
             
             // Create 3D preview for the selected state or transition
+            // Note: PreviewRenderer reads initial blend positions from PreviewSettings internally
             if (currentSelectionType == SelectionType.State && selectedState != null)
             {
                 previewRenderer.CreatePreviewForState(selectedState);
             }
             else if (currentSelectionType == SelectionType.Transition || currentSelectionType == SelectionType.AnyStateTransition)
             {
-                // Create transition preview
                 CreateTransitionPreviewForSelection();
             }
             else
@@ -959,6 +971,11 @@ namespace DMotion.Editor
             if (fromState != currentFromState) return;
             
             previewRenderer?.SetTransitionFromBlendPosition(blendPosition);
+            
+            // Update timeline durations to reflect new blend position
+            var toBlendPos = PreviewSettings.GetBlendPosition(selectedTransitionTo);
+            transitionInspectorBuilder?.Timeline?.UpdateDurationsForBlendPosition(blendPosition, toBlendPos);
+            
             Repaint();
         }
         
@@ -972,6 +989,11 @@ namespace DMotion.Editor
             if (toState != selectedTransitionTo) return;
             
             previewRenderer?.SetTransitionToBlendPosition(blendPosition);
+            
+            // Update timeline durations to reflect new blend position
+            var fromBlendPos = PreviewSettings.GetBlendPosition(selectedTransitionFrom);
+            transitionInspectorBuilder?.Timeline?.UpdateDurationsForBlendPosition(fromBlendPos, blendPosition);
+            
             Repaint();
         }
         
@@ -987,7 +1009,14 @@ namespace DMotion.Editor
             
             if (!matchesFrom || !matchesTo) return;
             
-            previewRenderer?.SetTransitionNormalizedTime(normalizedTime);
+            // Get per-state normalized times from the timeline for proper playback
+            var timeline = transitionInspectorBuilder?.Timeline;
+            if (timeline != null)
+            {
+                previewRenderer?.SetTransitionStateNormalizedTimes(
+                    timeline.FromStateNormalizedTime,
+                    timeline.ToStateNormalizedTime);
+            }
             Repaint();
         }
         
@@ -1008,11 +1037,23 @@ namespace DMotion.Editor
                 previewRenderer.SetNormalizedTime(stateTimeline.NormalizedTime);
             }
             
-            // Sync time from transition timeline
+            // Sync time and progress from transition timeline
             var transitionTimeline = transitionInspectorBuilder?.Timeline;
             if (transitionTimeline != null && previewRenderer.IsTransitionPreview)
             {
-                previewRenderer.SetTransitionNormalizedTime(transitionTimeline.NormalizedTime);
+                // Set per-state normalized times for proper clip sampling
+                previewRenderer.SetTransitionStateNormalizedTimes(
+                    transitionTimeline.FromStateNormalizedTime,
+                    transitionTimeline.ToStateNormalizedTime);
+                
+                // Apply blend curve to get actual blend weight
+                // Curve Y = "from" weight (1→0), so "to" weight = 1 - curveY
+                float rawProgress = transitionTimeline.TransitionProgress;
+                float curveValue = transitionTimeline.BlendCurve?.Evaluate(rawProgress) ?? (1f - rawProgress);
+                float blendWeight = 1f - curveValue;
+                
+                // Set transition progress for blend weights (from→to crossfade)
+                previewRenderer.SetTransitionProgress(blendWeight);
             }
             
             // Draw the preview

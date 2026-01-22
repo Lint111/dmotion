@@ -125,9 +125,32 @@ namespace DMotion.Editor
             set
             {
                 normalizedSampleTime = Mathf.Clamp01(value);
-                // Sync clip times when normalized time changes, BEFORE graph sampling
-                SyncClipTimes();
+                // Legacy: sync both clips to same time (for backwards compatibility)
+                // Prefer using SetStateNormalizedTimes for proper per-state timing
+                SyncClipTimesInternal(normalizedSampleTime, normalizedSampleTime);
             }
+        }
+        
+        /// <summary>
+        /// Normalized time for the "from" state's clip (0-1).
+        /// </summary>
+        public float FromStateNormalizedTime { get; private set; }
+        
+        /// <summary>
+        /// Normalized time for the "to" state's clip (0-1).
+        /// </summary>
+        public float ToStateNormalizedTime { get; private set; }
+        
+        /// <summary>
+        /// Sets the normalized sample times for both states independently.
+        /// This allows proper time synchronization where each state advances at its own rate.
+        /// </summary>
+        public void SetStateNormalizedTimes(float fromNormalized, float toNormalized)
+        {
+            FromStateNormalizedTime = Mathf.Clamp01(fromNormalized);
+            ToStateNormalizedTime = Mathf.Clamp01(toNormalized);
+            normalizedSampleTime = fromNormalized; // Keep legacy field in sync
+            SyncClipTimesInternal(FromStateNormalizedTime, ToStateNormalizedTime);
         }
         
         /// <summary>
@@ -456,21 +479,33 @@ namespace DMotion.Editor
         #region Time Synchronization
         
         /// <summary>
-        /// Synchronizes all clip times based on normalized sample time.
-        /// Each clip is set to its own time: normalizedTime * clipLength
-        /// This ensures all clips are at the same normalized position regardless of their individual lengths.
+        /// Synchronizes all clip times using stored per-state normalized times.
+        /// Called during graph initialization.
         /// </summary>
         private void SyncClipTimes()
         {
-            // Sync "from" state clips
-            SyncStateClipTimes(fromState, singleFromClipPlayable, fromClipPlayables, fromClipData);
+            // Use stored per-state times (default to normalizedSampleTime for backwards compatibility)
+            float fromTime = FromStateNormalizedTime > 0 ? FromStateNormalizedTime : normalizedSampleTime;
+            float toTime = ToStateNormalizedTime > 0 ? ToStateNormalizedTime : normalizedSampleTime;
+            SyncClipTimesInternal(fromTime, toTime);
+        }
+        
+        /// <summary>
+        /// Synchronizes clip times with separate normalized times for each state.
+        /// This allows the from and to states to be at different positions in their respective clips.
+        /// </summary>
+        private void SyncClipTimesInternal(float fromNormalizedTime, float toNormalizedTime)
+        {
+            // Sync "from" state clips to from state's normalized time
+            SyncStateClipTimes(fromState, singleFromClipPlayable, fromClipPlayables, fromClipData, fromNormalizedTime);
             
-            // Sync "to" state clips
-            SyncStateClipTimes(toState, singleToClipPlayable, toClipPlayables, toClipData);
+            // Sync "to" state clips to to state's normalized time
+            SyncStateClipTimes(toState, singleToClipPlayable, toClipPlayables, toClipData, toNormalizedTime);
         }
         
         private void SyncStateClipTimes(AnimationStateAsset state, AnimationClipPlayable singleClipPlayable, 
-            AnimationClipPlayable[] blendClipPlayables, BlendedClipPreview.BlendClipData[] clipData)
+            AnimationClipPlayable[] blendClipPlayables, BlendedClipPreview.BlendClipData[] clipData,
+            float stateNormalizedTime)
         {
             if (state == null) return;
             
@@ -480,7 +515,7 @@ namespace DMotion.Editor
                 var clip = singleClipState.Clip?.Clip;
                 if (clip != null)
                 {
-                    SetClipTime(singleClipPlayable, clip, normalizedSampleTime);
+                    SetClipTime(singleClipPlayable, clip, stateNormalizedTime);
                 }
                 return;
             }
@@ -495,7 +530,7 @@ namespace DMotion.Editor
                 var clip = clipData[i].Clip;
                 if (clip == null) continue;
                 
-                SetClipTime(blendClipPlayables[i], clip, normalizedSampleTime);
+                SetClipTime(blendClipPlayables[i], clip, stateNormalizedTime);
             }
         }
         
