@@ -170,8 +170,10 @@ namespace DMotion.Editor
             RegisterCallback<PointerDownEvent>(OnPointerDown);
             RegisterCallback<PointerMoveEvent>(OnPointerMove);
             RegisterCallback<PointerUpEvent>(OnPointerUp);
+            RegisterCallback<PointerEnterEvent>(OnPointerEnter);
             RegisterCallback<PointerLeaveEvent>(OnPointerLeave);
-            RegisterCallback<WheelEvent>(OnWheel);
+            // Register wheel event in TrickleDown phase to capture BEFORE parent ScrollView
+            RegisterCallback<WheelEvent>(OnWheel, TrickleDown.TrickleDown);
             RegisterCallback<GeometryChangedEvent>(OnGeometryChanged);
         }
         
@@ -723,6 +725,12 @@ namespace DMotion.Editor
             }
         }
         
+        private void OnPointerEnter(PointerEnterEvent evt)
+        {
+            // Focus the element to capture wheel events before parent ScrollView
+            Focus();
+        }
+        
         private void OnPointerLeave(PointerLeaveEvent evt)
         {
             if (isModeButtonHovered)
@@ -744,7 +752,10 @@ namespace DMotion.Editor
             HandleZoom(delta, mousePos, rect);
             
             MarkDirtyRepaint();
+            
+            // Stop propagation AND prevent default to block parent ScrollView
             evt.StopPropagation();
+            evt.PreventDefault();
         }
         
         private void CapturePointer(int pointerId)

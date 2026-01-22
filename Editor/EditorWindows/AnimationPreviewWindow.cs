@@ -336,6 +336,24 @@ namespace DMotion.Editor
 
             var inspectorScroll = new ScrollView(ScrollViewMode.Vertical);
             inspectorScroll.AddToClassList("inspector-scroll");
+            
+            // Allow nested elements (like blend space) to capture wheel events
+            // by checking if the mouse is over a blend space element
+            inspectorScroll.RegisterCallback<WheelEvent>(evt =>
+            {
+                // Check if the event target or any ancestor is a BlendSpaceVisualElement
+                var target = evt.target as VisualElement;
+                while (target != null && target != inspectorScroll)
+                {
+                    if (target is BlendSpaceVisualElement)
+                    {
+                        // Let the blend space handle it - don't scroll
+                        evt.StopPropagation();
+                        return;
+                    }
+                    target = target.parent;
+                }
+            }, TrickleDown.TrickleDown);
 
             inspectorContent = new VisualElement();
             inspectorContent.AddToClassList("inspector-content");
