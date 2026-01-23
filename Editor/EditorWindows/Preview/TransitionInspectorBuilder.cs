@@ -75,6 +75,11 @@ namespace DMotion.Editor
         /// </summary>
         public event Action OnRepaintRequested;
         
+        /// <summary>
+        /// Fired when the timeline play state changes.
+        /// </summary>
+        public event Action<bool> OnPlayStateChanged;
+        
         #endregion
         
         #region Properties
@@ -676,6 +681,7 @@ namespace DMotion.Editor
         private void OnTimelinePlayStateChanged(bool isPlaying)
         {
             AnimationPreviewEvents.RaiseTransitionPlayStateChanged(isPlaying);
+            OnPlayStateChanged?.Invoke(isPlaying);
             OnRepaintRequested?.Invoke();
         }
         

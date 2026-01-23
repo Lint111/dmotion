@@ -289,6 +289,7 @@ namespace DMotion.Editor
             transitionInspectorBuilder = new TransitionInspectorBuilder();
             transitionInspectorBuilder.OnTimeChanged += OnTransitionTimelineTimeChanged;
             transitionInspectorBuilder.OnRepaintRequested += Repaint;
+            transitionInspectorBuilder.OnPlayStateChanged += OnTimelinePlayStateChanged;
         }
         
         private void OnTransitionTimelineTimeChanged(float time)

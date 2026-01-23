@@ -187,6 +187,7 @@ namespace DMotion.Editor
             errorMessage = null;
             isInitialized = false;
             entityCreated = false;
+            sceneSetupRequested = false;
             
             if (toState == null)
             {
@@ -202,6 +203,29 @@ namespace DMotion.Editor
                 return;
             }
             
+            // Store the state machine for scene setup
+            stateMachineAsset = newStateMachineAsset;
+            
+            // In entity browser mode, handle transition preview on live entities
+            if (useEntityBrowserMode)
+            {
+                isInitialized = true;
+                
+                // Auto-setup preview scene if not already set up
+                if (!sceneManager.IsSetup)
+                {
+                    SetupPreviewScene();
+                }
+                
+                // If we have a selected entity, trigger a transition on it
+                if (entityBrowser.HasSelection)
+                {
+                    TriggerTransitionOnBrowserEntity();
+                }
+                return;
+            }
+            
+            // Legacy isolated preview mode (below)
             // Create world if not already created
             if (!worldService.IsInitialized)
             {
@@ -209,15 +233,11 @@ namespace DMotion.Editor
             }
             
             // Rebuild blobs if state machine changed
-            if (stateMachineAsset != newStateMachineAsset)
+            DisposeBlobs();
+            
+            if (!TryCreateBlobs())
             {
-                DisposeBlobs();
-                stateMachineAsset = newStateMachineAsset;
-                
-                if (!TryCreateBlobs())
-                {
-                    return;
-                }
+                return;
             }
             
             // Create preview entity
@@ -487,13 +507,211 @@ namespace DMotion.Editor
         
         public void SetTransitionStateNormalizedTimes(float fromNormalized, float toNormalized)
         {
-            // TODO: Phase 6 - Update transition state times
+            if (!useEntityBrowserMode || !entityBrowser.HasSelection) return;
+            if (!IsTransitionPreview) return;
+            
+            isPreviewTimeControlled = true;
+            SetTransitionSamplerTimesOnBrowserEntity(fromNormalized, toNormalized);
         }
         
         public void SetTransitionProgress(float progress)
         {
             transitionProgress = progress;
-            // TODO: Phase 6 - Update transition progress
+            
+            if (!useEntityBrowserMode || !entityBrowser.HasSelection) return;
+            if (!IsTransitionPreview) return;
+            
+            isPreviewTimeControlled = true;
+            SetTransitionProgressOnBrowserEntity(progress);
+        }
+        
+        /// <summary>
+        /// Triggers a state transition on the selected browser entity.
+        /// </summary>
+        private void TriggerTransitionOnBrowserEntity()
+        {
+            if (!entityBrowser.HasSelection) return;
+            if (transitionToState == null || stateMachineAsset == null) return;
+            
+            var entity = entityBrowser.SelectedEntity;
+            var world = entityBrowser.SelectedWorld;
+            
+            if (world == null || !world.IsCreated) return;
+            
+            var em = world.EntityManager;
+            if (!em.Exists(entity)) return;
+            
+            // Find the target state index in the state machine
+            int toStateIndex = stateMachineAsset.States.IndexOf(transitionToState);
+            if (toStateIndex < 0) return;
+            
+            // Get the AnimationStateMachine to find the animation state ID
+            if (!em.HasComponent<AnimationStateMachine>(entity)) return;
+            
+            var stateMachine = em.GetComponentData<AnimationStateMachine>(entity);
+            ref var blob = ref stateMachine.StateMachineBlob.Value;
+            
+            // Validate state index
+            if (toStateIndex >= blob.States.Length) return;
+            
+            // The animation state for this state machine state
+            // Note: In ECS, animation states are created dynamically when entering states
+            // For preview, we need to request a transition
+            if (!em.HasComponent<AnimationStateTransitionRequest>(entity)) return;
+            
+            // Create transition request
+            var request = AnimationStateTransitionRequest.New(
+                (sbyte)toStateIndex, // This is state machine state index, not animation state ID
+                transitionDuration,
+                transitionFromState != null ? (short)stateMachineAsset.States.IndexOf(transitionFromState) : (short)-1,
+                (short)0, // TODO: Find correct transition index
+                TransitionSource.State);
+            
+            em.SetComponentData(entity, request);
+        }
+        
+        /// <summary>
+        /// Sets the transition progress on the browser entity by controlling animation state time.
+        /// Progress is determined by toState.Time / transitionDuration.
+        /// </summary>
+        private void SetTransitionProgressOnBrowserEntity(float progress)
+        {
+            if (!entityBrowser.HasSelection) return;
+
+
+            var entity = entityBrowser.SelectedEntity;
+            var world = entityBrowser.SelectedWorld;
+
+
+            if (world == null || !world.IsCreated) return;
+
+
+            var em = world.EntityManager;
+            if (!em.Exists(entity)) return;
+
+            // Get the current transition
+
+            if (!em.HasComponent<AnimationStateTransition>(entity)) return;
+            var transition = em.GetComponentData<AnimationStateTransition>(entity);
+
+
+            if (!transition.IsValid) return;
+
+            // Get animation states buffer
+
+            if (!em.HasBuffer<AnimationState>(entity)) return;
+            var animationStates = em.GetBuffer<AnimationState>(entity);
+
+            // Find the "to" animation state
+
+            int toStateIndex = animationStates.IdToIndex((byte)transition.AnimationStateId);
+            if (toStateIndex < 0) return;
+
+            // Set the time to control progress: time = progress * duration
+
+            var toState = animationStates[toStateIndex];
+            toState.Time = progress * transition.TransitionDuration;
+            animationStates[toStateIndex] = toState;
+
+            // Also update the sampler times for the to state
+
+            if (!em.HasBuffer<ClipSampler>(entity)) return;
+
+
+            var samplers = em.GetBuffer<ClipSampler>(entity);
+            int startSamplerIndex = samplers.IdToIndex(toState.StartSamplerId);
+
+            if (startSamplerIndex < 0) return; 
+
+            // Set sampler times based on normalized time within the state
+            // For now, use a simple approach - set all samplers to same normalized time
+            for (int i = 0; i < toState.ClipCount && (startSamplerIndex + i) < samplers.Length; i++)
+            {
+                var sampler = samplers[startSamplerIndex + i];
+                // Keep current normalized position within the clip
+                sampler.PreviousTime = sampler.Time;
+                samplers[startSamplerIndex + i] = sampler;
+
+            }
+        }
+
+
+        /// <summary>
+        /// Sets the sampler times for both from and to states during transition.
+        /// </summary>
+        private void SetTransitionSamplerTimesOnBrowserEntity(float fromNormalized, float toNormalized)
+        {
+            if (!entityBrowser.HasSelection) return;
+            
+            var entity = entityBrowser.SelectedEntity;
+            var world = entityBrowser.SelectedWorld;
+            
+            if (world == null || !world.IsCreated) return;
+            
+            var em = world.EntityManager;
+            if (!em.Exists(entity)) return;
+            
+            if (!em.HasBuffer<AnimationState>(entity)) return;
+            if (!em.HasBuffer<ClipSampler>(entity)) return;
+            
+            var animationStates = em.GetBuffer<AnimationState>(entity);
+            var samplers = em.GetBuffer<ClipSampler>(entity);
+            
+            // Get current state (from state)
+            if (em.HasComponent<AnimationCurrentState>(entity))
+            {
+                var currentState = em.GetComponentData<AnimationCurrentState>(entity);
+                if (currentState.IsValid)
+                {
+                    int fromStateIndex = animationStates.IdToIndex((byte)currentState.AnimationStateId);
+                    if (fromStateIndex >= 0)
+                    {
+                        SetAnimationStateSamplerTimes(ref animationStates, ref samplers, fromStateIndex, fromNormalized);
+                    }
+                }
+            }
+            
+            // Get transition state (to state)
+            if (em.HasComponent<AnimationStateTransition>(entity))
+            {
+                var transition = em.GetComponentData<AnimationStateTransition>(entity);
+                if (transition.IsValid)
+                {
+                    int toStateIndex = animationStates.IdToIndex((byte)transition.AnimationStateId);
+                    if (toStateIndex >= 0)
+                    {
+                        SetAnimationStateSamplerTimes(ref animationStates, ref samplers, toStateIndex, toNormalized);
+                    }
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Sets sampler times for all clips in an animation state.
+        /// </summary>
+        private static void SetAnimationStateSamplerTimes(
+            ref DynamicBuffer<AnimationState> animationStates,
+            ref DynamicBuffer<ClipSampler> samplers,
+            int animationStateIndex,
+            float normalizedTime)
+        {
+            var animState = animationStates[animationStateIndex];
+            int startIndex = samplers.IdToIndex(animState.StartSamplerId);
+            
+            if (startIndex < 0) return;
+            
+            for (int i = 0; i < animState.ClipCount && (startIndex + i) < samplers.Length; i++)
+            {
+                var sampler = samplers[startIndex + i];
+                float clipDuration = sampler.Duration;
+
+
+                if (clipDuration <= 0) continue; 
+                
+                sampler.PreviousTime = sampler.Time;
+                sampler.Time = normalizedTime * clipDuration;
+                samplers[startIndex + i] = sampler;
+            }
         }
         
         /// <summary>
@@ -503,46 +721,43 @@ namespace DMotion.Editor
         public void SetPlaying(bool playing)
         {
             isPreviewPlaying = playing;
-            
-            if (!playing)
+
+
+            if (playing)
+            {
+                // When playing, release time control
+                isPreviewTimeControlled = false;
+            }
+            else
             {
                 // When pausing, take control of time
                 isPreviewTimeControlled = true;
-                
+
                 // Sync current entity time to preview
-                if (useEntityBrowserMode && entityBrowser.HasSelection)
-                {
-                    return;
-                }
-                
+                if (!useEntityBrowserMode || !entityBrowser.HasSelection) return;
+
+
                 float clipDuration = GetSelectedEntityClipDuration();
-                
-                if (clipDuration > 0)
-                {
-                    var entity = entityBrowser.SelectedEntity;
-                    var world = entityBrowser.SelectedWorld;
 
 
-                    if (world == null || !world.IsCreated)
-                    {
-                        return;
-                    }
+                if (clipDuration <= 0) return;
+
+                var entity = entityBrowser.SelectedEntity;
+                var world = entityBrowser.SelectedWorld;
 
 
-                    var em = world.EntityManager;
-                    if (!em.Exists(entity) || !em.HasBuffer<ClipSampler>(entity))
-                    {
-                        return;
-                    }
-                    var samplers = em.GetBuffer<ClipSampler>(entity);
+                if (world == null || !world.IsCreated) return;
 
-                    if (samplers.Length <= 0)
-                    {
-                        return;
-                    }
-                    previewControlledTime = samplers[0].Time;
-                    normalizedTime = previewControlledTime / clipDuration;
-                }
+                var em = world.EntityManager;
+
+                if (!em.Exists(entity) || !em.HasBuffer<ClipSampler>(entity)) return;
+
+                var samplers = em.GetBuffer<ClipSampler>(entity);
+
+                if (samplers.Length <= 0) return;
+
+                previewControlledTime = samplers[0].Time;
+                normalizedTime = previewControlledTime / clipDuration;
             }
         }
 
@@ -559,25 +774,28 @@ namespace DMotion.Editor
         public void StepFrames(int frameCount, float fps = 30f)
         {
             if (!useEntityBrowserMode || !entityBrowser.HasSelection) return;
-            
+
+
             isPreviewTimeControlled = true;
             isPreviewPlaying = false;
-            
+
+
             float frameDuration = 1f / fps;
             float stepTime = frameCount * frameDuration;
-            
+
             // Get current time and advance
             previewControlledTime += stepTime;
-            
+
             // Get clip duration and normalize
             float clipDuration = GetSelectedEntityClipDuration();
-            if (clipDuration > 0)
-            {
-                normalizedTime = (previewControlledTime % clipDuration) / clipDuration;
-                SetSamplerTimesOnBrowserEntity(normalizedTime);
-            }
+            
+            if (clipDuration <= 0) return;
+
+            normalizedTime = (previewControlledTime % clipDuration) / clipDuration;
+            SetSamplerTimesOnBrowserEntity(normalizedTime);
         }
-        
+
+
         /// <summary>
         /// Releases preview time control, letting ECS systems drive animation.
         /// </summary>
@@ -593,39 +811,43 @@ namespace DMotion.Editor
         private void SetSamplerTimesOnBrowserEntity(float normalizedTime)
         {
             if (!entityBrowser.HasSelection) return;
-            
+
+
             var entity = entityBrowser.SelectedEntity;
             var world = entityBrowser.SelectedWorld;
-            
+
+
             if (world == null || !world.IsCreated) return;
-            
+
+
             var em = world.EntityManager;
             if (!em.Exists(entity)) return;
             if (!em.HasBuffer<ClipSampler>(entity)) return;
-            
+
+
             var samplers = em.GetBuffer<ClipSampler>(entity);
-            
+
             for (int i = 0; i < samplers.Length; i++)
             {
                 var sampler = samplers[i];
                 float clipDuration = sampler.Duration;
-                
-                if (clipDuration > 0)
-                {
-                    float newTime = normalizedTime * clipDuration;
-                    sampler.PreviousTime = sampler.Time;
-                    sampler.Time = newTime;
-                    samplers[i] = sampler;
-                }
+
+                if (clipDuration <= 0) continue;
+
+                float newTime = normalizedTime * clipDuration;
+                sampler.PreviousTime = sampler.Time;
+                sampler.Time = newTime;
+                samplers[i] = sampler;
             }
-            
+
             // Store for step calculations
-            if (samplers.Length > 0)
-            {
-                previewControlledTime = normalizedTime * samplers[0].Duration;
-            }
+
+            if (samplers.Length <= 0) return;
+
+            previewControlledTime = normalizedTime * samplers[0].Duration;
         }
-        
+
+
         /// <summary>
         /// Gets the clip duration of the first sampler on the selected entity.
         /// </summary>
@@ -647,22 +869,16 @@ namespace DMotion.Editor
             
             return samplers[0].Duration;
         }
-        
+
         #endregion
-        
+
         #region IPreviewBackend Blend Control
-        
-        public void SetBlendPosition1D(float value)
-        {
-            // Set target for smooth interpolation
-            targetBlendPosition = new float2(value, 0);
-        }
-        
-        public void SetBlendPosition2D(float2 position)
-        {
-            // Set target for smooth interpolation
-            targetBlendPosition = position;
-        }
+
+
+        public void SetBlendPosition1D(float value) => targetBlendPosition = new float2(value, 0);
+
+
+        public void SetBlendPosition2D(float2 position) => targetBlendPosition = position;
         
         public void SetBlendPosition1DImmediate(float value)
         {
@@ -795,13 +1011,12 @@ namespace DMotion.Editor
         {
             for (int i = 0; i < buffer.Length; i++)
             {
-                if (buffer[i].Hash == hash)
-                {
-                    var param = buffer[i];
-                    param.Value = value;
-                    buffer[i] = param;
-                    return;
-                }
+                if (buffer[i].Hash != hash) continue;
+                
+                var param = buffer[i];
+                param.Value = value;
+                buffer[i] = param;
+                return;
             }
         }
         
@@ -812,14 +1027,16 @@ namespace DMotion.Editor
         public bool Tick(float deltaTime)
         {
             bool needsRepaint = false;
-            
+
             // Smooth blend position interpolation
+
             if (math.any(blendPosition != targetBlendPosition))
             {
                 // Lerp towards target
                 var diff = targetBlendPosition - blendPosition;
                 var maxStep = BlendSmoothSpeed * deltaTime;
-                
+
+
                 if (math.length(diff) <= maxStep)
                 {
                     blendPosition = targetBlendPosition;
@@ -828,57 +1045,62 @@ namespace DMotion.Editor
                 {
                     blendPosition += math.normalize(diff) * maxStep;
                 }
-                
+
                 // Update entity parameters with new blend position
+
                 SetBlendParameters();
                 needsRepaint = true;
             }
-            
+
             // Entity browser mode
-            if (useEntityBrowserMode)
+
+            if (!useEntityBrowserMode)
             {
-                // When preview controls time (paused or scrubbed), maintain the sampler times
-                // This prevents ECS systems from advancing time
-                if (isPreviewTimeControlled && !isPreviewPlaying && entityBrowser.HasSelection)
-                {
-                    // Re-apply sampler times each frame to override system updates
-                    SetSamplerTimesOnBrowserEntity(normalizedTime);
-                    needsRepaint = true;
-                }
-                else if (isPreviewPlaying && entityBrowser.HasSelection)
-                {
-                    // When playing, sync normalizedTime from entity for UI display
-                    float clipDuration = GetSelectedEntityClipDuration();
-                    if (clipDuration > 0)
-                    {
-                        var entity = entityBrowser.SelectedEntity;
-                        var world = entityBrowser.SelectedWorld;
-                        if (world != null && world.IsCreated)
-                        {
-                            var em = world.EntityManager;
-                            if (em.Exists(entity) && em.HasBuffer<ClipSampler>(entity))
-                            {
-                                var samplers = em.GetBuffer<ClipSampler>(entity);
-                                if (samplers.Length > 0)
-                                {
-                                    normalizedTime = samplers[0].Time / clipDuration;
-                                    normalizedTime -= math.floor(normalizedTime); // Wrap to 0-1
-                                }
-                            }
-                        }
-                    }
-                }
-                
+                // Legacy isolated preview mode
+                if (!worldService.IsInitialized) return needsRepaint;
+
+                worldService.Update(deltaTime);
                 return needsRepaint;
             }
-            
-            // Legacy isolated preview mode
-            if (!worldService.IsInitialized) return needsRepaint;
-            
-            worldService.Update(deltaTime);
+
+            // When preview controls time (paused or scrubbed), maintain the sampler times
+            // This prevents ECS systems from advancing time
+            if (isPreviewTimeControlled && !isPreviewPlaying && entityBrowser.HasSelection)
+            {
+                // Re-apply sampler times each frame to override system updates
+                SetSamplerTimesOnBrowserEntity(normalizedTime);
+                needsRepaint = true;
+            }
+            else if (isPreviewPlaying && entityBrowser.HasSelection)
+            {
+                // When playing, sync normalizedTime from entity for UI display
+                float clipDuration = GetSelectedEntityClipDuration();
+                
+                if (clipDuration <= 0) return needsRepaint;
+
+                var entity = entityBrowser.SelectedEntity;
+                var world = entityBrowser.SelectedWorld;
+
+                bool worldValid = world != null && world.IsCreated;
+
+                if(!worldValid) return needsRepaint;
+
+                var em = world.EntityManager;
+                bool entityValid = em.Exists(entity) && em.HasBuffer<ClipSampler>(entity);
+
+                if (!entityValid) return needsRepaint;
+
+                var samplers = em.GetBuffer<ClipSampler>(entity);
+                bool hasSamplers = entityValid && samplers.Length > 0;
+
+                return needsRepaint;
+            }
+
+
             return needsRepaint;
         }
-        
+
+
         public void Draw(Rect rect)
         {
             // Draw background
@@ -1135,13 +1357,13 @@ namespace DMotion.Editor
         public void ResetCameraView()
         {
             cameraState = PlayableGraphPreview.CameraState.Invalid;
+
+            if (!rendererInitialized) return;
             
-            if (rendererInitialized)
-            {
-                hybridRenderer.ResetCameraView();
-            }
+            hybridRenderer.ResetCameraView();
         }
-        
+
+
         public PreviewSnapshot GetSnapshot()
         {
             // Entity browser mode - return tracked state
