@@ -696,6 +696,8 @@ namespace DMotion.Editor
         private void EnsureAnimationStateExists(EntityManager em, Entity entity, int stateIndex)
         {
             if (!em.HasBuffer<AnimationState>(entity)) return;
+            if (!em.HasBuffer<ClipSampler>(entity)) return;
+            if (!em.HasComponent<AnimationStateMachine>(entity)) return;
             
             var animationStates = em.GetBuffer<AnimationState>(entity);
             
@@ -708,13 +710,132 @@ namespace DMotion.Editor
                 state.Time = 0f;
                 state.Weight = 0f; // Will be controlled by transition progress
                 animationStates[existingIndex] = state;
+                Debug.Log($"[EcsPreviewBackend] AnimationState {stateIndex} already exists, reset time/weight");
                 return;
             }
             
-            // State doesn't exist - we need to create it
-            // This requires access to the state machine blob to know clip count, speed, etc.
-            // For now, log a warning - the state should have been created by the ECS systems
-            Debug.LogWarning($"[EcsPreviewBackend] AnimationState {stateIndex} doesn't exist. ECS systems may need to run first.");
+            // State doesn't exist - create it using blob data
+            var sm = em.GetComponentData<AnimationStateMachine>(entity);
+            ref var smBlob = ref sm.StateMachineBlob.Value;
+            
+            if (stateIndex < 0 || stateIndex >= smBlob.States.Length)
+            {
+                Debug.LogWarning($"[EcsPreviewBackend] State index {stateIndex} out of range (max: {smBlob.States.Length})");
+                return;
+            }
+            
+            ref var stateBlob = ref smBlob.States[stateIndex];
+            var samplers = em.GetBuffer<ClipSampler>(entity);
+            
+            // Determine clip count based on state type
+            int clipCount = GetClipCountForState(ref smBlob, ref stateBlob);
+            
+            // Find the next available sampler ID
+            byte nextSamplerId = 0;
+            for (int i = 0; i < samplers.Length; i++)
+            {
+                if (samplers[i].Id >= nextSamplerId)
+                    nextSamplerId = (byte)(samplers[i].Id + 1);
+            }
+            
+            // Create the AnimationState
+            var newState = new AnimationState
+            {
+                Id = (byte)stateIndex,
+                Time = 0f,
+                Weight = 0f,
+                Speed = stateBlob.Speed,
+                Loop = stateBlob.Loop,
+                StartSamplerId = nextSamplerId,
+                ClipCount = (byte)clipCount
+            };
+            animationStates.Add(newState);
+            
+            // Create ClipSamplers for this state
+            CreateClipSamplersForState(ref smBlob, ref stateBlob, sm.ClipsBlob, sm.ClipEventsBlob, samplers, ref nextSamplerId);
+            
+            Debug.Log($"[EcsPreviewBackend] Created AnimationState {stateIndex} with {clipCount} clips");
+        }
+        
+        private int GetClipCountForState(ref StateMachineBlob smBlob, ref AnimationStateBlob stateBlob)
+        {
+            switch (stateBlob.Type)
+            {
+                case StateType.Single:
+                    return 1;
+                case StateType.LinearBlend:
+                    return smBlob.LinearBlendStates[stateBlob.StateIndex].SortedClipIndexes.Length;
+                case StateType.Directional2DBlend:
+                    return smBlob.Directional2DBlendStates[stateBlob.StateIndex].ClipIndexes.Length;
+                default:
+                    return 1;
+            }
+        }
+        
+        private void CreateClipSamplersForState(
+            ref StateMachineBlob smBlob,
+            ref AnimationStateBlob stateBlob,
+            BlobAssetReference<SkeletonClipSetBlob> clipsBlob,
+            BlobAssetReference<ClipEventsBlob> clipEventsBlob,
+            DynamicBuffer<ClipSampler> samplers,
+            ref byte nextSamplerId)
+        {
+            switch (stateBlob.Type)
+            {
+                case StateType.Single:
+                {
+                    ref var singleState = ref smBlob.SingleClipStates[stateBlob.StateIndex];
+                    samplers.Add(new ClipSampler
+                    {
+                        Id = nextSamplerId++,
+                        Clips = clipsBlob,
+                        ClipEventsBlob = clipEventsBlob,
+                        ClipIndex = singleState.ClipIndex,
+                        Time = 0f,
+                        PreviousTime = 0f,
+                        Weight = 0f
+                    });
+                    break;
+                }
+                
+                case StateType.LinearBlend:
+                {
+                    ref var linearState = ref smBlob.LinearBlendStates[stateBlob.StateIndex];
+                    for (int i = 0; i < linearState.SortedClipIndexes.Length; i++)
+                    {
+                        samplers.Add(new ClipSampler
+                        {
+                            Id = nextSamplerId++,
+                            Clips = clipsBlob,
+                            ClipEventsBlob = clipEventsBlob,
+                            ClipIndex = (ushort)linearState.SortedClipIndexes[i],
+                            Time = 0f,
+                            PreviousTime = 0f,
+                            Weight = 0f
+                        });
+                    }
+                    break;
+                }
+                
+                case StateType.Directional2DBlend:
+                {
+                    ref var dir2DState = ref smBlob.Directional2DBlendStates[stateBlob.StateIndex];
+                    for (int i = 0; i < dir2DState.ClipIndexes.Length; i++)
+                    {
+                        samplers.Add(new ClipSampler
+                        {
+                            Id = nextSamplerId++,
+                            Clips = clipsBlob,
+                            ClipEventsBlob = clipEventsBlob,
+                            ClipIndex = (ushort)dir2DState.ClipIndexes[i],
+                            Time = 0f,
+                            PreviousTime = 0f,
+                            Weight = 0f
+                        });
+                    }
+                    break;
+                }
+            }
         }
         
         /// <summary>
