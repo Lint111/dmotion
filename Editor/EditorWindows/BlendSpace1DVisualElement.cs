@@ -352,8 +352,11 @@ namespace DMotion.Editor
         
         protected override void HandleZoom(float delta, Vector2 mousePos, Rect rect)
         {
+            WheelDebugLogger.LogWheelEvent("BlendSpace1D.HandleZoom", delta, mousePos, rect);
             var mouseThreshold = ScreenToThreshold(mousePos.x);
+            var oldZoom = zoom;
             ApplyZoomDelta(delta);
+            WheelDebugLogger.LogWheelEvent($"BlendSpace1D.HandleZoom - zoom changed from {oldZoom:F2} to {zoom:F2}", delta, mousePos, rect);
             var newMouseThreshold = ScreenToThreshold(mousePos.x);
             panOffset.x += (mouseThreshold - newMouseThreshold);
         }

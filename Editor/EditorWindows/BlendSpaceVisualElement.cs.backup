@@ -736,17 +736,11 @@ namespace DMotion.Editor
             if (scrollView != null)
             {
                 // Store the original value and set to 0 to disable wheel scrolling
-                var originalSize = scrollView.mouseWheelScrollSize;
-                scrollView.userData = originalSize;
+                scrollView.userData = scrollView.mouseWheelScrollSize;
                 scrollView.mouseWheelScrollSize = 0;
-                WheelDebugLogger.LogWheelEvent($"OnPointerEnter - disabled ScrollView wheel (was {originalSize})", 0, Vector2.zero, contentRect);
-            }
-            else
-            {
-                WheelDebugLogger.LogWheelEvent("OnPointerEnter - no parent ScrollView found", 0, Vector2.zero, contentRect);
             }
         }
-        }
+        
         private void OnPointerLeave(PointerLeaveEvent evt)
         {
             if (isModeButtonHovered)
@@ -761,15 +755,6 @@ namespace DMotion.Editor
             {
                 scrollView.mouseWheelScrollSize = originalSize;
                 scrollView.userData = null;
-                WheelDebugLogger.LogWheelEvent($"OnPointerLeave - restored ScrollView wheel to {originalSize}", 0, Vector2.zero, contentRect);
-            }
-            else
-            {
-                WheelDebugLogger.LogWheelEvent("OnPointerLeave - no ScrollView to restore", 0, Vector2.zero, contentRect);
-            }
-        }
-                scrollView.mouseWheelScrollSize = originalSize;
-                scrollView.userData = null;
             }
         }
         
@@ -778,16 +763,10 @@ namespace DMotion.Editor
             var rect = contentRect;
             var mousePos = evt.localMousePosition;
             
-            WheelDebugLogger.LogWheelEvent("OnWheel", evt.delta.y, mousePos, rect);
-            
             // Only zoom if mouse is in bounds
-            if (!rect.Contains(mousePos)) {
-                WheelDebugLogger.LogWheelEvent("OnWheel - OUT OF BOUNDS", evt.delta.y, mousePos, rect);
-                return;
-            }
+            if (!rect.Contains(mousePos)) return;
             
             float delta = -evt.delta.y * 0.05f;
-            WheelDebugLogger.LogWheelEvent("OnWheel - CALLING HandleZoom", delta, mousePos, rect);
             HandleZoom(delta, mousePos, rect);
             
             MarkDirtyRepaint();
