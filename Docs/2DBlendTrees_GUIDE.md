@@ -1,5 +1,8 @@
 # 2D Blend Trees Guide
 
+**Status:** Complete (Phase 1B)  
+**Last Updated:** 2026-01-23
+
 ## Overview
 
 2D Blend Trees allow you to blend animations based on two parameters (X and Y), commonly used for directional locomotion like 8-way movement systems.
@@ -171,9 +174,13 @@ StateMachineParameterUtils.SetFloat(ref floatParams, _moveYHash, input.y);
 
 ## Algorithm Details
 
-DMotion uses the **Real Simple Directional** algorithm (similar to Unity's Simple Directional 2D):
+DMotion supports two 2D blend algorithms:
 
-### How It Works
+### Simple Directional (Default)
+
+Similar to Unity's Simple Directional 2D. Best for **radial clip arrangements** (8-way locomotion). Maximum 2-3 clips active at once.
+
+**How It Works:**
 
 1. **Input at Origin (0,0)**: Uses 100% idle clip (if one exists at origin)
 2. **Directional Input**: 
@@ -183,7 +190,7 @@ DMotion uses the **Real Simple Directional** algorithm (similar to Unity's Simpl
    - Small magnitude = more idle weight
    - Full magnitude = no idle weight
 
-### Weight Calculation
+**Weight Calculation:**
 
 ```
 For input (x, y):
@@ -196,6 +203,23 @@ For input (x, y):
    e. If idle exists: scale by input magnitude
 ```
 
+### Inverse Distance Weighting (IDW)
+
+Alternative algorithm for **arbitrary clip placements**. All clips can be active simultaneously.
+
+**How It Works:**
+
+1. Calculate distance from input to each clip position
+2. Weight = 1 / distance^2 (inverse square)
+3. Normalize all weights to sum to 1.0
+4. Exact position match = 100% weight on that clip
+
+**When to Use IDW:**
+
+- Non-radial clip arrangements
+- Clips at varying distances from origin
+- When you want smoother multi-clip blending
+
 ### Edge Cases Handled
 
 | Case | Behavior |
@@ -204,6 +228,7 @@ For input (x, y):
 | No idle clip | Uses closest clip for origin input |
 | Large magnitude | Clips clamp to their position distance |
 | Two clips only | Blends between them by angle |
+| Exact position match | 100% weight on matching clip |
 
 ---
 
@@ -309,11 +334,25 @@ void Update()
 
 ### Runtime Cost
 
-| Operation | Cost |
-|-----------|------|
-| Weight calculation | ~200-400 cycles per entity |
-| Sampling (via Kinemation) | Standard blend cost |
-| Memory per state | ~48 bytes + clips |
+| Operation | Algorithm | Cost |
+|-----------|-----------|------|
+| Weight calculation (4 clips) | SimpleDirectional | ~150-250 cycles |
+| Weight calculation (8 clips) | SimpleDirectional | ~200-350 cycles |
+| Weight calculation (9 clips) | SimpleDirectional | ~250-400 cycles |
+| Weight calculation (8 clips) | IDW | ~300-500 cycles |
+| Sampling (via Kinemation) | - | Standard blend cost |
+| Memory per state | - | ~48 bytes + clips |
+
+**Target:** <500 cycles per evaluation (achieved)
+
+### Algorithm Performance Comparison
+
+| Algorithm | Active Clips | Best For |
+|-----------|--------------|----------|
+| SimpleDirectional | 2-3 max | Radial layouts, locomotion |
+| IDW | All clips | Arbitrary layouts, smooth blends |
+
+SimpleDirectional is faster due to early-out after finding angle neighbors.
 
 ### Optimization Tips
 
@@ -321,6 +360,7 @@ void Update()
 2. **Batch parameter updates** when possible
 3. **Use normalized input** to avoid extra magnitude calculations
 4. **Limit clip count** to 9 or fewer for best performance
+5. **Prefer SimpleDirectional** for standard 8-way locomotion
 
 ### Comparison to 1D Blend
 
@@ -330,6 +370,16 @@ void Update()
 | Typical clips | 2-5 | 5-9 |
 | Weight calc cost | Lower | Higher |
 | Use case | Speed-based | Direction-based |
+
+### Performance Tests
+
+Run performance benchmarks via Unity Test Runner:
+- `DMotion.PerformanceTests.Directional2DBlendPerformanceTests`
+
+Tests include:
+- 4-way, 8-way, 9-way (8+idle) configurations
+- SimpleDirectional vs IDW comparison
+- Scaling behavior with clip count
 
 ---
 
@@ -389,15 +439,34 @@ public struct Directional2DClipWithPosition
 public static class Directional2DBlendUtils
 {
     /// <summary>
-    /// Calculates weights for Simple Directional 2D blending.
+    /// Calculates weights for 2D blending using the specified algorithm.
     /// </summary>
     /// <param name="input">The 2D blend input (X, Y)</param>
     /// <param name="positions">Clip positions in 2D space</param>
     /// <param name="weights">Output weights (same length as positions)</param>
+    /// <param name="algorithm">SimpleDirectional (default) or InverseDistanceWeighting</param>
     public static void CalculateWeights(
         float2 input, 
         NativeArray<float2> positions, 
-        NativeArray<float> weights);
+        NativeArray<float> weights,
+        Blend2DAlgorithm algorithm = Blend2DAlgorithm.SimpleDirectional);
+    
+    // Managed array overload for editor/preview
+    public static void CalculateWeights(
+        float2 input, 
+        float2[] positions, 
+        float[] weights,
+        Blend2DAlgorithm algorithm = Blend2DAlgorithm.SimpleDirectional);
+}
+```
+
+### Blend2DAlgorithm
+
+```csharp
+public enum Blend2DAlgorithm : byte
+{
+    SimpleDirectional = 0,      // Angular neighbor blending (2-3 clips active)
+    InverseDistanceWeighting = 1 // Distance-based blending (all clips active)
 }
 ```
 

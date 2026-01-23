@@ -18,16 +18,6 @@ namespace DMotion.Editor
         private readonly string noOptionsMessage;
         private SerializedProperty boundProperty;
         
-        // Cached choices to avoid re-collecting on every access
-        private bool choicesDirty = true;
-        private static bool globalDirtyFlag;
-        
-        static SubAssetPopupField()
-        {
-            // Mark dirty when assets change
-            ObjectReferencePopupSelector.IsDirty = true;
-        }
-        
         /// <summary>
         /// Creates a new SubAssetPopupField.
         /// </summary>
@@ -126,8 +116,6 @@ namespace DMotion.Editor
                     // Don't auto-select, leave as null
                 }
             }
-            
-            choicesDirty = false;
         }
         
         private List<Object> CollectSubAssets()

@@ -244,6 +244,4 @@
     margin-right: 4px;
 }
 
-.int-range-row__field:last-child {
-    margin-right: 0;
-}
+/* Note: :last-child not supported in Unity USS - use explicit class if needed */
