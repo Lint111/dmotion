@@ -284,6 +284,7 @@ namespace DMotion.Editor
             stateInspectorBuilder.OnTimeChanged += OnTimelineTimeChanged;
             stateInspectorBuilder.OnRepaintRequested += Repaint;
             stateInspectorBuilder.OnStateSpeedChanged += OnStateSpeedChanged;
+            stateInspectorBuilder.OnPlayStateChanged += OnTimelinePlayStateChanged;
             
             transitionInspectorBuilder = new TransitionInspectorBuilder();
             transitionInspectorBuilder.OnTimeChanged += OnTransitionTimelineTimeChanged;
@@ -941,6 +942,12 @@ namespace DMotion.Editor
         {
             // Store the base state speed - will be combined with weighted clip speed in Update
             currentStateSpeed = newSpeed > 0 ? newSpeed : 1f;
+        }
+        
+        private void OnTimelinePlayStateChanged(bool isPlaying)
+        {
+            // Forward play state to preview session (important for ECS mode)
+            previewSession?.SetPlaying(isPlaying);
         }
 
         #endregion

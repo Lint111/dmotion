@@ -124,6 +124,18 @@ namespace DMotion.Editor
             renderer.SetTransitionProgress(progress);
         }
         
+        public void SetPlaying(bool playing)
+        {
+            // PlayableGraph backend doesn't need special handling - 
+            // time is controlled by timeline calling SetNormalizedTime
+        }
+        
+        public void StepFrames(int frameCount, float fps = 30f)
+        {
+            // PlayableGraph backend doesn't need special handling -
+            // time is controlled by timeline
+        }
+        
         #endregion
         
         #region IPreviewBackend Blend Control

@@ -289,6 +289,23 @@ namespace DMotion.Editor
             MarkDirty(PreviewDirtyFlags.TransitionProgress);
         }
         
+        /// <summary>
+        /// Sets the playback state. When paused, animation time is controlled by the preview.
+        /// </summary>
+        public void SetPlaying(bool playing)
+        {
+            activeBackend?.SetPlaying(playing);
+        }
+        
+        /// <summary>
+        /// Steps the animation by the given number of frames.
+        /// </summary>
+        public void StepFrames(int frameCount, float fps = 30f)
+        {
+            activeBackend?.StepFrames(frameCount, fps);
+            MarkDirty(PreviewDirtyFlags.Time);
+        }
+        
         #endregion
         
         #region Blend Control

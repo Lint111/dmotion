@@ -136,6 +136,16 @@ namespace DMotion.Editor
         /// </summary>
         void SetTransitionProgress(float progress);
         
+        /// <summary>
+        /// Sets the playback state. When paused, animation time is controlled by the preview.
+        /// </summary>
+        void SetPlaying(bool playing);
+        
+        /// <summary>
+        /// Steps the animation by the given number of frames.
+        /// </summary>
+        void StepFrames(int frameCount, float fps = 30f);
+        
         #endregion
         
         #region Blend Control

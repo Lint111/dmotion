@@ -49,6 +49,11 @@ namespace DMotion.Editor
         // Blend smoothing
         private const float BlendSmoothSpeed = 8f; // Higher = faster interpolation
         
+        // Playback control for entity browser mode
+        private bool isPreviewPlaying = true;
+        private bool isPreviewTimeControlled = false;
+        private float previewControlledTime = 0f; // Time in seconds when preview controls playback
+        
         // Hybrid renderer for 3D preview (legacy - for isolated preview)
         private EcsHybridRenderer hybridRenderer;
         private bool rendererInitialized;
@@ -471,7 +476,13 @@ namespace DMotion.Editor
         public void SetNormalizedTime(float time)
         {
             normalizedTime = time;
-            // TODO: Phase 6 - Update ECS entity time
+            
+            // Enable preview time control and set sampler times
+            if (useEntityBrowserMode && entityBrowser.HasSelection)
+            {
+                isPreviewTimeControlled = true;
+                SetSamplerTimesOnBrowserEntity(time);
+            }
         }
         
         public void SetTransitionStateNormalizedTimes(float fromNormalized, float toNormalized)
@@ -483,6 +494,158 @@ namespace DMotion.Editor
         {
             transitionProgress = progress;
             // TODO: Phase 6 - Update transition progress
+        }
+        
+        /// <summary>
+        /// Sets the playback state.
+        /// When paused, sampler times are controlled by the preview timeline.
+        /// </summary>
+        public void SetPlaying(bool playing)
+        {
+            isPreviewPlaying = playing;
+            
+            if (!playing)
+            {
+                // When pausing, take control of time
+                isPreviewTimeControlled = true;
+                
+                // Sync current entity time to preview
+                if (useEntityBrowserMode && entityBrowser.HasSelection)
+                {
+                    return;
+                }
+                
+                float clipDuration = GetSelectedEntityClipDuration();
+                
+                if (clipDuration > 0)
+                {
+                    var entity = entityBrowser.SelectedEntity;
+                    var world = entityBrowser.SelectedWorld;
+
+
+                    if (world == null || !world.IsCreated)
+                    {
+                        return;
+                    }
+
+
+                    var em = world.EntityManager;
+                    if (!em.Exists(entity) || !em.HasBuffer<ClipSampler>(entity))
+                    {
+                        return;
+                    }
+                    var samplers = em.GetBuffer<ClipSampler>(entity);
+
+                    if (samplers.Length <= 0)
+                    {
+                        return;
+                    }
+                    previewControlledTime = samplers[0].Time;
+                    normalizedTime = previewControlledTime / clipDuration;
+                }
+            }
+        }
+
+
+        /// <summary>
+        /// Toggles play/pause for the preview.
+        /// </summary>
+        public void TogglePlayPause() => SetPlaying(!isPreviewPlaying);
+
+
+        /// <summary>
+        /// Steps the animation forward by the given number of frames.
+        /// </summary>
+        public void StepFrames(int frameCount, float fps = 30f)
+        {
+            if (!useEntityBrowserMode || !entityBrowser.HasSelection) return;
+            
+            isPreviewTimeControlled = true;
+            isPreviewPlaying = false;
+            
+            float frameDuration = 1f / fps;
+            float stepTime = frameCount * frameDuration;
+            
+            // Get current time and advance
+            previewControlledTime += stepTime;
+            
+            // Get clip duration and normalize
+            float clipDuration = GetSelectedEntityClipDuration();
+            if (clipDuration > 0)
+            {
+                normalizedTime = (previewControlledTime % clipDuration) / clipDuration;
+                SetSamplerTimesOnBrowserEntity(normalizedTime);
+            }
+        }
+        
+        /// <summary>
+        /// Releases preview time control, letting ECS systems drive animation.
+        /// </summary>
+        public void ReleaseTimeControl()
+        {
+            isPreviewTimeControlled = false;
+            isPreviewPlaying = true;
+        }
+        
+        /// <summary>
+        /// Sets sampler times on the selected browser entity.
+        /// </summary>
+        private void SetSamplerTimesOnBrowserEntity(float normalizedTime)
+        {
+            if (!entityBrowser.HasSelection) return;
+            
+            var entity = entityBrowser.SelectedEntity;
+            var world = entityBrowser.SelectedWorld;
+            
+            if (world == null || !world.IsCreated) return;
+            
+            var em = world.EntityManager;
+            if (!em.Exists(entity)) return;
+            if (!em.HasBuffer<ClipSampler>(entity)) return;
+            
+            var samplers = em.GetBuffer<ClipSampler>(entity);
+            
+            for (int i = 0; i < samplers.Length; i++)
+            {
+                var sampler = samplers[i];
+                float clipDuration = sampler.Duration;
+                
+                if (clipDuration > 0)
+                {
+                    float newTime = normalizedTime * clipDuration;
+                    sampler.PreviousTime = sampler.Time;
+                    sampler.Time = newTime;
+                    samplers[i] = sampler;
+                }
+            }
+            
+            // Store for step calculations
+            if (samplers.Length > 0)
+            {
+                previewControlledTime = normalizedTime * samplers[0].Duration;
+            }
+        }
+        
+        /// <summary>
+        /// Gets the clip duration of the first sampler on the selected entity.
+        /// </summary>
+        private float GetSelectedEntityClipDuration()
+        {
+            if (!entityBrowser.HasSelection) return 0f;
+            
+            var entity = entityBrowser.SelectedEntity;
+            var world = entityBrowser.SelectedWorld;
+            
+            if (world == null || !world.IsCreated) return 0f;
+            
+            var em = world.EntityManager;
+            if (!em.Exists(entity)) return 0f;
+            if (!em.HasBuffer<ClipSampler>(entity)) return 0f;
+            
+            var samplers = em.GetBuffer<ClipSampler>(entity);
+            if (samplers.Length == 0) return 0f;
+            
+            return samplers[0].Duration;
         }
         
         #endregion
@@ -671,9 +834,41 @@ namespace DMotion.Editor
                 needsRepaint = true;
             }
             
-            // Entity browser mode doesn't need world update (game handles it)
+            // Entity browser mode
             if (useEntityBrowserMode)
             {
+                // When preview controls time (paused or scrubbed), maintain the sampler times
+                // This prevents ECS systems from advancing time
+                if (isPreviewTimeControlled && !isPreviewPlaying && entityBrowser.HasSelection)
+                {
+                    // Re-apply sampler times each frame to override system updates
+                    SetSamplerTimesOnBrowserEntity(normalizedTime);
+                    needsRepaint = true;
+                }
+                else if (isPreviewPlaying && entityBrowser.HasSelection)
+                {
+                    // When playing, sync normalizedTime from entity for UI display
+                    float clipDuration = GetSelectedEntityClipDuration();
+                    if (clipDuration > 0)
+                    {
+                        var entity = entityBrowser.SelectedEntity;
+                        var world = entityBrowser.SelectedWorld;
+                        if (world != null && world.IsCreated)
+                        {
+                            var em = world.EntityManager;
+                            if (em.Exists(entity) && em.HasBuffer<ClipSampler>(entity))
+                            {
+                                var samplers = em.GetBuffer<ClipSampler>(entity);
+                                if (samplers.Length > 0)
+                                {
+                                    normalizedTime = samplers[0].Time / clipDuration;
+                                    normalizedTime -= math.floor(normalizedTime); // Wrap to 0-1
+                                }
+                            }
+                        }
+                    }
+                }
+                
                 return needsRepaint;
             }
             
@@ -949,6 +1144,21 @@ namespace DMotion.Editor
         
         public PreviewSnapshot GetSnapshot()
         {
+            // Entity browser mode - return tracked state
+            if (useEntityBrowserMode)
+            {
+                return new PreviewSnapshot
+                {
+                    IsInitialized = isInitialized,
+                    NormalizedTime = normalizedTime,
+                    BlendPosition = blendPosition,
+                    TransitionProgress = IsTransitionPreview ? transitionProgress : -1f,
+                    IsPlaying = isPreviewPlaying,
+                    ErrorMessage = errorMessage
+                };
+            }
+            
+            // Legacy isolated preview mode
             if (!worldService.IsInitialized)
             {
                 return new PreviewSnapshot

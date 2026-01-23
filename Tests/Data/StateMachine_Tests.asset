@@ -67,7 +67,7 @@ MonoBehaviour:
   m_Name: Locomotion
   m_EditorClassIdentifier: 
   Loop: 1
-  Speed: 3
+  Speed: 1
   SpeedParameter: {fileID: 0}
   OutTransitions:
   - ToState: {fileID: 5953759798062009019}

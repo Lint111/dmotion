@@ -56,6 +56,11 @@ namespace DMotion.Editor
         /// </summary>
         public event Action<float> OnStateSpeedChanged;
         
+        /// <summary>
+        /// Fired when the timeline play state changes.
+        /// </summary>
+        public event Action<bool> OnPlayStateChanged;
+        
         #endregion
         
         #region Properties
@@ -382,6 +387,7 @@ namespace DMotion.Editor
             }
             
             timelineScrubber.OnTimeChanged += time => OnTimeChanged?.Invoke(time);
+            timelineScrubber.OnPlayStateChanged += playing => OnPlayStateChanged?.Invoke(playing);
             
             timelineSection.Add(timelineScrubber);
             container.Add(timelineSection);
