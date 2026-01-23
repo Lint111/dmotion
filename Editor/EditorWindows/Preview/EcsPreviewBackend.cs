@@ -40,8 +40,10 @@ namespace DMotion.Editor
         
         // Preview state
         private float normalizedTime;
-        private float2 blendPosition;
-        private float2 targetBlendPosition;
+        private float2 blendPosition;           // For single state, or "from" state in transition
+        private float2 targetBlendPosition;     // Interpolation target for blendPosition
+        private float2 toBlendPosition;         // For "to" state in transition
+        private float2 targetToBlendPosition;   // Interpolation target for toBlendPosition
         private float transitionProgress;
         private string errorMessage;
         private bool isInitialized;
@@ -1026,12 +1028,18 @@ namespace DMotion.Editor
         
         public void SetTransitionFromBlendPosition(float2 position)
         {
-            // TODO: Phase 6 - Set from state blend position
+            // Immediate - set both current and target, then apply
+            blendPosition = position;
+            targetBlendPosition = position;
+            SetBlendParameters();
         }
         
         public void SetTransitionToBlendPosition(float2 position)
         {
-            // TODO: Phase 6 - Set to state blend position
+            // Immediate - set both current and target, then apply
+            toBlendPosition = position;
+            targetToBlendPosition = position;
+            SetBlendParameters();
         }
         
         public void SetSoloClip(int clipIndex)
@@ -1086,8 +1094,9 @@ namespace DMotion.Editor
             if (IsTransitionPreview)
             {
                 // Transition preview - set blend parameters for both from and to states
+                // blendPosition = from-state blend, toBlendPosition = to-state blend
                 SetBlendParametersForState(em, entity, transitionFromState, blendPosition);
-                SetBlendParametersForState(em, entity, transitionToState, targetBlendPosition);
+                SetBlendParametersForState(em, entity, transitionToState, toBlendPosition);
             }
             else if (currentState != null)
             {
@@ -1175,14 +1184,13 @@ namespace DMotion.Editor
         public bool Tick(float deltaTime)
         {
             bool needsRepaint = false;
+            bool blendChanged = false;
 
-            // Smooth blend position interpolation
+            // Smooth blend position interpolation (from-state or single state)
             if (math.any(blendPosition != targetBlendPosition))
             {
-                // Lerp towards target
                 var diff = targetBlendPosition - blendPosition;
                 var maxStep = BlendSmoothSpeed * deltaTime;
-
 
                 if (math.length(diff) <= maxStep)
                 {
@@ -1192,9 +1200,29 @@ namespace DMotion.Editor
                 {
                     blendPosition += math.normalize(diff) * maxStep;
                 }
+                blendChanged = true;
+            }
+            
+            // Smooth to-state blend position interpolation (transitions only)
+            if (math.any(toBlendPosition != targetToBlendPosition))
+            {
+                var diff = targetToBlendPosition - toBlendPosition;
+                var maxStep = BlendSmoothSpeed * deltaTime;
 
-                // Update entity parameters with new blend position
-
+                if (math.length(diff) <= maxStep)
+                {
+                    toBlendPosition = targetToBlendPosition;
+                }
+                else
+                {
+                    toBlendPosition += math.normalize(diff) * maxStep;
+                }
+                blendChanged = true;
+            }
+            
+            // Update entity parameters if any blend position changed
+            if (blendChanged)
+            {
                 SetBlendParameters();
                 needsRepaint = true;
             }
