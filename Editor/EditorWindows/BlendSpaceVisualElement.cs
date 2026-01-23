@@ -174,7 +174,7 @@ namespace DMotion.Editor
             RegisterCallback<PointerEnterEvent>(OnPointerEnter);
             RegisterCallback<PointerLeaveEvent>(OnPointerLeave);
             // Wheel event for zoom - StopPropagation + PreventDefault prevents parent ScrollView from scrolling
-            RegisterCallback<WheelEvent>(OnWheel);
+            RegisterCallback<WheelEvent>(OnWheel, TrickleDown.TrickleDown);
             RegisterCallback<GeometryChangedEvent>(OnGeometryChanged);
         }
         
