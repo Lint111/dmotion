@@ -258,8 +258,8 @@ namespace DMotion.Editor
                 
                 // Add animation state buffer and components
                 em.AddBuffer<AnimationState>(previewEntity);
-                em.AddComponent(previewEntity, AnimationStateTransition.Null);
-                em.AddComponent(previewEntity, AnimationStateTransitionRequest.Null);
+                em.AddComponentData(previewEntity, AnimationStateTransition.Null);
+                em.AddComponentData(previewEntity, AnimationStateTransitionRequest.Null);
                 
                 // Add parameter buffers
                 em.AddBuffer<FloatParameter>(previewEntity);
