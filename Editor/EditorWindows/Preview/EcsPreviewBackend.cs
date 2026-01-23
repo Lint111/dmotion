@@ -78,7 +78,6 @@ namespace DMotion.Editor
         
         public EcsPreviewBackend()
         {
-            Debug.Log("[EcsPreviewBackend] Constructor called - ECS Runtime backend created");
             worldService = new EcsPreviewWorldService();
             entityBrowser = new EcsEntityBrowser();
             sceneManager = EcsPreviewSceneManager.Instance;
@@ -117,7 +116,6 @@ namespace DMotion.Editor
         
         public void CreatePreviewForState(AnimationStateAsset state)
         {
-            Debug.Log($"[EcsPreviewBackend] CreatePreviewForState: {state?.name ?? "null"}, type={state?.GetType().Name ?? "null"}");
             currentState = state;
             transitionFromState = null;
             transitionToState = null;
@@ -145,13 +143,16 @@ namespace DMotion.Editor
             // In entity browser mode, we set up the preview scene automatically
             if (useEntityBrowserMode)
             {
-                isInitialized = true;
-                
                 // Auto-setup preview scene if not already set up
                 if (!sceneManager.IsSetup)
                 {
                     SetupPreviewScene();
                 }
+                
+                // Initialize entity browser and auto-select an entity
+                InitializeEntityBrowser(stateMachineAsset);
+                
+                isInitialized = true;
                 return;
             }
             
@@ -209,19 +210,22 @@ namespace DMotion.Editor
             // In entity browser mode, handle transition preview on live entities
             if (useEntityBrowserMode)
             {
-                isInitialized = true;
-                
                 // Auto-setup preview scene if not already set up
                 if (!sceneManager.IsSetup)
                 {
                     SetupPreviewScene();
                 }
                 
+                // Initialize entity browser and auto-select an entity
+                InitializeEntityBrowser(stateMachineAsset);
+                
                 // If we have a selected entity, trigger a transition on it
                 if (entityBrowser.HasSelection)
                 {
                     TriggerTransitionOnBrowserEntity();
                 }
+                
+                isInitialized = true;
                 return;
             }
             
@@ -1000,17 +1004,9 @@ namespace DMotion.Editor
 
         #region IPreviewBackend Blend Control
 
-        public void SetBlendPosition1D(float value)
-        {
-            Debug.Log($"[EcsPreviewBackend] SetBlendPosition1D called: value={value}");
-            targetBlendPosition = new float2(value, 0);
-        }
+        public void SetBlendPosition1D(float value) => targetBlendPosition = new float2(value, 0);
 
-        public void SetBlendPosition2D(float2 position)
-        {
-            Debug.Log($"[EcsPreviewBackend] SetBlendPosition2D called: position={position}");
-            targetBlendPosition = position;
-        }
+        public void SetBlendPosition2D(float2 position) => targetBlendPosition = position;
         
         public void SetBlendPosition1DImmediate(float value)
         {
@@ -1060,14 +1056,12 @@ namespace DMotion.Editor
         
         /// <summary>
         /// Sets blend parameters on the entity selected in the entity browser.
+        /// Works for both single state preview and transition preview.
         /// </summary>
         private void SetBlendParametersOnBrowserEntity()
         {
-            Debug.Log($"[EcsPreviewBackend] SetBlendParametersOnBrowserEntity called. currentState={currentState?.name ?? "null"}, hasSelection={entityBrowser.HasSelection}");
-            
             if (!entityBrowser.HasSelection)
             {
-                Debug.Log("[EcsPreviewBackend] SetBlendParameters: No entity selected");
                 return;
             }
             
@@ -1076,90 +1070,73 @@ namespace DMotion.Editor
             
             if (world == null || !world.IsCreated)
             {
-                Debug.Log("[EcsPreviewBackend] SetBlendParameters: World not valid");
                 return;
             }
             
             var em = world.EntityManager;
             if (!em.Exists(entity))
             {
-                Debug.Log("[EcsPreviewBackend] SetBlendParameters: Entity doesn't exist");
                 return;
             }
             
-            // Get the blend parameter hash from the current state
-            int paramHash = 0;
-            bool isIntParam = false;
-            int intRangeMin = 0;
-            int intRangeMax = 1;
+            // Determine which state(s) to set blend parameters for
+            // For single state preview: set parameters for currentState using blendPosition
+            // For transition preview: set parameters for both from/to states
             
-            if (currentState is LinearBlendStateAsset linearBlend)
+            if (IsTransitionPreview)
             {
-                if (linearBlend.BlendParameter == null)
-                {
-                    Debug.Log("[EcsPreviewBackend] SetBlendParameters: LinearBlend has no BlendParameter");
-                    return;
-                }
-
-                paramHash = linearBlend.BlendParameter.Hash;
-                isIntParam = linearBlend.UsesIntParameter;
-                intRangeMin = linearBlend.IntRangeMin;
-                intRangeMax = linearBlend.IntRangeMax;
-                Debug.Log($"[EcsPreviewBackend] SetBlendParameters: LinearBlend hash={paramHash}, value={blendPosition.x}");
+                // Transition preview - set blend parameters for both from and to states
+                SetBlendParametersForState(em, entity, transitionFromState, blendPosition);
+                SetBlendParametersForState(em, entity, transitionToState, targetBlendPosition);
             }
-            else if (currentState is Directional2DBlendStateAsset directional2D)
+            else if (currentState != null)
+            {
+                // Single state preview
+                SetBlendParametersForState(em, entity, currentState, blendPosition);
+            }
+        }
+        
+        /// <summary>
+        /// Sets blend parameters on an entity for a specific state.
+        /// </summary>
+        private void SetBlendParametersForState(EntityManager em, Entity entity, AnimationStateAsset state, float2 position)
+        {
+            if (state == null) return;
+            
+            if (state is LinearBlendStateAsset linearBlend)
+            {
+                if (linearBlend.BlendParameter == null) return;
+                
+                int paramHash = linearBlend.BlendParameter.Hash;
+                bool isIntParam = linearBlend.UsesIntParameter;
+                
+                if (isIntParam)
+                {
+                    if (!em.HasBuffer<IntParameter>(entity)) return;
+                    var buffer = em.GetBuffer<IntParameter>(entity);
+                    int intValue = (int)math.lerp(linearBlend.IntRangeMin, linearBlend.IntRangeMax, position.x);
+                    SetIntParameterByHash(buffer, paramHash, intValue);
+                }
+                else
+                {
+                    if (!em.HasBuffer<FloatParameter>(entity)) return;
+                    var buffer = em.GetBuffer<FloatParameter>(entity);
+                    SetFloatParameterByHash(buffer, paramHash, position.x);
+                }
+            }
+            else if (state is Directional2DBlendStateAsset directional2D)
             {
                 // For 2D blend, set both X and Y parameters
                 if (directional2D.BlendParameterX != null && em.HasBuffer<FloatParameter>(entity))
                 {
                     var buffer = em.GetBuffer<FloatParameter>(entity);
-                    SetFloatParameterByHash(buffer, directional2D.BlendParameterX.Hash, blendPosition.x);
+                    SetFloatParameterByHash(buffer, directional2D.BlendParameterX.Hash, position.x);
                 }
                 if (directional2D.BlendParameterY != null && em.HasBuffer<FloatParameter>(entity))
                 {
                     var buffer = em.GetBuffer<FloatParameter>(entity);
-                    SetFloatParameterByHash(buffer, directional2D.BlendParameterY.Hash, blendPosition.y);
+                    SetFloatParameterByHash(buffer, directional2D.BlendParameterY.Hash, position.y);
                 }
-                return;
-            }
-            else
-            {
-                return; // Not a blend state
-            }
-            
-            // Set the parameter value
-            if (isIntParam)
-            {
-                if (!em.HasBuffer<IntParameter>(entity))
-                {
-                    Debug.Log("[EcsPreviewBackend] SetBlendParameters: No IntParameter buffer");
-                    return;
-                }
-                var buffer = em.GetBuffer<IntParameter>(entity);
-                
-                // Convert blend position (0-1) to int range
-                int intValue = (int)math.lerp(intRangeMin, intRangeMax, blendPosition.x);
-                bool found = SetIntParameterByHash(buffer, paramHash, intValue);
-                Debug.Log($"[EcsPreviewBackend] SetBlendParameters: IntParam hash={paramHash}, value={intValue}, found={found}");
-            }
-            else
-            {
-                if (!em.HasBuffer<FloatParameter>(entity))
-                {
-                    Debug.Log("[EcsPreviewBackend] SetBlendParameters: No FloatParameter buffer");
-                    return;
-                }
-                var buffer = em.GetBuffer<FloatParameter>(entity);
-                
-                // Log existing parameters for debugging
-                Debug.Log($"[EcsPreviewBackend] Entity has {buffer.Length} float params. Looking for hash={paramHash}");
-                for (int i = 0; i < buffer.Length; i++)
-                {
-                    Debug.Log($"  Param[{i}]: Hash={buffer[i].Hash}, Value={buffer[i].Value}");
-                }
-                
-                bool found = SetFloatParameterByHash(buffer, paramHash, blendPosition.x);
-                Debug.Log($"[EcsPreviewBackend] SetBlendParameters: FloatParam hash={paramHash}, value={blendPosition.x}, found={found}");
             }
         }
         
@@ -1195,22 +1172,13 @@ namespace DMotion.Editor
         
         #region IPreviewBackend Update & Render
         
-        private static int tickLogCounter = 0;
-        
         public bool Tick(float deltaTime)
         {
             bool needsRepaint = false;
-            
-            // Log occasionally to confirm Tick is running
-            if (++tickLogCounter % 60 == 0)
-            {
-                Debug.Log($"[EcsPreviewBackend] Tick running. blendPos={blendPosition}, targetBlendPos={targetBlendPosition}, useEntityBrowserMode={useEntityBrowserMode}");
-            }
 
             // Smooth blend position interpolation
             if (math.any(blendPosition != targetBlendPosition))
             {
-                Debug.Log($"[EcsPreviewBackend] Blend interpolating: {blendPosition} -> {targetBlendPosition}");
                 // Lerp towards target
                 var diff = targetBlendPosition - blendPosition;
                 var maxStep = BlendSmoothSpeed * deltaTime;
@@ -1532,6 +1500,37 @@ namespace DMotion.Editor
             else
             {
                 errorMessage = "Failed to set up preview scene.\nEnsure a preview model is assigned.";
+            }
+        }
+        
+        /// <summary>
+        /// Initializes the entity browser and auto-selects an entity.
+        /// This is called when creating a preview to ensure an entity is available.
+        /// </summary>
+        private void InitializeEntityBrowser(StateMachineAsset targetStateMachine)
+        {
+            // Refresh the entity list
+            entityBrowser.RefreshEntityList();
+            
+            // Try to select an entity that matches the target state machine
+            if (!entityBrowser.HasSelection)
+            {
+                if (targetStateMachine != null)
+                {
+                    // Try to find an entity with this state machine
+                    bool found = entityBrowser.SelectByStateMachine(targetStateMachine);
+                    Debug.Log($"[EcsPreviewBackend] InitializeEntityBrowser: SelectByStateMachine({targetStateMachine.name}) = {found}, EntityCount={entityBrowser.EntityCount}");
+                }
+                else
+                {
+                    // No specific state machine, just select the first entity
+                    bool found = entityBrowser.AutoSelectFirst();
+                    Debug.Log($"[EcsPreviewBackend] InitializeEntityBrowser: AutoSelectFirst = {found}, EntityCount={entityBrowser.EntityCount}");
+                }
+            }
+            else
+            {
+                Debug.Log($"[EcsPreviewBackend] InitializeEntityBrowser: Already has selection, EntityCount={entityBrowser.EntityCount}");
             }
         }
         

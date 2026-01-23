@@ -122,6 +122,73 @@ namespace DMotion.Editor
         }
         
         /// <summary>
+        /// Auto-selects the first available entity.
+        /// Useful for automatic preview initialization.
+        /// </summary>
+        /// <returns>True if an entity was selected.</returns>
+        public bool AutoSelectFirst()
+        {
+            // Refresh if we have no entities
+            if (cachedEntities.Count == 0)
+            {
+                RefreshEntityList();
+            }
+            
+            if (cachedEntities.Count > 0)
+            {
+                var first = cachedEntities[0];
+                SelectEntity(first.Entity, first.World);
+                return true;
+            }
+            
+            return false;
+        }
+        
+        /// <summary>
+        /// Selects an entity that matches the given state machine asset.
+        /// Falls back to auto-selecting first entity if no match found.
+        /// </summary>
+        /// <param name="stateMachineAsset">The state machine asset to match.</param>
+        /// <returns>True if an entity was selected.</returns>
+        public bool SelectByStateMachine(StateMachineAsset stateMachineAsset)
+        {
+            if (stateMachineAsset == null) return AutoSelectFirst();
+            
+            // Refresh if we have no entities
+            if (cachedEntities.Count == 0)
+            {
+                RefreshEntityList();
+            }
+            
+            // Look for an entity with matching state machine
+            foreach (var info in cachedEntities)
+            {
+                if (!info.World.IsCreated) continue;
+                
+                var em = info.World.EntityManager;
+                if (!em.Exists(info.Entity)) continue;
+                
+                if (em.HasComponent<AnimationStateMachineDebug>(info.Entity))
+                {
+                    var debug = em.GetComponentObject<AnimationStateMachineDebug>(info.Entity);
+                    if (debug?.StateMachineAsset == stateMachineAsset)
+                    {
+                        SelectEntity(info.Entity, info.World);
+                        return true;
+                    }
+                }
+            }
+            
+            // No match found, fall back to first entity
+            return AutoSelectFirst();
+        }
+        
+        /// <summary>
+        /// Gets the cached entities list.
+        /// </summary>
+        public IReadOnlyList<AnimationEntityInfo> CachedEntities => cachedEntities;
+        
+        /// <summary>
         /// Draws the entity browser UI.
         /// </summary>
         public void DrawBrowser(Rect rect)
