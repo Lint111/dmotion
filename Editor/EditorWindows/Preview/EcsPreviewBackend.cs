@@ -578,9 +578,10 @@ namespace DMotion.Editor
                 }
             }
             
-            // Note about Phase 6B - positioned at bottom
+            // Note about Phase 6B - positioned at ~70% down
             var noteHeight = 36f;
-            var noteRect = new Rect(rect.x, rect.y + rect.height - noteHeight - padding, rect.width, noteHeight);
+            var noteY = rect.y + rect.height * 0.7f;
+            var noteRect = new Rect(rect.x, noteY, rect.width, noteHeight);
             GUI.Label(noteRect, "State machine logic active.\n3D rendering coming in Phase 6B.", noteStyle);
         }
         
