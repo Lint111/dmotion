@@ -64,7 +64,6 @@ namespace DMotion.Editor
         
         // Scene manager for automatic SubScene setup
         private EcsPreviewSceneManager sceneManager;
-        private bool sceneSetupRequested;
         
         // Camera state
         private PlayableGraphPreview.CameraState cameraState;
@@ -122,7 +121,6 @@ namespace DMotion.Editor
             errorMessage = null;
             isInitialized = false;
             entityCreated = false;
-            sceneSetupRequested = false;
             
             if (state == null)
             {
@@ -187,7 +185,6 @@ namespace DMotion.Editor
             errorMessage = null;
             isInitialized = false;
             entityCreated = false;
-            sceneSetupRequested = false;
             
             if (toState == null)
             {
@@ -561,7 +558,7 @@ namespace DMotion.Editor
             
             // Create transition request
             var request = AnimationStateTransitionRequest.New(
-                (sbyte)toStateIndex, // This is state machine state index, not animation state ID
+                (byte)toStateIndex, // This is state machine state index, not animation state ID
                 transitionDuration,
                 transitionFromState != null ? (short)stateMachineAsset.States.IndexOf(transitionFromState) : (short)-1,
                 (short)0, // TODO: Find correct transition index
@@ -707,7 +704,7 @@ namespace DMotion.Editor
 
 
                 if (clipDuration <= 0) continue; 
-                
+
                 sampler.PreviousTime = sampler.Time;
                 sampler.Time = normalizedTime * clipDuration;
                 samplers[startIndex + i] = sampler;
@@ -950,6 +947,7 @@ namespace DMotion.Editor
             if (currentState is LinearBlendStateAsset linearBlend)
             {
                 if (linearBlend.BlendParameter == null) return;
+
                 paramHash = linearBlend.BlendParameter.Hash;
                 isIntParam = linearBlend.UsesIntParameter;
                 intRangeMin = linearBlend.IntRangeMin;
@@ -997,13 +995,12 @@ namespace DMotion.Editor
         {
             for (int i = 0; i < buffer.Length; i++)
             {
-                if (buffer[i].Hash == hash)
-                {
-                    var param = buffer[i];
-                    param.Value = value;
-                    buffer[i] = param;
-                    return;
-                }
+                if (buffer[i].Hash != hash) continue; 
+                
+                var param = buffer[i];
+                param.Value = value;
+                buffer[i] = param;
+                return;
             }
         }
         
