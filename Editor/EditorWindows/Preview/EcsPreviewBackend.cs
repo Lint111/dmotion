@@ -1120,22 +1120,40 @@ namespace DMotion.Editor
             // Set the parameter value
             if (isIntParam)
             {
-                if (!em.HasBuffer<IntParameter>(entity)) return;
+                if (!em.HasBuffer<IntParameter>(entity))
+                {
+                    Debug.Log("[EcsPreviewBackend] SetBlendParameters: No IntParameter buffer");
+                    return;
+                }
                 var buffer = em.GetBuffer<IntParameter>(entity);
                 
                 // Convert blend position (0-1) to int range
                 int intValue = (int)math.lerp(intRangeMin, intRangeMax, blendPosition.x);
-                SetIntParameterByHash(buffer, paramHash, intValue);
+                bool found = SetIntParameterByHash(buffer, paramHash, intValue);
+                Debug.Log($"[EcsPreviewBackend] SetBlendParameters: IntParam hash={paramHash}, value={intValue}, found={found}");
             }
             else
             {
-                if (!em.HasBuffer<FloatParameter>(entity)) return;
+                if (!em.HasBuffer<FloatParameter>(entity))
+                {
+                    Debug.Log("[EcsPreviewBackend] SetBlendParameters: No FloatParameter buffer");
+                    return;
+                }
                 var buffer = em.GetBuffer<FloatParameter>(entity);
-                SetFloatParameterByHash(buffer, paramHash, blendPosition.x);
+                
+                // Log existing parameters for debugging
+                Debug.Log($"[EcsPreviewBackend] Entity has {buffer.Length} float params. Looking for hash={paramHash}");
+                for (int i = 0; i < buffer.Length; i++)
+                {
+                    Debug.Log($"  Param[{i}]: Hash={buffer[i].Hash}, Value={buffer[i].Value}");
+                }
+                
+                bool found = SetFloatParameterByHash(buffer, paramHash, blendPosition.x);
+                Debug.Log($"[EcsPreviewBackend] SetBlendParameters: FloatParam hash={paramHash}, value={blendPosition.x}, found={found}");
             }
         }
         
-        private static void SetFloatParameterByHash(DynamicBuffer<FloatParameter> buffer, int hash, float value)
+        private static bool SetFloatParameterByHash(DynamicBuffer<FloatParameter> buffer, int hash, float value)
         {
             for (int i = 0; i < buffer.Length; i++)
             {
@@ -1144,11 +1162,12 @@ namespace DMotion.Editor
                 var param = buffer[i];
                 param.Value = value;
                 buffer[i] = param;
-                return;
+                return true;
             }
+            return false;
         }
         
-        private static void SetIntParameterByHash(DynamicBuffer<IntParameter> buffer, int hash, int value)
+        private static bool SetIntParameterByHash(DynamicBuffer<IntParameter> buffer, int hash, int value)
         {
             for (int i = 0; i < buffer.Length; i++)
             {
@@ -1157,8 +1176,9 @@ namespace DMotion.Editor
                 var param = buffer[i];
                 param.Value = value;
                 buffer[i] = param;
-                return;
+                return true;
             }
+            return false;
         }
         
         #endregion
