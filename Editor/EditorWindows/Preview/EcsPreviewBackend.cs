@@ -529,29 +529,49 @@ namespace DMotion.Editor
         /// </summary>
         private void TriggerTransitionOnBrowserEntity()
         {
-            if (!entityBrowser.HasSelection) return;
-            if (transitionToState == null || stateMachineAsset == null) return;
+            Debug.Log($"[EcsPreviewBackend] TriggerTransitionOnBrowserEntity called. HasSelection={entityBrowser.HasSelection}");
+            
+            if (!entityBrowser.HasSelection)
+            {
+                Debug.LogWarning("[EcsPreviewBackend] No entity selected in browser");
+                return;
+            }
+            if (transitionToState == null || stateMachineAsset == null)
+            {
+                Debug.LogWarning($"[EcsPreviewBackend] Missing data: toState={transitionToState?.name}, stateMachine={stateMachineAsset?.name}");
+                return;
+            }
             
             var entity = entityBrowser.SelectedEntity;
             var world = entityBrowser.SelectedWorld;
             
-            if (world == null || !world.IsCreated) return;
+            if (world == null || !world.IsCreated)
+            {
+                Debug.LogWarning("[EcsPreviewBackend] World not valid");
+                return;
+            }
             
             var em = world.EntityManager;
-            if (!em.Exists(entity)) return;
+            if (!em.Exists(entity))
+            {
+                Debug.LogWarning("[EcsPreviewBackend] Entity doesn't exist");
+                return;
+            }
             
             // Find the transition definition
             StateOutTransition transition = FindTransitionDefinition();
             if (transition == null)
             {
-                UnityEngine.Debug.LogWarning($"[EcsPreviewBackend] Could not find transition from {transitionFromState?.name ?? "Any"} to {transitionToState.name}");
+                Debug.LogWarning($"[EcsPreviewBackend] Could not find transition from {transitionFromState?.name ?? "Any"} to {transitionToState.name}");
                 return;
             }
+            
+            Debug.Log($"[EcsPreviewBackend] Found transition with {transition.Conditions?.Count ?? 0} conditions");
             
             // Set parameters to satisfy transition conditions
             SetTransitionConditionsOnEntity(em, entity, transition);
             
-            UnityEngine.Debug.Log($"[EcsPreviewBackend] Set conditions for transition to {transitionToState.name}");
+            Debug.Log($"[EcsPreviewBackend] Set conditions for transition to {transitionToState.name}");
         }
         
         /// <summary>
@@ -1035,15 +1055,27 @@ namespace DMotion.Editor
         /// </summary>
         private void SetBlendParametersOnBrowserEntity()
         {
-            if (!entityBrowser.HasSelection) return;
+            if (!entityBrowser.HasSelection)
+            {
+                Debug.Log("[EcsPreviewBackend] SetBlendParameters: No entity selected");
+                return;
+            }
             
             var entity = entityBrowser.SelectedEntity;
             var world = entityBrowser.SelectedWorld;
             
-            if (world == null || !world.IsCreated) return;
+            if (world == null || !world.IsCreated)
+            {
+                Debug.Log("[EcsPreviewBackend] SetBlendParameters: World not valid");
+                return;
+            }
             
             var em = world.EntityManager;
-            if (!em.Exists(entity)) return;
+            if (!em.Exists(entity))
+            {
+                Debug.Log("[EcsPreviewBackend] SetBlendParameters: Entity doesn't exist");
+                return;
+            }
             
             // Get the blend parameter hash from the current state
             int paramHash = 0;
@@ -1053,12 +1085,17 @@ namespace DMotion.Editor
             
             if (currentState is LinearBlendStateAsset linearBlend)
             {
-                if (linearBlend.BlendParameter == null) return;
+                if (linearBlend.BlendParameter == null)
+                {
+                    Debug.Log("[EcsPreviewBackend] SetBlendParameters: LinearBlend has no BlendParameter");
+                    return;
+                }
 
                 paramHash = linearBlend.BlendParameter.Hash;
                 isIntParam = linearBlend.UsesIntParameter;
                 intRangeMin = linearBlend.IntRangeMin;
                 intRangeMax = linearBlend.IntRangeMax;
+                Debug.Log($"[EcsPreviewBackend] SetBlendParameters: LinearBlend hash={paramHash}, value={blendPosition.x}");
             }
             else if (currentState is Directional2DBlendStateAsset directional2D)
             {
@@ -1244,12 +1281,14 @@ namespace DMotion.Editor
         
         /// <summary>
         /// Reads blend parameter values from the entity and updates local blendPosition.
+        /// Also updates PreviewSettings so the UI reflects the current entity state.
         /// </summary>
         private void SyncBlendPositionFromEntity(EntityManager em, Entity entity)
         {
             if (!em.HasBuffer<FloatParameter>(entity)) return;
             
             var floatParams = em.GetBuffer<FloatParameter>(entity);
+            bool updated = false;
             
             // Get blend parameter hash from current state
             if (currentState is LinearBlendStateAsset linearBlend && linearBlend.BlendParameter != null)
