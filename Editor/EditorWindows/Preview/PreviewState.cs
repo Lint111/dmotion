@@ -231,49 +231,6 @@ namespace DMotion.Editor
         }
     }
     
-    /// <summary>
-    /// Combined snapshot of preview state for UI synchronization.
-    /// </summary>
-    public struct PreviewSnapshot
-    {
-        /// <summary>
-        /// Current time state.
-        /// </summary>
-        public PreviewTimeState TimeState;
-        
-        /// <summary>
-        /// Current parameter state.
-        /// </summary>
-        public PreviewParameterState ParameterState;
-        
-        /// <summary>
-        /// Calculated blend weights for display.
-        /// </summary>
-        public float[] BlendWeights;
-        
-        /// <summary>
-        /// To-state blend weights (for transitions).
-        /// </summary>
-        public float[] ToBlendWeights;
-        
-        /// <summary>
-        /// Whether the preview is initialized and ready.
-        /// </summary>
-        public bool IsInitialized;
-        
-        /// <summary>
-        /// Error message if preview failed.
-        /// </summary>
-        public string ErrorMessage;
-        
-        /// <summary>
-        /// Name of the current preview target.
-        /// </summary>
-        public string TargetName;
-        
-        /// <summary>
-        /// Whether this is a transition preview.
-        /// </summary>
-        public bool IsTransition;
-    }
+    // Note: PreviewSnapshot is defined in IPreviewBackend.cs
+    // When migrating to PreviewBackendBase, consider consolidating snapshot types
 }
