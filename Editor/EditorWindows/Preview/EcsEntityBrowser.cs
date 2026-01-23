@@ -42,10 +42,8 @@ namespace DMotion.Editor
         private double lastRefreshTime;
         private const double RefreshInterval = 0.5; // Refresh entity list every 0.5s
         
-        // Parameter modification state
-        private Dictionary<int, float> floatParamValues = new();
-        private Dictionary<int, int> intParamValues = new();
-        private Dictionary<int, bool> boolParamValues = new();
+        // Parameter modification state (kept for potential future use with named parameters)
+        private Dictionary<int, string> parameterNames = new();
         
         #endregion
         
@@ -120,9 +118,7 @@ namespace DMotion.Editor
         {
             selectedEntity = Entity.Null;
             selectedWorld = null;
-            floatParamValues.Clear();
-            intParamValues.Clear();
-            boolParamValues.Clear();
+            parameterNames.Clear();
         }
         
         /// <summary>
@@ -431,20 +427,18 @@ namespace DMotion.Editor
                     for (int i = 0; i < buffer.Length; i++)
                     {
                         var param = buffer[i];
+                        float currentValue = param.Value; // Always read from entity
                         
-                        if (!floatParamValues.TryGetValue(i, out float currentValue))
-                        {
-                            currentValue = param.Value;
-                            floatParamValues[i] = currentValue;
-                        }
+                        EditorGUILayout.BeginHorizontal();
+                        EditorGUILayout.LabelField($"[{i}]", GUILayout.Width(30));
                         
                         EditorGUI.BeginChangeCheck();
-                        float newValue = EditorGUILayout.FloatField($"[{i}] Hash: {param.Hash}", currentValue);
+                        float newValue = EditorGUILayout.Slider(currentValue, -10f, 10f);
                         if (EditorGUI.EndChangeCheck())
                         {
-                            floatParamValues[i] = newValue;
                             SetFloatParameter(em, i, newValue);
                         }
+                        EditorGUILayout.EndHorizontal();
                     }
                     
                     EditorGUI.indentLevel--;
@@ -464,20 +458,18 @@ namespace DMotion.Editor
                     for (int i = 0; i < buffer.Length; i++)
                     {
                         var param = buffer[i];
+                        int currentValue = param.Value; // Always read from entity
                         
-                        if (!intParamValues.TryGetValue(i, out int currentValue))
-                        {
-                            currentValue = param.Value;
-                            intParamValues[i] = currentValue;
-                        }
+                        EditorGUILayout.BeginHorizontal();
+                        EditorGUILayout.LabelField($"[{i}]", GUILayout.Width(30));
                         
                         EditorGUI.BeginChangeCheck();
-                        int newValue = EditorGUILayout.IntField($"[{i}] Hash: {param.Hash}", currentValue);
+                        int newValue = EditorGUILayout.IntSlider(currentValue, -10, 10);
                         if (EditorGUI.EndChangeCheck())
                         {
-                            intParamValues[i] = newValue;
                             SetIntParameter(em, i, newValue);
                         }
+                        EditorGUILayout.EndHorizontal();
                     }
                     
                     EditorGUI.indentLevel--;
@@ -497,20 +489,18 @@ namespace DMotion.Editor
                     for (int i = 0; i < buffer.Length; i++)
                     {
                         var param = buffer[i];
+                        bool currentValue = param.Value; // Always read from entity
                         
-                        if (!boolParamValues.TryGetValue(i, out bool currentValue))
-                        {
-                            currentValue = param.Value;
-                            boolParamValues[i] = currentValue;
-                        }
+                        EditorGUILayout.BeginHorizontal();
+                        EditorGUILayout.LabelField($"[{i}]", GUILayout.Width(30));
                         
                         EditorGUI.BeginChangeCheck();
-                        bool newValue = EditorGUILayout.Toggle($"[{i}] Hash: {param.Hash}", currentValue);
+                        bool newValue = EditorGUILayout.Toggle(currentValue);
                         if (EditorGUI.EndChangeCheck())
                         {
-                            boolParamValues[i] = newValue;
                             SetBoolParameter(em, i, newValue);
                         }
+                        EditorGUILayout.EndHorizontal();
                     }
                     
                     EditorGUI.indentLevel--;
@@ -529,44 +519,9 @@ namespace DMotion.Editor
         
         private void CacheParameterValues()
         {
-            floatParamValues.Clear();
-            intParamValues.Clear();
-            boolParamValues.Clear();
-            
-            if (!HasSelection || !selectedWorld.IsCreated) return;
-            
-            var em = selectedWorld.EntityManager;
-            if (!em.Exists(selectedEntity)) return;
-            
-            // Cache float params
-            if (em.HasBuffer<FloatParameter>(selectedEntity))
-            {
-                var buffer = em.GetBuffer<FloatParameter>(selectedEntity);
-                for (int i = 0; i < buffer.Length; i++)
-                {
-                    floatParamValues[i] = buffer[i].Value;
-                }
-            }
-            
-            // Cache int params
-            if (em.HasBuffer<IntParameter>(selectedEntity))
-            {
-                var buffer = em.GetBuffer<IntParameter>(selectedEntity);
-                for (int i = 0; i < buffer.Length; i++)
-                {
-                    intParamValues[i] = buffer[i].Value;
-                }
-            }
-            
-            // Cache bool params
-            if (em.HasBuffer<BoolParameter>(selectedEntity))
-            {
-                var buffer = em.GetBuffer<BoolParameter>(selectedEntity);
-                for (int i = 0; i < buffer.Length; i++)
-                {
-                    boolParamValues[i] = buffer[i].Value;
-                }
-            }
+            // No longer caching values - we read directly from entity each frame
+            // This method is kept for potential future use (e.g., caching parameter names)
+            parameterNames.Clear();
         }
         
         private void SetFloatParameter(EntityManager em, int index, float value)
