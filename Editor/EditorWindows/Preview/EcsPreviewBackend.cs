@@ -1322,7 +1322,6 @@ namespace DMotion.Editor
             if (!em.HasBuffer<FloatParameter>(entity)) return;
             
             var floatParams = em.GetBuffer<FloatParameter>(entity);
-            bool updated = false;
             
             // Get blend parameter hash from current state
             if (currentState is LinearBlendStateAsset linearBlend && linearBlend.BlendParameter != null)

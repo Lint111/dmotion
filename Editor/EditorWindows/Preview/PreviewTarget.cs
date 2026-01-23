@@ -102,17 +102,17 @@ namespace DMotion.Editor
             switch (state)
             {
                 case SingleClipStateAsset single:
-                    if (single.Clip != null) yield return single.Clip;
+                    if (single.Clip?.Clip != null) yield return single.Clip.Clip;
                     break;
                     
                 case LinearBlendStateAsset linear:
                     foreach (var entry in linear.BlendClips)
-                        if (entry.Clip != null) yield return entry.Clip;
+                        if (entry.Clip?.Clip != null) yield return entry.Clip.Clip;
                     break;
                     
                 case Directional2DBlendStateAsset directional:
                     foreach (var entry in directional.BlendClips)
-                        if (entry.Clip != null) yield return entry.Clip;
+                        if (entry.Clip?.Clip != null) yield return entry.Clip.Clip;
                     break;
             }
         }
@@ -236,17 +236,17 @@ namespace DMotion.Editor
             switch (state)
             {
                 case SingleClipStateAsset single:
-                    if (single.Clip != null) yield return single.Clip;
+                    if (single.Clip?.Clip != null) yield return single.Clip.Clip;
                     break;
                     
                 case LinearBlendStateAsset linear:
                     foreach (var entry in linear.BlendClips)
-                        if (entry.Clip != null) yield return entry.Clip;
+                        if (entry.Clip?.Clip != null) yield return entry.Clip.Clip;
                     break;
                     
                 case Directional2DBlendStateAsset directional:
                     foreach (var entry in directional.BlendClips)
-                        if (entry.Clip != null) yield return entry.Clip;
+                        if (entry.Clip?.Clip != null) yield return entry.Clip.Clip;
                     break;
             }
         }
