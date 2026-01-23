@@ -135,8 +135,13 @@ namespace DMotion.Editor
             // In entity browser mode, we set up the preview scene automatically
             if (useEntityBrowserMode)
             {
-                sceneSetupRequested = true;
                 isInitialized = true;
+                
+                // Auto-setup preview scene if not already set up
+                if (!sceneManager.IsSetup)
+                {
+                    SetupPreviewScene();
+                }
                 return;
             }
             
