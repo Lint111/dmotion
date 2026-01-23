@@ -78,6 +78,7 @@ namespace DMotion.Editor
         
         public EcsPreviewBackend()
         {
+            Debug.Log("[EcsPreviewBackend] Constructor called - ECS Runtime backend created");
             worldService = new EcsPreviewWorldService();
             entityBrowser = new EcsEntityBrowser();
             sceneManager = EcsPreviewSceneManager.Instance;
@@ -116,6 +117,7 @@ namespace DMotion.Editor
         
         public void CreatePreviewForState(AnimationStateAsset state)
         {
+            Debug.Log($"[EcsPreviewBackend] CreatePreviewForState: {state?.name ?? "null"}, type={state?.GetType().Name ?? "null"}");
             currentState = state;
             transitionFromState = null;
             transitionToState = null;
@@ -1061,6 +1063,8 @@ namespace DMotion.Editor
         /// </summary>
         private void SetBlendParametersOnBrowserEntity()
         {
+            Debug.Log($"[EcsPreviewBackend] SetBlendParametersOnBrowserEntity called. currentState={currentState?.name ?? "null"}, hasSelection={entityBrowser.HasSelection}");
+            
             if (!entityBrowser.HasSelection)
             {
                 Debug.Log("[EcsPreviewBackend] SetBlendParameters: No entity selected");
