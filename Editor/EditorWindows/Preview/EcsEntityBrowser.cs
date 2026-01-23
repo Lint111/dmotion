@@ -255,11 +255,16 @@ namespace DMotion.Editor
         {
             if (!world.IsCreated) return;
             
-            var em = world.EntityManager;
-            
-            // Query for entities with AnimationStateMachine
-            using var query = em.CreateEntityQuery(ComponentType.ReadOnly<AnimationStateMachine>());
-            using var entities = query.ToEntityArray(Unity.Collections.Allocator.Temp);
+            try
+            {
+                var em = world.EntityManager;
+                
+                // Complete any pending jobs before querying (handles async SubScene loading)
+                em.CompleteAllTrackedJobs();
+                
+                // Query for entities with AnimationStateMachine
+                using var query = em.CreateEntityQuery(ComponentType.ReadOnly<AnimationStateMachine>());
+                using var entities = query.ToEntityArray(Unity.Collections.Allocator.Temp);
             
             foreach (var entity in entities)
             {
@@ -301,6 +306,16 @@ namespace DMotion.Editor
                 }
                 
                 cachedEntities.Add(info);
+            }
+            }
+            catch (InvalidOperationException)
+            {
+                // World is busy (e.g., SubScene loading) - skip this world for now
+                // Will retry on next refresh
+            }
+            catch (Exception e)
+            {
+                UnityEngine.Debug.LogWarning($"[EcsEntityBrowser] Error querying world {world.Name}: {e.Message}");
             }
         }
         
