@@ -256,10 +256,10 @@ namespace DMotion.Editor
                     CurrentState = new StateMachineStateRef { StateIndex = 0, AnimationStateId = 0 }
                 });
                 
-                // Add animation state buffers
+                // Add animation state buffer and components
                 em.AddBuffer<AnimationState>(previewEntity);
-                em.AddBuffer<AnimationStateTransition>(previewEntity);
-                em.AddBuffer<AnimationStateTransitionRequest>(previewEntity);
+                em.AddComponent(previewEntity, AnimationStateTransition.Null);
+                em.AddComponent(previewEntity, AnimationStateTransitionRequest.Null);
                 
                 // Add parameter buffers
                 em.AddBuffer<FloatParameter>(previewEntity);
@@ -311,7 +311,7 @@ namespace DMotion.Editor
             if (!IsInitialized || previewEntity == Entity.Null) return;
             
             var buffer = world.EntityManager.GetBuffer<FloatParameter>(previewEntity);
-            StateMachineParameterUtils.SetFloat(ref buffer, parameterHash, value);
+            buffer.SetValue(parameterHash, value);
         }
         
         /// <summary>
@@ -322,7 +322,7 @@ namespace DMotion.Editor
             if (!IsInitialized || previewEntity == Entity.Null) return;
             
             var buffer = world.EntityManager.GetBuffer<IntParameter>(previewEntity);
-            StateMachineParameterUtils.SetInt(ref buffer, parameterHash, value);
+            buffer.SetValue(parameterHash, value);
         }
         
         /// <summary>
@@ -333,7 +333,7 @@ namespace DMotion.Editor
             if (!IsInitialized || previewEntity == Entity.Null) return;
             
             var buffer = world.EntityManager.GetBuffer<BoolParameter>(previewEntity);
-            StateMachineParameterUtils.SetBool(ref buffer, parameterHash, value);
+            buffer.SetValue(parameterHash, value);
         }
         
         #endregion
@@ -393,26 +393,22 @@ namespace DMotion.Editor
                 
                 // Check for active transition
                 float transitionProgress = -1f;
-                if (em.HasBuffer<AnimationStateTransition>(previewEntity))
+                if (em.HasComponent<AnimationStateTransition>(previewEntity))
                 {
-                    var transitions = em.GetBuffer<AnimationStateTransition>(previewEntity);
-                    if (transitions.Length > 0)
+                    var activeTransition = em.GetComponentData<AnimationStateTransition>(previewEntity);
+                    if (activeTransition.IsValid && activeTransition.TransitionDuration > 0)
                     {
-                        var activeTransition = transitions[0];
-                        if (activeTransition.IsValid && activeTransition.TransitionDuration > 0)
+                        // Find the transitioning state to get progress
+                        if (em.HasBuffer<AnimationState>(previewEntity))
                         {
-                            // Find the transitioning state to get progress
-                            if (em.HasBuffer<AnimationState>(previewEntity))
+                            var states = em.GetBuffer<AnimationState>(previewEntity);
+                            for (int i = 0; i < states.Length; i++)
                             {
-                                var states = em.GetBuffer<AnimationState>(previewEntity);
-                                for (int i = 0; i < states.Length; i++)
+                                if (states[i].Id == activeTransition.AnimationStateId)
                                 {
-                                    if (states[i].Id == activeTransition.AnimationStateId)
-                                    {
-                                        transitionProgress = states[i].Time / activeTransition.TransitionDuration;
-                                        transitionProgress = Unity.Mathematics.math.saturate(transitionProgress);
-                                        break;
-                                    }
+                                    transitionProgress = states[i].Time / activeTransition.TransitionDuration;
+                                    transitionProgress = Unity.Mathematics.math.saturate(transitionProgress);
+                                    break;
                                 }
                             }
                         }
