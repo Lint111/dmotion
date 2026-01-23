@@ -80,7 +80,7 @@ namespace DMotion.Editor
         
         public PreviewMode Mode => PreviewMode.EcsRuntime;
         
-        public bool IsInitialized => isInitialized && worldService.IsInitialized;
+        public bool IsInitialized => isInitialized && (useEntityBrowserMode || worldService.IsInitialized);
         
         public string ErrorMessage => errorMessage;
         
