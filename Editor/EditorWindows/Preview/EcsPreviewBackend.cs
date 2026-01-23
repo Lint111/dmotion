@@ -40,10 +40,14 @@ namespace DMotion.Editor
         // Preview state
         private float normalizedTime;
         private float2 blendPosition;
+        private float2 targetBlendPosition;
         private float transitionProgress;
         private string errorMessage;
         private bool isInitialized;
         private bool entityCreated;
+        
+        // Blend smoothing
+        private const float BlendSmoothSpeed = 8f; // Higher = faster interpolation
         
         // Hybrid renderer for 3D preview (legacy - for isolated preview)
         private EcsHybridRenderer hybridRenderer;
@@ -487,25 +491,29 @@ namespace DMotion.Editor
         
         public void SetBlendPosition1D(float value)
         {
-            blendPosition = new float2(value, 0);
-            SetBlendParameters();
+            // Set target for smooth interpolation
+            targetBlendPosition = new float2(value, 0);
         }
         
         public void SetBlendPosition2D(float2 position)
         {
-            blendPosition = position;
-            SetBlendParameters();
+            // Set target for smooth interpolation
+            targetBlendPosition = position;
         }
         
         public void SetBlendPosition1DImmediate(float value)
         {
+            // Immediate - skip interpolation
             blendPosition = new float2(value, 0);
+            targetBlendPosition = blendPosition;
             SetBlendParameters();
         }
         
         public void SetBlendPosition2DImmediate(float2 position)
         {
+            // Immediate - skip interpolation
             blendPosition = position;
+            targetBlendPosition = position;
             SetBlendParameters();
         }
         
@@ -526,10 +534,112 @@ namespace DMotion.Editor
         
         private void SetBlendParameters()
         {
+            // In entity browser mode, modify the selected entity directly
+            if (useEntityBrowserMode)
+            {
+                SetBlendParametersOnBrowserEntity();
+                return;
+            }
+            
+            // Legacy isolated preview mode
             if (!worldService.IsInitialized) return;
             
-            // TODO: Phase 6 - Set actual parameters on entity
-            // This requires knowing the parameter hashes from the state asset
+            // TODO: Implement for isolated preview mode if needed
+        }
+        
+        /// <summary>
+        /// Sets blend parameters on the entity selected in the entity browser.
+        /// </summary>
+        private void SetBlendParametersOnBrowserEntity()
+        {
+            if (!entityBrowser.HasSelection) return;
+            
+            var entity = entityBrowser.SelectedEntity;
+            var world = entityBrowser.SelectedWorld;
+            
+            if (world == null || !world.IsCreated) return;
+            
+            var em = world.EntityManager;
+            if (!em.Exists(entity)) return;
+            
+            // Get the blend parameter hash from the current state
+            int paramHash = 0;
+            bool isIntParam = false;
+            int intRangeMin = 0;
+            int intRangeMax = 1;
+            
+            if (currentState is LinearBlendStateAsset linearBlend)
+            {
+                if (linearBlend.BlendParameter == null) return;
+                paramHash = linearBlend.BlendParameter.Hash;
+                isIntParam = linearBlend.UsesIntParameter;
+                intRangeMin = linearBlend.IntRangeMin;
+                intRangeMax = linearBlend.IntRangeMax;
+            }
+            else if (currentState is Directional2DBlendStateAsset directional2D)
+            {
+                // For 2D blend, set both X and Y parameters
+                if (directional2D.BlendParameterX != null && em.HasBuffer<FloatParameter>(entity))
+                {
+                    var buffer = em.GetBuffer<FloatParameter>(entity);
+                    SetFloatParameterByHash(buffer, directional2D.BlendParameterX.Hash, blendPosition.x);
+                }
+                if (directional2D.BlendParameterY != null && em.HasBuffer<FloatParameter>(entity))
+                {
+                    var buffer = em.GetBuffer<FloatParameter>(entity);
+                    SetFloatParameterByHash(buffer, directional2D.BlendParameterY.Hash, blendPosition.y);
+                }
+                return;
+            }
+            else
+            {
+                return; // Not a blend state
+            }
+            
+            // Set the parameter value
+            if (isIntParam)
+            {
+                if (!em.HasBuffer<IntParameter>(entity)) return;
+                var buffer = em.GetBuffer<IntParameter>(entity);
+                
+                // Convert blend position (0-1) to int range
+                int intValue = (int)math.lerp(intRangeMin, intRangeMax, blendPosition.x);
+                SetIntParameterByHash(buffer, paramHash, intValue);
+            }
+            else
+            {
+                if (!em.HasBuffer<FloatParameter>(entity)) return;
+                var buffer = em.GetBuffer<FloatParameter>(entity);
+                SetFloatParameterByHash(buffer, paramHash, blendPosition.x);
+            }
+        }
+        
+        private static void SetFloatParameterByHash(DynamicBuffer<FloatParameter> buffer, int hash, float value)
+        {
+            for (int i = 0; i < buffer.Length; i++)
+            {
+                if (buffer[i].Hash == hash)
+                {
+                    var param = buffer[i];
+                    param.Value = value;
+                    buffer[i] = param;
+                    return;
+                }
+            }
+        }
+        
+        private static void SetIntParameterByHash(DynamicBuffer<IntParameter> buffer, int hash, int value)
+        {
+            for (int i = 0; i < buffer.Length; i++)
+            {
+                if (buffer[i].Hash == hash)
+                {
+                    var param = buffer[i];
+                    param.Value = value;
+                    buffer[i] = param;
+                    return;
+                }
+            }
         }
         
         #endregion
@@ -538,10 +648,40 @@ namespace DMotion.Editor
         
         public bool Tick(float deltaTime)
         {
-            if (!worldService.IsInitialized) return false;
+            bool needsRepaint = false;
+            
+            // Smooth blend position interpolation
+            if (math.any(blendPosition != targetBlendPosition))
+            {
+                // Lerp towards target
+                var diff = targetBlendPosition - blendPosition;
+                var maxStep = BlendSmoothSpeed * deltaTime;
+                
+                if (math.length(diff) <= maxStep)
+                {
+                    blendPosition = targetBlendPosition;
+                }
+                else
+                {
+                    blendPosition += math.normalize(diff) * maxStep;
+                }
+                
+                // Update entity parameters with new blend position
+                SetBlendParameters();
+                needsRepaint = true;
+            }
+            
+            // Entity browser mode doesn't need world update (game handles it)
+            if (useEntityBrowserMode)
+            {
+                return needsRepaint;
+            }
+            
+            // Legacy isolated preview mode
+            if (!worldService.IsInitialized) return needsRepaint;
             
             worldService.Update(deltaTime);
-            return false; // No smooth transitions in ECS mode (handled by systems)
+            return needsRepaint;
         }
         
         public void Draw(Rect rect)
