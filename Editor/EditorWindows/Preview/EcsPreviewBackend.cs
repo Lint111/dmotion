@@ -579,7 +579,128 @@ namespace DMotion.Editor
             // Set parameters to satisfy transition conditions
             SetTransitionConditionsOnEntity(em, entity, transition);
             
-            Debug.Log($"[EcsPreviewBackend] Set conditions for transition to {transitionToState.name}");
+            // Force-create the transition directly for preview scrubbing
+            ForceStartTransitionOnBrowserEntity(em, entity, transition);
+            
+            Debug.Log($"[EcsPreviewBackend] Set conditions and started transition to {transitionToState.name}");
+        }
+        
+        /// <summary>
+        /// Force-creates a transition on the entity for preview purposes.
+        /// This bypasses the normal state machine evaluation and directly sets up the transition.
+        /// </summary>
+        private void ForceStartTransitionOnBrowserEntity(EntityManager em, Entity entity, StateOutTransition transitionDef)
+        {
+            if (transitionToState == null || stateMachineAsset == null) return;
+            
+            // Find the target state index in the flattened state list
+            int toStateIndex = -1;
+            for (int i = 0; i < stateMachineAsset.States.Count; i++)
+            {
+                if (stateMachineAsset.States[i] == transitionToState)
+                {
+                    toStateIndex = i;
+                    break;
+                }
+            }
+            
+            if (toStateIndex < 0)
+            {
+                Debug.LogWarning($"[EcsPreviewBackend] Could not find state index for {transitionToState.name}");
+                return;
+            }
+            
+            // Find from state index for curve lookup
+            int fromStateIndex = -1;
+            int transitionIndex = -1;
+            var curveSource = TransitionSource.State;
+            
+            if (transitionFromState != null)
+            {
+                for (int i = 0; i < stateMachineAsset.States.Count; i++)
+                {
+                    if (stateMachineAsset.States[i] == transitionFromState)
+                    {
+                        fromStateIndex = i;
+                        break;
+                    }
+                }
+                
+                // Find transition index within the from state's transitions
+                if (transitionFromState.OutTransitions != null)
+                {
+                    for (int i = 0; i < transitionFromState.OutTransitions.Count; i++)
+                    {
+                        if (transitionFromState.OutTransitions[i] == transitionDef)
+                        {
+                            transitionIndex = i;
+                            break;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // Any State transition
+                curveSource = TransitionSource.AnyState;
+                if (stateMachineAsset.AnyStateTransitions != null)
+                {
+                    for (int i = 0; i < stateMachineAsset.AnyStateTransitions.Count; i++)
+                    {
+                        if (stateMachineAsset.AnyStateTransitions[i] == transitionDef)
+                        {
+                            transitionIndex = i;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Create or update the AnimationStateTransition component
+            var transition = new AnimationStateTransition
+            {
+                AnimationStateId = (sbyte)toStateIndex,
+                TransitionDuration = transitionDef.TransitionDuration,
+                CurveSourceStateIndex = (short)fromStateIndex,
+                CurveSourceTransitionIndex = (short)transitionIndex,
+                CurveSource = curveSource
+            };
+            
+            em.SetComponentData(entity, transition);
+            
+            // Ensure an AnimationState exists for the to-state
+            // The ECS systems should handle this, but we need to initialize it for preview
+            EnsureAnimationStateExists(em, entity, toStateIndex);
+            
+            Debug.Log($"[EcsPreviewBackend] Force-started transition to state {toStateIndex} ({transitionToState.name})");
+        }
+        
+        /// <summary>
+        /// Ensures an AnimationState exists for the given state index.
+        /// Creates one if necessary using the state machine blob data.
+        /// </summary>
+        private void EnsureAnimationStateExists(EntityManager em, Entity entity, int stateIndex)
+        {
+            if (!em.HasBuffer<AnimationState>(entity)) return;
+            
+            var animationStates = em.GetBuffer<AnimationState>(entity);
+            
+            // Check if an animation state with this ID already exists
+            int existingIndex = animationStates.IdToIndex((byte)stateIndex);
+            if (existingIndex >= 0)
+            {
+                // State exists, ensure it's properly initialized
+                var state = animationStates[existingIndex];
+                state.Time = 0f;
+                state.Weight = 0f; // Will be controlled by transition progress
+                animationStates[existingIndex] = state;
+                return;
+            }
+            
+            // State doesn't exist - we need to create it
+            // This requires access to the state machine blob to know clip count, speed, etc.
+            // For now, log a warning - the state should have been created by the ECS systems
+            Debug.LogWarning($"[EcsPreviewBackend] AnimationState {stateIndex} doesn't exist. ECS systems may need to run first.");
         }
         
         /// <summary>
