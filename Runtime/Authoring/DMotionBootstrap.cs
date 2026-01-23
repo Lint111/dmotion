@@ -7,44 +7,29 @@ using Unity.Entities;
 namespace DMotion.Authoring
 {
     /// <summary>
-    /// Singleton baking bootstrap for DMotion. Ensures DMotion and Kinemation
+    /// Baking bootstrap for DMotion. Ensures DMotion and Kinemation
     /// SmartBlobbers are registered during subscene baking.
-    /// Uses singleton pattern to prevent multiple bootstrap conflicts.
     /// </summary>
     [UnityEngine.Scripting.Preserve]
-    public class DMotionBakingBootstrapSingleton : ICustomBakingBootstrap
+    public class DMotionBakingBootstrapUnified : ICustomBakingBootstrap
     {
-        private static bool isInstalled;
-        
         public void InitializeBakingForAllWorlds(ref CustomBakingBootstrapContext context)
         {
-            if (isInstalled) return;
-            isInstalled = true;
-            
+            // Always install - Unity manages when this is called
             KinemationBakingBootstrap.InstallKinemation(ref context);
             DMotionBakingBootstrap.InstallDMotionBakersAndSystems(ref context);
         }
     }
 
     /// <summary>
-    /// Singleton runtime bootstrap for DMotion. Creates a LatiosWorld with
-    /// Kinemation installed. Uses singleton pattern to prevent multiple bootstrap conflicts.
+    /// Runtime bootstrap for DMotion. Creates a LatiosWorld with Kinemation installed.
+    /// This is the unified bootstrap - no other ICustomBootstrap should exist in the project.
     /// </summary>
     [UnityEngine.Scripting.Preserve]
     public class DMotionRuntimeBootstrap : ICustomBootstrap
     {
-        private static bool isInitialized;
-        
         public bool Initialize(string defaultWorldName)
         {
-            // Singleton check - only initialize once
-            if (isInitialized)
-            {
-                UnityEngine.Debug.LogWarning("[DMotionRuntimeBootstrap] Already initialized, skipping duplicate initialization.");
-                return true;
-            }
-            isInitialized = true;
-            
             var world = new LatiosWorld(defaultWorldName);
             World.DefaultGameObjectInjectionWorld = world;
 
@@ -56,15 +41,6 @@ namespace DMotion.Authoring
 
             ScriptBehaviourUpdateOrder.AppendWorldToCurrentPlayerLoop(world);
             return true;
-        }
-        
-        /// <summary>
-        /// Resets the singleton state. Call this when exiting play mode in editor.
-        /// </summary>
-        [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void ResetState()
-        {
-            isInitialized = false;
         }
     }
 }
