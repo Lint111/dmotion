@@ -306,13 +306,15 @@ namespace DMotion.Editor
         
         private string GetEntityName(EntityManager em, Entity entity)
         {
-            // Try to get name from various sources
-            #if UNITY_EDITOR
-            if (em.HasComponent<Unity.Entities.Name>(entity))
+            // Try to get name from debug component
+            if (em.HasComponent<AnimationStateMachineDebug>(entity))
             {
-                return em.GetComponentData<Unity.Entities.Name>(entity).ToString();
+                var debug = em.GetComponentObject<AnimationStateMachineDebug>(entity);
+                if (debug?.StateMachineAsset != null)
+                {
+                    return debug.StateMachineAsset.name;
+                }
             }
-            #endif
             
             return $"Entity {entity.Index}:{entity.Version}";
         }
