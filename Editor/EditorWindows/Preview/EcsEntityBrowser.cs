@@ -159,6 +159,20 @@ namespace DMotion.Editor
             }
             else
             {
+                // Show Play mode hint for 3D rendering
+                if (!EditorApplication.isPlaying)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Enter Play mode for 3D rendering.\n" +
+                        "Parameter editing works in Edit mode.",
+                        MessageType.Info);
+                    
+                    if (GUILayout.Button("Enter Play Mode", GUILayout.Height(24)))
+                    {
+                        EditorApplication.isPlaying = true;
+                    }
+                    EditorGUILayout.Space(5);
+                }
                 // Entity list
                 entityListScroll = EditorGUILayout.BeginScrollView(entityListScroll);
                 
