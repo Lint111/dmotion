@@ -72,11 +72,13 @@ namespace DMotion
                     ref buffers,
                     floatParameters);
 
-                animationStateTransitionRequest = new AnimationStateTransitionRequest
-                {
-                    AnimationStateId = stateMachine.CurrentState.AnimationStateId,
-                    TransitionDuration = 0
-                };
+                // Initial state has no transition curve (instant transition)
+                animationStateTransitionRequest = AnimationStateTransitionRequest.New(
+                    (byte)stateMachine.CurrentState.AnimationStateId,
+                    transitionDuration: 0,
+                    curveSourceStateIndex: -1,
+                    curveSourceTransitionIndex: -1,
+                    curveSource: TransitionSource.State);
             }
 
             // Evaluate transitions
@@ -121,6 +123,9 @@ namespace DMotion
                 // - 1000+: Exit transition (encoded as 1000 + exitTransitionIndex)
                 short toStateIndex;
                 float transitionDuration;
+                short curveSourceStateIndex;
+                short curveSourceTransitionIndex;
+                TransitionSource curveSource;
 
                 if (transitionIndex < 0)
                 {
@@ -129,6 +134,11 @@ namespace DMotion
                     ref var anyTransition = ref stateMachineBlob.AnyStateTransitions[anyTransitionIndex];
                     toStateIndex = anyTransition.ToStateIndex;
                     transitionDuration = anyTransition.TransitionDuration;
+                    
+                    // Curve lookup: Any State transitions use AnyStateTransitions array
+                    curveSourceStateIndex = -1;  // Not applicable for Any State
+                    curveSourceTransitionIndex = anyTransitionIndex;
+                    curveSource = TransitionSource.AnyState;
                 }
                 else if (transitionIndex >= ExitTransitionIndexOffset)
                 {
@@ -139,6 +149,11 @@ namespace DMotion
                     ref var exitTransition = ref exitGroup.ExitTransitions[exitTransitionIndex];
                     toStateIndex = exitTransition.ToStateIndex;
                     transitionDuration = exitTransition.TransitionDuration;
+                    
+                    // Exit transitions have no curve - parent state machine handles the blend
+                    curveSourceStateIndex = -1;
+                    curveSourceTransitionIndex = -1;
+                    curveSource = TransitionSource.Exit;
                 }
                 else
                 {
@@ -146,6 +161,11 @@ namespace DMotion
                     ref var transition = ref stateMachine.CurrentStateBlob.Transitions[transitionIndex];
                     toStateIndex = transition.ToStateIndex;
                     transitionDuration = transition.TransitionDuration;
+                    
+                    // Curve lookup: State transitions use States[fromState].Transitions array
+                    curveSourceStateIndex = (short)stateMachine.CurrentState.StateIndex;
+                    curveSourceTransitionIndex = transitionIndex;
+                    curveSource = TransitionSource.State;
                 }
 
                 // All states are leaf states (Single or LinearBlend) - no hierarchy navigation needed
@@ -158,11 +178,12 @@ namespace DMotion
                     ref buffers,
                     floatParameters);
 
-                animationStateTransitionRequest = new AnimationStateTransitionRequest
-                {
-                    AnimationStateId = stateMachine.CurrentState.AnimationStateId,
-                    TransitionDuration = transitionDuration,
-                };
+                animationStateTransitionRequest = AnimationStateTransitionRequest.New(
+                    (byte)stateMachine.CurrentState.AnimationStateId,
+                    transitionDuration,
+                    curveSourceStateIndex,
+                    curveSourceTransitionIndex,
+                    curveSource);
             }
         }
 

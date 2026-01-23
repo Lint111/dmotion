@@ -43,6 +43,9 @@ namespace DMotion.Editor
 
                         var conditionsProperty =
                             outTransitionProperty.FindPropertyRelative(nameof(StateOutTransition.Conditions));
+                        
+                        var blendCurveProperty =
+                            outTransitionProperty.FindPropertyRelative(nameof(StateOutTransition.BlendCurve));
 
                         StateMachineEditorUtils.DrawTransitionSummary(
                             model.FromState,
@@ -56,6 +59,7 @@ namespace DMotion.Editor
                         }
 
                         EditorGUILayout.PropertyField(transitionDurationProperty, GUIContentCache.Duration);
+                        BlendCurveDrawer.DrawCurveFieldLayout(blendCurveProperty, GUIContentCache.BlendCurve);
                         EditorGUILayout.PropertyField(conditionsProperty);
                     }
                 }

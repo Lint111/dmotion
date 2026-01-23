@@ -62,6 +62,12 @@ namespace DMotion.Authoring
         internal UnsafeList<BoolTransition> BoolTransitions;
         internal UnsafeList<IntTransition> IntTransitions;
         internal bool CanTransitionToSelf;
+        
+        /// <summary>
+        /// Hermite spline keyframes for custom blend curve.
+        /// Empty = linear (fast-path). Populated only for non-linear curves.
+        /// </summary>
+        internal UnsafeList<CurveKeyframe> CurveKeyframes;
     }
 
 
@@ -163,6 +169,15 @@ namespace DMotion.Authoring
                                 transitionConversionData.IntTransitions.Length);
                         else
                             builder.Allocate(ref transitions[transitionIndex].IntTransitions, 0);
+                        
+                        // Curve keyframes (empty = linear fast-path)
+                        if (transitionConversionData.CurveKeyframes.IsCreated && transitionConversionData.CurveKeyframes.Length > 0)
+                            builder.ConstructFromNativeArray(
+                                ref transitions[transitionIndex].CurveKeyframes,
+                                transitionConversionData.CurveKeyframes.Ptr,
+                                transitionConversionData.CurveKeyframes.Length);
+                        else
+                            builder.Allocate(ref transitions[transitionIndex].CurveKeyframes, 0);
                     }
                 }
             }
@@ -257,6 +272,15 @@ namespace DMotion.Authoring
                             anyTransitionConversionData.IntTransitions.Length);
                     else
                         builder.Allocate(ref anyStateTransitions[i].IntTransitions, 0);
+                    
+                    // Curve keyframes (empty = linear fast-path)
+                    if (anyTransitionConversionData.CurveKeyframes.IsCreated && anyTransitionConversionData.CurveKeyframes.Length > 0)
+                        builder.ConstructFromNativeArray(
+                            ref anyStateTransitions[i].CurveKeyframes,
+                            anyTransitionConversionData.CurveKeyframes.Ptr,
+                            anyTransitionConversionData.CurveKeyframes.Length);
+                    else
+                        builder.Allocate(ref anyStateTransitions[i].CurveKeyframes, 0);
                 }
             }
 
@@ -333,6 +357,8 @@ namespace DMotion.Authoring
                                 transition.BoolTransitions.Dispose();
                             if (transition.IntTransitions.IsCreated)
                                 transition.IntTransitions.Dispose();
+                            if (transition.CurveKeyframes.IsCreated)
+                                transition.CurveKeyframes.Dispose();
                         }
                         state.Transitions.Dispose();
                     }
@@ -374,6 +400,8 @@ namespace DMotion.Authoring
                         anyTransition.BoolTransitions.Dispose();
                     if (anyTransition.IntTransitions.IsCreated)
                         anyTransition.IntTransitions.Dispose();
+                    if (anyTransition.CurveKeyframes.IsCreated)
+                        anyTransition.CurveKeyframes.Dispose();
                 }
                 AnyStateTransitions.Dispose();
             }
@@ -396,6 +424,8 @@ namespace DMotion.Authoring
                                 exitTransition.BoolTransitions.Dispose();
                             if (exitTransition.IntTransitions.IsCreated)
                                 exitTransition.IntTransitions.Dispose();
+                            if (exitTransition.CurveKeyframes.IsCreated)
+                                exitTransition.CurveKeyframes.Dispose();
                         }
                         exitGroup.ExitTransitions.Dispose();
                     }

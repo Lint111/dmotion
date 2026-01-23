@@ -519,3 +519,5 @@ serializedObject.ApplyModifiedProperties();
 ## Related Documents
 
 - **[EcsPreviewAndRigBinding.md](./EcsPreviewAndRigBinding.md)** - ECS preview world + rig binding feature plan (builds on this work)
+- **[UIToolkitMigration.md](./UIToolkitMigration.md)** - UIToolkit migration audit (✅ Complete)
+- **[TransitionBlendCurve.md](./TransitionBlendCurve.md)** - Transition curve runtime support (Planned)

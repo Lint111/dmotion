@@ -163,20 +163,12 @@ namespace DMotion.Editor
         {
             var header = new VisualElement();
             header.AddToClassList("section-header");
-            header.style.flexDirection = FlexDirection.Row;
-            header.style.paddingBottom = 4;
-            header.style.borderBottomWidth = 1;
-            header.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
-            header.style.marginBottom = 8;
 
             var typeLabel = new Label(type);
             typeLabel.AddToClassList("header-type");
-            typeLabel.style.color = new Color(0.6f, 0.6f, 0.6f);
-            typeLabel.style.marginRight = 8;
 
             var nameLabel = new Label(name);
             nameLabel.AddToClassList("header-name");
-            nameLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
 
             header.Add(typeLabel);
             header.Add(nameLabel);
@@ -195,13 +187,9 @@ namespace DMotion.Editor
         {
             var row = new VisualElement();
             row.AddToClassList("property-row");
-            row.style.flexDirection = FlexDirection.Row;
-            row.style.marginBottom = 2;
 
             var labelElement = new Label(label);
             labelElement.AddToClassList("property-label");
-            labelElement.style.width = 100;
-            labelElement.style.minWidth = 100;
 
             var valueElement = new Label(value);
             valueElement.AddToClassList("property-value");
@@ -228,28 +216,20 @@ namespace DMotion.Editor
 
             var container = new VisualElement();
             container.AddToClassList("property-row");
-            container.style.flexDirection = FlexDirection.Row;
-            container.style.marginBottom = 2;
 
             var labelElement = new Label(label);
             labelElement.AddToClassList("property-label");
-            labelElement.style.width = 100;
-            labelElement.style.minWidth = 100;
             container.Add(labelElement);
 
             var valueContainer = new VisualElement();
-            valueContainer.style.flexDirection = FlexDirection.Row;
-            valueContainer.style.flexGrow = 1;
+            valueContainer.AddToClassList("slider-value-container");
 
             var slider = new Slider(min, max);
             slider.AddToClassList("property-slider");
-            slider.style.flexGrow = 1;
             slider.bindingPath = propertyName;
             
             var floatField = new FloatField();
             floatField.AddToClassList("property-float-field");
-            floatField.style.width = FloatFieldWidth;
-            floatField.style.marginLeft = 4;
             floatField.bindingPath = propertyName;
             
             if (onChanged != null)
@@ -266,9 +246,7 @@ namespace DMotion.Editor
             if (!string.IsNullOrEmpty(suffix))
             {
                 var suffixLabel = new Label(suffix);
-                suffixLabel.AddToClassList("property-suffix");
-                suffixLabel.style.marginLeft = 2;
-                suffixLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
+                suffixLabel.AddToClassList("suffix-label");
                 valueContainer.Add(suffixLabel);
             }
 
@@ -289,13 +267,9 @@ namespace DMotion.Editor
 
             var container = new VisualElement();
             container.AddToClassList("property-row");
-            container.style.flexDirection = FlexDirection.Row;
-            container.style.marginBottom = 2;
 
             var labelElement = new Label(label);
             labelElement.AddToClassList("property-label");
-            labelElement.style.width = 100;
-            labelElement.style.minWidth = 100;
             container.Add(labelElement);
 
             var toggle = new Toggle();
@@ -343,18 +317,15 @@ namespace DMotion.Editor
             {
                 var speedParamContainer = new VisualElement();
                 speedParamContainer.AddToClassList("property-row");
-                speedParamContainer.style.flexDirection = FlexDirection.Row;
-                speedParamContainer.style.marginBottom = 2;
                 
                 var speedParamLabel = new Label("Speed Param");
                 speedParamLabel.AddToClassList("property-label");
-                speedParamLabel.style.width = 100;
-                speedParamLabel.style.minWidth = 100;
                 speedParamLabel.tooltip = "Parameter that controls playback speed at runtime";
                 speedParamContainer.Add(speedParamLabel);
                 
                 var speedParamValue = new Label(speedParamProp.objectReferenceValue.name);
-                speedParamValue.style.color = PreviewEditorColors.DimText;
+                speedParamValue.AddToClassList("property-value");
+                speedParamValue.AddToClassList("property-value--dim");
                 speedParamContainer.Add(speedParamValue);
                 
                 propertiesSection.Add(speedParamContainer);
@@ -439,7 +410,6 @@ namespace DMotion.Editor
             {
                 var outFoldout = new Foldout { text = $"Out Transitions ({outTransitions.Count})", value = true };
                 outFoldout.AddToClassList("navigation-sub-foldout");
-                outFoldout.style.marginLeft = 8;
                 
                 foreach (var transition in outTransitions)
                 {
@@ -448,8 +418,7 @@ namespace DMotion.Editor
                         transition.ToState?.name ?? "(exit)",
                         $"{transition.TransitionDuration:F2}s",
                         transition.ToState != null ? $"Click to preview transition to {transition.ToState.name}" : null,
-                        PreviewEditorColors.ToState,
-                        PreviewEditorColors.ToStateHighlight,
+                        "to",
                         transition.ToState != null ? () => AnimationPreviewEvents.RaiseNavigateToTransition(state, transition.ToState, false) : null);
                     outFoldout.Add(row);
                 }
@@ -463,7 +432,6 @@ namespace DMotion.Editor
             {
                 var inFoldout = new Foldout { text = $"In Transitions ({inCount})", value = true };
                 inFoldout.AddToClassList("navigation-sub-foldout");
-                inFoldout.style.marginLeft = 8;
                 
                 // Regular incoming transitions
                 foreach (var fromState in incomingStates)
@@ -473,8 +441,7 @@ namespace DMotion.Editor
                         fromState.name,
                         null,
                         $"Click to preview transition from {fromState.name}",
-                        PreviewEditorColors.FromState,
-                        PreviewEditorColors.FromStateHighlight,
+                        "from",
                         () => AnimationPreviewEvents.RaiseNavigateToTransition(fromState, state, false));
                     inFoldout.Add(row);
                 }
@@ -487,8 +454,7 @@ namespace DMotion.Editor
                         "Any State",
                         $"{transition.TransitionDuration:F2}s",
                         "Click to preview Any State transition",
-                        new Color(0.7f, 0.5f, 0.8f), // Purple
-                        new Color(0.9f, 0.7f, 1f),
+                        "any",
                         () => AnimationPreviewEvents.RaiseNavigateToTransition(null, state, true));
                     inFoldout.Add(row);
                 }
@@ -502,43 +468,38 @@ namespace DMotion.Editor
         /// <summary>
         /// Creates a single clickable transition row.
         /// </summary>
+        /// <param name="variant">Color variant: "from", "to", or "any"</param>
         private VisualElement CreateTransitionRow(
             string arrow, string stateName, string duration, string tooltip,
-            Color normalColor, Color hoverColor, Action onClick)
+            string variant, Action onClick)
         {
             var row = new VisualElement();
             row.AddToClassList("transition-row");
-            row.style.flexDirection = FlexDirection.Row;
-            row.style.paddingTop = 2;
-            row.style.paddingBottom = 2;
-            row.style.paddingLeft = 4;
             
             // Arrow
             var arrowLabel = new Label(arrow);
-            arrowLabel.style.color = PreviewEditorColors.DimText;
-            arrowLabel.style.marginRight = 6;
-            arrowLabel.style.width = 14;
+            arrowLabel.AddToClassList("transition-row__arrow");
             row.Add(arrowLabel);
             
             // State name (clickable)
             var nameLabel = new Label(stateName);
-            nameLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+            nameLabel.AddToClassList("transition-row__name");
             
             if (onClick != null)
             {
-                nameLabel.style.color = normalColor;
+                nameLabel.AddToClassList($"transition-row__name--{variant}");
                 nameLabel.tooltip = tooltip;
                 
-                // Hover effects on entire row
+                // Hover effects via CSS class toggling
                 row.RegisterCallback<MouseEnterEvent>(_ =>
                 {
-                    nameLabel.style.color = hoverColor;
-                    row.style.backgroundColor = new Color(0.3f, 0.3f, 0.3f, 0.3f);
+                    row.EnableInClassList("transition-row--hover", true);
+                    nameLabel.EnableInClassList("transition-row__name--hover", true);
                 });
                 row.RegisterCallback<MouseLeaveEvent>(_ =>
                 {
-                    nameLabel.style.color = normalColor;
-                    row.style.backgroundColor = Color.clear;
+                    row.EnableInClassList("transition-row--hover", false);
+                    nameLabel.EnableInClassList("transition-row__name--hover", false);
                 });
                 row.RegisterCallback<MouseDownEvent>(evt =>
                 {
@@ -548,7 +509,7 @@ namespace DMotion.Editor
             }
             else
             {
-                nameLabel.style.color = PreviewEditorColors.DimText;
+                nameLabel.AddToClassList("transition-row__name--dim");
             }
             row.Add(nameLabel);
             
@@ -556,8 +517,7 @@ namespace DMotion.Editor
             if (!string.IsNullOrEmpty(duration))
             {
                 var durationLabel = new Label($" ({duration})");
-                durationLabel.style.color = PreviewEditorColors.DimText;
-                durationLabel.style.fontSize = 10;
+                durationLabel.AddToClassList("transition-row__duration");
                 row.Add(durationLabel);
             }
             

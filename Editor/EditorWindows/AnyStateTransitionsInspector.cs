@@ -113,6 +113,8 @@ namespace DMotion.Editor
                 transitionProperty.FindPropertyRelative(nameof(StateOutTransition.EndTime));
             var transitionDurationProperty =
                 transitionProperty.FindPropertyRelative(nameof(StateOutTransition.TransitionDuration));
+            var blendCurveProperty =
+                transitionProperty.FindPropertyRelative(nameof(StateOutTransition.BlendCurve));
             var conditionsProperty =
                 transitionProperty.FindPropertyRelative(nameof(StateOutTransition.Conditions));
 
@@ -124,6 +126,7 @@ namespace DMotion.Editor
                 EditorGUILayout.PropertyField(endTimeProperty, GUIContentCache.ExitTime);
             }
             EditorGUILayout.PropertyField(transitionDurationProperty, GUIContentCache.BlendDuration);
+            BlendCurveDrawer.DrawCurveFieldLayout(blendCurveProperty, GUIContentCache.BlendCurve);
             EditorGUILayout.PropertyField(conditionsProperty, GUIContentCache.Conditions);
             
             EditorGUILayout.Space(8);

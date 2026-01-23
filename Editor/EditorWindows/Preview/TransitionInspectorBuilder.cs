@@ -15,10 +15,9 @@ namespace DMotion.Editor
     {
         #region Constants
         
+        private const string UssPath = "Packages/com.gamedevpro.dmotion/Editor/EditorWindows/Preview/TransitionInspector.uss";
         private const float MaxTransitionDuration = 2f;
         private const float MaxExitTime = 5f;
-        private const float BlendSpace1DHeight = 60f;
-        private const float BlendSpace2DHeight = 150f;
         
         // Use shared constant
         private const float FloatFieldWidth = PreviewEditorConstants.FloatFieldWidth;
@@ -50,6 +49,10 @@ namespace DMotion.Editor
         // Cached blend curve for timeline
         private AnimationCurve cachedBlendCurve;
         
+        // Cached keyframes for curve evaluation (converted from AnimationCurve)
+        // Uses same Hermite evaluation as runtime for identical behavior
+        private CurveKeyframe[] cachedBlendCurveKeyframes;
+        
         // Blend space visual elements - using base class references (polymorphism)
         private BlendSpaceVisualElement fromBlendSpaceElement;
         private BlendSpaceVisualElement toBlendSpaceElement;
@@ -57,11 +60,6 @@ namespace DMotion.Editor
         // Cached event handlers for cleanup
         private Action<Vector2> fromBlendPositionHandler;
         private Action<Vector2> toBlendPositionHandler;
-        
-        // Cached arrays for curve preview IMGUI drawing (still used for curve preview)
-        private const int CurvePreviewSegments = 30;
-        private static readonly Vector3[] cachedCurvePreviewPoints = new Vector3[CurvePreviewSegments + 1];
-        private static GUIStyle cachedCurvePreviewLabelStyle;
         
         #endregion
         
@@ -91,6 +89,13 @@ namespace DMotion.Editor
         /// </summary>
         public bool IsPlaying => timeline?.IsPlaying ?? false;
         
+        /// <summary>
+        /// Cached blend curve keyframes for evaluation using CurveUtils.
+        /// Null if curve is linear (fast-path - use linear t instead).
+        /// Uses same Hermite evaluation as runtime for identical preview behavior.
+        /// </summary>
+        public CurveKeyframe[] BlendCurveKeyframes => cachedBlendCurveKeyframes;
+        
         #endregion
         
         #region Public API
@@ -111,6 +116,13 @@ namespace DMotion.Editor
             
             var container = new VisualElement();
             container.AddToClassList("transition-inspector");
+            
+            // Load stylesheet
+            var uss = AssetDatabase.LoadAssetAtPath<StyleSheet>(UssPath);
+            if (uss != null && !container.styleSheets.Contains(uss))
+            {
+                container.styleSheets.Add(uss);
+            }
             
             // Header with clickable state names
             var header = CreateTransitionHeader(fromState, toState, isAnyState);
@@ -133,6 +145,8 @@ namespace DMotion.Editor
             transitionDuration = transition?.TransitionDuration ?? 0.25f;
             transitionExitTime = transition?.EndTime ?? 0.75f;  // Exit time = To bar position
             cachedBlendCurve = transition?.BlendCurve ?? AnimationCurve.Linear(0f, 1f, 1f, 0f);
+            // Convert to keyframes for runtime-identical evaluation
+            cachedBlendCurveKeyframes = CurveUtils.ConvertAnimationCurveManaged(cachedBlendCurve);
             
             // Properties section
             var propertiesSection = CreateSection("Properties");
@@ -198,6 +212,7 @@ namespace DMotion.Editor
             cachedExitTimeProperty = null;
             cachedBlendCurveProperty = null;
             cachedBlendCurve = null;
+            cachedBlendCurveKeyframes = null;
             
             transitionFrom = null;
             transitionTo = null;
@@ -222,14 +237,19 @@ namespace DMotion.Editor
             var container = new VisualElement();
             container.AddToClassList("transition-inspector");
             
+            // Load stylesheet
+            var uss = AssetDatabase.LoadAssetAtPath<StyleSheet>(UssPath);
+            if (uss != null && !container.styleSheets.Contains(uss))
+            {
+                container.styleSheets.Add(uss);
+            }
+            
             var header = CreateSectionHeader("Any State", "Global transition source");
             container.Add(header);
             
             var infoSection = CreateSection("Info");
             var infoLabel = new Label("Any State transitions can target any state in the machine.\nSelect a transition to see its properties.");
             infoLabel.AddToClassList("info-message");
-            infoLabel.style.whiteSpace = WhiteSpace.Normal;
-            infoLabel.style.color = PreviewEditorColors.DimText;
             infoSection.Add(infoLabel);
             container.Add(infoSection);
             
@@ -244,20 +264,12 @@ namespace DMotion.Editor
         {
             var header = new VisualElement();
             header.AddToClassList("section-header");
-            header.style.flexDirection = FlexDirection.Row;
-            header.style.paddingBottom = 4;
-            header.style.borderBottomWidth = 1;
-            header.style.borderBottomColor = PreviewEditorColors.Border;
-            header.style.marginBottom = 8;
 
             var typeLabel = new Label(type);
             typeLabel.AddToClassList("header-type");
-            typeLabel.style.color = PreviewEditorColors.DimText;
-            typeLabel.style.marginRight = 8;
 
             var nameLabel = new Label(name);
             nameLabel.AddToClassList("header-name");
-            nameLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
 
             header.Add(typeLabel);
             header.Add(nameLabel);
@@ -272,70 +284,61 @@ namespace DMotion.Editor
         {
             var header = new VisualElement();
             header.AddToClassList("section-header");
-            header.style.flexDirection = FlexDirection.Row;
-            header.style.flexWrap = Wrap.Wrap;
-            header.style.paddingBottom = 4;
-            header.style.borderBottomWidth = 1;
-            header.style.borderBottomColor = PreviewEditorColors.Border;
-            header.style.marginBottom = 8;
+            header.AddToClassList("section-header--wrap");
 
             // Type label
             var typeLabel = new Label("Transition");
             typeLabel.AddToClassList("header-type");
-            typeLabel.style.color = PreviewEditorColors.DimText;
-            typeLabel.style.marginRight = 8;
             header.Add(typeLabel);
 
             // From state - clickable if it's an actual state (not Any State)
             string fromName = isAnyState ? "Any State" : (fromState?.name ?? "?");
             var fromLabel = new Label(fromName);
-            fromLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+            fromLabel.AddToClassList("state-link");
             
             if (!isAnyState && fromState != null)
             {
-                fromLabel.style.color = PreviewEditorColors.FromState;
-                fromLabel.style.cursor = StyleKeyword.None;
+                fromLabel.AddToClassList("state-link--from");
                 fromLabel.tooltip = $"Click to preview {fromState.name}";
                 fromLabel.RegisterCallback<MouseDownEvent>(evt =>
                 {
                     AnimationPreviewEvents.RaiseNavigateToState(fromState);
                     evt.StopPropagation();
                 });
-                fromLabel.RegisterCallback<MouseEnterEvent>(_ => fromLabel.style.color = PreviewEditorColors.FromStateHighlight);
-                fromLabel.RegisterCallback<MouseLeaveEvent>(_ => fromLabel.style.color = PreviewEditorColors.FromState);
+                fromLabel.RegisterCallback<MouseEnterEvent>(_ => fromLabel.EnableInClassList("state-link--hover", true));
+                fromLabel.RegisterCallback<MouseLeaveEvent>(_ => fromLabel.EnableInClassList("state-link--hover", false));
             }
             else
             {
-                fromLabel.style.color = PreviewEditorColors.DimText;
+                fromLabel.AddToClassList("state-link--dim");
             }
             header.Add(fromLabel);
 
             // Arrow
             var arrowLabel = new Label(" -> ");
-            arrowLabel.style.color = PreviewEditorColors.DimText;
+            arrowLabel.AddToClassList("arrow-label");
             header.Add(arrowLabel);
 
             // To state - clickable if it exists
             string toName = toState?.name ?? "(exit)";
             var toLabel = new Label(toName);
-            toLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+            toLabel.AddToClassList("state-link");
             
             if (toState != null)
             {
-                toLabel.style.color = PreviewEditorColors.ToState;
-                toLabel.style.cursor = StyleKeyword.None;
+                toLabel.AddToClassList("state-link--to");
                 toLabel.tooltip = $"Click to preview {toState.name}";
                 toLabel.RegisterCallback<MouseDownEvent>(evt =>
                 {
                     AnimationPreviewEvents.RaiseNavigateToState(toState);
                     evt.StopPropagation();
                 });
-                toLabel.RegisterCallback<MouseEnterEvent>(_ => toLabel.style.color = PreviewEditorColors.ToStateHighlight);
-                toLabel.RegisterCallback<MouseLeaveEvent>(_ => toLabel.style.color = PreviewEditorColors.ToState);
+                toLabel.RegisterCallback<MouseEnterEvent>(_ => toLabel.EnableInClassList("state-link--hover", true));
+                toLabel.RegisterCallback<MouseLeaveEvent>(_ => toLabel.EnableInClassList("state-link--hover", false));
             }
             else
             {
-                toLabel.style.color = PreviewEditorColors.DimText;
+                toLabel.AddToClassList("state-link--dim");
             }
             header.Add(toLabel);
 
@@ -353,13 +356,9 @@ namespace DMotion.Editor
         {
             var row = new VisualElement();
             row.AddToClassList("property-row");
-            row.style.flexDirection = FlexDirection.Row;
-            row.style.marginBottom = 2;
 
             var labelElement = new Label(label);
             labelElement.AddToClassList("property-label");
-            labelElement.style.width = 100;
-            labelElement.style.minWidth = 100;
 
             var valueElement = new Label(value);
             valueElement.AddToClassList("property-value");
@@ -378,28 +377,20 @@ namespace DMotion.Editor
         {
             var container = new VisualElement();
             container.AddToClassList("property-row");
-            container.style.flexDirection = FlexDirection.Row;
-            container.style.marginBottom = 2;
             
             var labelElement = new Label(label);
             labelElement.AddToClassList("property-label");
-            labelElement.style.width = 100;
-            labelElement.style.minWidth = 100;
             container.Add(labelElement);
             
             var valueContainer = new VisualElement();
-            valueContainer.style.flexDirection = FlexDirection.Row;
-            valueContainer.style.flexGrow = 1;
+            valueContainer.AddToClassList("slider-value-container");
             
             var slider = new Slider(min, max);
             slider.AddToClassList("property-slider");
-            slider.style.flexGrow = 1;
             slider.value = value;
             
             var field = new FloatField();
             field.AddToClassList("property-float-field");
-            field.style.width = FloatFieldWidth;
-            field.style.marginLeft = 4;
             field.value = value;
             
             slider.RegisterValueChangedCallback(evt =>
@@ -421,8 +412,7 @@ namespace DMotion.Editor
             if (!string.IsNullOrEmpty(suffix))
             {
                 var suffixLabel = new Label(suffix);
-                suffixLabel.style.marginLeft = 2;
-                suffixLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
+                suffixLabel.AddToClassList("suffix-label");
                 valueContainer.Add(suffixLabel);
             }
             
@@ -448,20 +438,16 @@ namespace DMotion.Editor
         {
             var container = new VisualElement();
             container.AddToClassList("property-row");
-            container.style.flexDirection = FlexDirection.Row;
-            container.style.marginBottom = 2;
             
             var labelElement = new Label(label);
-            labelElement.style.width = 100;
-            labelElement.style.minWidth = 100;
+            labelElement.AddToClassList("property-label");
             container.Add(labelElement);
             
             var valueContainer = new VisualElement();
-            valueContainer.style.flexDirection = FlexDirection.Row;
-            valueContainer.style.flexGrow = 1;
+            valueContainer.AddToClassList("slider-value-container");
             
             var slider = new Slider(min, max);
-            slider.style.flexGrow = 1;
+            slider.AddToClassList("property-slider");
             slider.BindProperty(property);
             
             if (onChanged != null)
@@ -470,8 +456,7 @@ namespace DMotion.Editor
             }
             
             var field = new FloatField();
-            field.style.width = FloatFieldWidth;
-            field.style.marginLeft = 4;
+            field.AddToClassList("property-float-field");
             field.BindProperty(property);
             
             valueContainer.Add(slider);
@@ -480,7 +465,7 @@ namespace DMotion.Editor
             if (!string.IsNullOrEmpty(suffix))
             {
                 var suffixLabel = new Label(suffix);
-                suffixLabel.style.marginLeft = 2;
+                suffixLabel.AddToClassList("suffix-label");
                 valueContainer.Add(suffixLabel);
             }
             
@@ -492,12 +477,9 @@ namespace DMotion.Editor
         {
             var container = new VisualElement();
             container.AddToClassList("property-row");
-            container.style.flexDirection = FlexDirection.Row;
-            container.style.marginBottom = 2;
             
             var labelElement = new Label(label);
-            labelElement.style.width = 100;
-            labelElement.style.minWidth = 100;
+            labelElement.AddToClassList("property-label");
             container.Add(labelElement);
             
             var toggle = new Toggle();
@@ -512,12 +494,9 @@ namespace DMotion.Editor
         {
             var container = new VisualElement();
             container.AddToClassList("property-row");
-            container.style.flexDirection = FlexDirection.Row;
-            container.style.marginBottom = 2;
             
             var labelElement = new Label(label);
-            labelElement.style.width = 100;
-            labelElement.style.minWidth = 100;
+            labelElement.AddToClassList("property-label");
             container.Add(labelElement);
             
             var toggle = new Toggle();
@@ -596,7 +575,7 @@ namespace DMotion.Editor
             float toDuration = transitionTo?.GetEffectiveDuration(toBlendPos) ?? 0f;
             
             var stateInfoFoldout = new Foldout { text = "State Info", value = false };
-            stateInfoFoldout.style.marginTop = 4;
+            stateInfoFoldout.AddToClassList("state-info-foldout");
             stateInfoFoldout.Add(CreatePropertyRow("From Speed", $"{fromSpeed:F2}x"));
             stateInfoFoldout.Add(CreatePropertyRow("To Speed", $"{toSpeed:F2}x"));
             if (fromDuration > 0) stateInfoFoldout.Add(CreatePropertyRow("From Duration", $"{fromDuration:F2}s"));
@@ -607,7 +586,7 @@ namespace DMotion.Editor
             if (transition != null && transition.Conditions != null && transition.Conditions.Count > 0)
             {
                 var conditionsFoldout = new Foldout { text = $"Conditions ({transition.Conditions.Count})", value = false };
-                conditionsFoldout.style.marginTop = 4;
+                conditionsFoldout.AddToClassList("conditions-foldout");
                 
                 foreach (var condition in transition.Conditions)
                 {
@@ -625,82 +604,31 @@ namespace DMotion.Editor
                 if (blendCurveProp != null)
                 {
                     var curveSection = new VisualElement();
-                    curveSection.style.marginTop = 8;
+                    curveSection.AddToClassList("curve-section");
                     
                     // Header row with label and edit button
                     var headerRow = new VisualElement();
-                    headerRow.style.flexDirection = FlexDirection.Row;
-                    headerRow.style.justifyContent = Justify.SpaceBetween;
-                    headerRow.style.alignItems = Align.Center;
+                    headerRow.AddToClassList("curve-header-row");
                     
                     var curveLabel = new Label("Blend Curve");
-                    curveLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+                    curveLabel.AddToClassList("curve-label");
                     headerRow.Add(curveLabel);
                     
                     curveSection.Add(headerRow);
                     
-                    // Curve preview (IMGUI for drawing)
-                    IMGUIContainer curvePreview = null;
-                    curvePreview = new IMGUIContainer(() =>
+                    // Curve preview (UIToolkit element with Painter2D)
+                    var curvePreview = new CurvePreviewElement();
+                    curvePreview.Curve = cachedBlendCurve ?? AnimationCurve.Linear(0f, 1f, 1f, 0f);
+                    curvePreview.SetOnCurveChanged(newCurve =>
                     {
-                        var rect = curvePreview.contentRect;
-                        if (rect.width < 10 || rect.height < 10) return;
-                        
-                        // Background
-                        EditorGUI.DrawRect(rect, PreviewEditorColors.DarkBackground);
-                        
-                        // Draw curve - use cached arrays to avoid allocation
-                        var curve = cachedBlendCurve ?? AnimationCurve.Linear(0f, 1f, 1f, 0f);
-                        
-                        Handles.BeginGUI();
-                        Handles.color = PreviewEditorColors.CurveAccent;
-                        
-                        float padding = 4f;
-                        float curveWidth = rect.width - padding * 2;
-                        float curveHeight = rect.height - padding * 2;
-                        
-                        for (int i = 0; i <= CurvePreviewSegments; i++)
-                        {
-                            float t = i / (float)CurvePreviewSegments;
-                            float value = curve.Evaluate(t);
-                            float x = rect.x + padding + t * curveWidth;
-                            float y = rect.y + padding + (1f - value) * curveHeight;
-                            cachedCurvePreviewPoints[i] = new Vector3(x, y, 0);
-                        }
-                        
-                        Handles.DrawAAPolyLine(2f, cachedCurvePreviewPoints);
-                        Handles.EndGUI();
-                        
-                        // Labels - use cached style
-                        cachedCurvePreviewLabelStyle ??= new GUIStyle(EditorStyles.miniLabel)
-                        {
-                            fontSize = 9,
-                            normal = { textColor = PreviewEditorColors.DimText }
-                        };
-                        GUI.Label(new Rect(rect.x + 2, rect.y + 2, 30, 12), "From", cachedCurvePreviewLabelStyle);
-                        GUI.Label(new Rect(rect.x + 2, rect.yMax - 14, 20, 12), "To", cachedCurvePreviewLabelStyle);
-                        
-                        // Click to edit
-                        if (Event.current.type == EventType.MouseDown && rect.Contains(Event.current.mousePosition))
-                        {
-                            BlendCurveEditorWindow.Show(
-                                cachedBlendCurve ?? AnimationCurve.Linear(0f, 1f, 1f, 0f),
-                                newCurve =>
-                                {
-                                    cachedBlendCurve = newCurve;
-                                    blendCurveProp.animationCurveValue = newCurve;
-                                    blendCurveProp.serializedObject.ApplyModifiedProperties();
-                                    if (timeline != null)
-                                        timeline.BlendCurve = newCurve;
-                                },
-                                curvePreview.worldBound);
-                            Event.current.Use();
-                        }
+                        cachedBlendCurve = newCurve;
+                        // Convert to keyframes for runtime-identical evaluation
+                        cachedBlendCurveKeyframes = CurveUtils.ConvertAnimationCurveManaged(newCurve);
+                        blendCurveProp.animationCurveValue = newCurve;
+                        blendCurveProp.serializedObject.ApplyModifiedProperties();
+                        if (timeline != null)
+                            timeline.BlendCurve = newCurve;
                     });
-                    curvePreview.style.height = 60;
-                    curvePreview.style.marginTop = 4;
-                    curvePreview.style.cursor = StyleKeyword.None; // Will show as clickable
-                    curvePreview.tooltip = "Click to edit curve";
                     curveSection.Add(curvePreview);
                     
                     section.Add(curveSection);
@@ -891,9 +819,7 @@ namespace DMotion.Editor
             }
             
             // Add UIToolkit visual element directly (no IMGUIContainer wrapper needed)
-            float elementHeight = blendInfo.Is2D ? BlendSpace2DHeight : BlendSpace1DHeight;
-            element.style.height = elementHeight;
-            element.style.marginTop = 8;
+            element.AddToClassList(blendInfo.Is2D ? "transition-blend-space-2d" : "transition-blend-space-1d");
             section.Add(element);
             
             // Wire up position change from visual element (bidirectional sync)
@@ -1105,49 +1031,6 @@ namespace DMotion.Editor
         #endregion
         
         #region Private - Helpers
-        
-        /// <summary>
-        /// Gets the duration of the state's animation (longest clip for blend states).
-        /// </summary>
-        private static float GetStateDuration(AnimationStateAsset state)
-        {
-            if (state == null) return 0f;
-            
-            switch (state)
-            {
-                case SingleClipStateAsset singleClip:
-                    return singleClip.Clip?.Clip != null ? singleClip.Clip.Clip.length : 0f;
-                    
-                case LinearBlendStateAsset linearBlend:
-                    float maxDuration1D = 0f;
-                    if (linearBlend.BlendClips != null)
-                    {
-                        foreach (var clip in linearBlend.BlendClips)
-                        {
-                            if (clip.Clip?.Clip != null)
-                                maxDuration1D = Mathf.Max(maxDuration1D, clip.Clip.Clip.length);
-                        }
-                    }
-                    return maxDuration1D;
-                    
-                case Directional2DBlendStateAsset blend2D:
-                    float maxDuration2D = 0f;
-                    if (blend2D.BlendClips != null)
-                    {
-                        foreach (var clip in blend2D.BlendClips)
-                        {
-                            if (clip.Clip?.Clip != null)
-                                maxDuration2D = Mathf.Max(maxDuration2D, clip.Clip.Clip.length);
-                        }
-                    }
-                    return maxDuration2D;
-                    
-                default:
-                    return 0f;
-            }
-        }
-        
-
         
         private static string GetConditionDescription(TransitionCondition condition)
         {

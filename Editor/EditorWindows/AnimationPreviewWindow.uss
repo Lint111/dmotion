@@ -1,4 +1,5 @@
 /* Animation Preview Window Styles */
+/* Main stylesheet - also provides shared utility classes for child components */
 /* Phase 1: Foundation Layout */
 
 .preview-window {
@@ -67,9 +68,48 @@
     flex-grow: 1;
 }
 
+/* Toolbar Spacer */
+.toolbar-spacer {
+    flex-grow: 1;
+}
+
 /* Preview Toolbar Overlay */
 .preview-toolbar-overlay {
+    flex-direction: row;
     position: absolute;
+    top: 4px;
+    right: 4px;
+}
+
+/* Preview Model Selection Bar */
+.preview-model-bar {
+    flex-direction: row;
+    position: absolute;
+    bottom: 4px;
+    left: 4px;
+    right: 4px;
+    background-color: rgba(51, 51, 51, 0.8);
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+
+.preview-model-label {
+    -unity-text-align: middle-left;
+    margin-right: 4px;
+    color: rgb(204, 204, 204);
+}
+
+.preview-model-field {
+    flex-grow: 1;
+}
+
+/* Preview IMGUI visibility states */
+.preview-imgui--hidden {
+    display: none;
+}
+
+.preview-placeholder--hidden {
+    display: none;
 }
 
 .preview-control-button {
@@ -171,6 +211,10 @@
     color: rgb(200, 200, 200);
     font-size: 11px;
     flex-grow: 1;
+}
+
+.property-value--dim {
+    color: rgb(153, 153, 153);
 }
 
 /* Editable Properties */
@@ -704,4 +748,135 @@
     font-size: 11px;
     color: rgb(220, 100, 100);
     -unity-font-style: bold;
+}
+
+/* Curve Preview Element */
+
+.curve-preview {
+    height: 60px;
+    margin-top: 4px;
+    background-color: rgb(35, 35, 40);
+    border-radius: 3px;
+}
+
+.curve-preview:hover {
+    background-color: rgb(40, 40, 45);
+}
+
+.curve-preview__label {
+    position: absolute;
+    font-size: 9px;
+    color: rgb(120, 120, 120);
+}
+
+.curve-preview__label--from {
+    left: 2px;
+    top: 2px;
+}
+
+.curve-preview__label--to {
+    left: 2px;
+    bottom: 2px;
+}
+
+/* ============================================
+   Navigation Foldouts
+   ============================================ */
+
+.navigation-foldout {
+    margin-top: 8px;
+}
+
+.navigation-sub-foldout {
+    margin-left: 8px;
+}
+
+/* ============================================
+   Transition Rows (Navigation Links)
+   ============================================ */
+
+.transition-row {
+    flex-direction: row;
+    padding-top: 2px;
+    padding-bottom: 2px;
+    padding-left: 4px;
+}
+
+.transition-row--hover {
+    background-color: rgba(77, 77, 77, 0.3);
+}
+
+.transition-row__arrow {
+    color: rgb(153, 153, 153);
+    margin-right: 6px;
+    width: 14px;
+}
+
+.transition-row__name {
+    -unity-font-style: bold;
+}
+
+/* From state colors (blue) */
+.transition-row__name--from {
+    color: rgb(64, 115, 191);
+}
+
+.transition-row__name--from.transition-row__name--hover {
+    color: rgb(89, 140, 217);
+}
+
+/* To state colors (green) */
+.transition-row__name--to {
+    color: rgb(64, 166, 115);
+}
+
+.transition-row__name--to.transition-row__name--hover {
+    color: rgb(89, 191, 140);
+}
+
+/* Any state colors (purple) */
+.transition-row__name--any {
+    color: rgb(179, 128, 204);
+}
+
+.transition-row__name--any.transition-row__name--hover {
+    color: rgb(230, 179, 255);
+}
+
+/* Dim text for disabled/non-clickable */
+.transition-row__name--dim {
+    color: rgb(153, 153, 153);
+}
+
+.transition-row__duration {
+    color: rgb(153, 153, 153);
+    font-size: 10px;
+}
+
+/* ============================================
+   Slider Value Container
+   ============================================ */
+
+.slider-value-container {
+    flex-direction: row;
+    flex-grow: 1;
+}
+
+.property-float-field {
+    width: 50px;
+    margin-left: 4px;
+}
+
+.suffix-label {
+    margin-left: 2px;
+    -unity-text-align: middle-left;
+}
+
+/* ============================================
+   Shared Utility Classes
+   ============================================ */
+
+/* Generic hidden class - use for simple visibility toggling */
+.hidden {
+    display: none;
 }

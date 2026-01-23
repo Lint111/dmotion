@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
@@ -25,12 +25,43 @@ namespace DMotion
         }
     }
     
+    /// <summary>
+    /// Identifies the source of a transition for curve lookup.
+    /// </summary>
+    internal enum TransitionSource : byte
+    {
+        /// <summary>Regular state-to-state transition.</summary>
+        State = 0,
+        /// <summary>Any State global transition.</summary>
+        AnyState = 1,
+        /// <summary>Exit transition (no curve - parent handles blend).</summary>
+        Exit = 2
+    }
+
     internal struct AnimationStateTransition : IComponentData
     {
         internal sbyte AnimationStateId;
         internal float TransitionDuration;
-        internal static AnimationStateTransition Null => new () { AnimationStateId = -1 };
+        
+        // Curve lookup info (Phase 0: Transition Blend Curve feature)
+        /// <summary>Source state index for curve lookup. -1 for Any State transitions.</summary>
+        internal short CurveSourceStateIndex;
+        /// <summary>Index into the transition array (State.Transitions or AnyStateTransitions).</summary>
+        internal short CurveSourceTransitionIndex;
+        /// <summary>Which transition array to look up the curve from.</summary>
+        internal TransitionSource CurveSource;
+        
+        internal static AnimationStateTransition Null => new () 
+        { 
+            AnimationStateId = -1,
+            CurveSourceStateIndex = -1,
+            CurveSourceTransitionIndex = -1,
+            CurveSource = TransitionSource.State
+        };
         internal bool IsValid => AnimationStateId >= 0;
+        
+        /// <summary>Whether this transition has curve data to look up (not Exit, has valid indices).</summary>
+        internal bool HasCurveSource => CurveSource != TransitionSource.Exit && CurveSourceTransitionIndex >= 0;
 
         internal readonly bool HasEnded(in AnimationState animationState)
         {
@@ -43,17 +74,57 @@ namespace DMotion
     {
         internal sbyte AnimationStateId;
         internal float TransitionDuration;
+        
+        // Curve lookup info (Phase 0: Transition Blend Curve feature)
+        internal short CurveSourceStateIndex;
+        internal short CurveSourceTransitionIndex;
+        internal TransitionSource CurveSource;
+        
         internal bool IsValid => AnimationStateId >= 0;
 
-        internal static AnimationStateTransitionRequest Null => new AnimationStateTransitionRequest() { AnimationStateId = -1 };
+        internal static AnimationStateTransitionRequest Null => new AnimationStateTransitionRequest() 
+        { 
+            AnimationStateId = -1,
+            CurveSourceStateIndex = -1,
+            CurveSourceTransitionIndex = -1,
+            CurveSource = TransitionSource.State
+        };
 
+        /// <summary>
+        /// Creates a transition request with curve source info for state machine transitions.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static AnimationStateTransitionRequest New(
+            byte animationStateId, 
+            float transitionDuration,
+            short curveSourceStateIndex,
+            short curveSourceTransitionIndex,
+            TransitionSource curveSource)
+        {
+            return new AnimationStateTransitionRequest
+            {
+                AnimationStateId = (sbyte)animationStateId,
+                TransitionDuration = transitionDuration,
+                CurveSourceStateIndex = curveSourceStateIndex,
+                CurveSourceTransitionIndex = curveSourceTransitionIndex,
+                CurveSource = curveSource
+            };
+        }
+        
+        /// <summary>
+        /// Creates a transition request without curve data (uses linear blend).
+        /// Used for direct clip playback, one-shots, and programmatic transitions.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static AnimationStateTransitionRequest New(byte animationStateId, float transitionDuration)
         {
             return new AnimationStateTransitionRequest
             {
                 AnimationStateId = (sbyte)animationStateId,
-                TransitionDuration = transitionDuration
+                TransitionDuration = transitionDuration,
+                CurveSourceStateIndex = -1,
+                CurveSourceTransitionIndex = -1,
+                CurveSource = TransitionSource.State  // Default, but indices are invalid so no lookup
             };
         }
     }

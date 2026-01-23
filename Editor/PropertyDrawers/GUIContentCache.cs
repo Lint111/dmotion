@@ -30,6 +30,7 @@ namespace DMotion.Editor
         public static readonly GUIContent HasExitTime = new GUIContent("Has Exit Time");
         public static readonly GUIContent ExitTime = new GUIContent("Exit Time (s)");
         public static readonly GUIContent BlendDuration = new GUIContent("Blend Duration (s)");
+        public static readonly GUIContent BlendCurve = new GUIContent("Blend Curve", "Custom blend curve. X = transition time (0-1), Y = From state weight (1 to 0)");
         public static readonly GUIContent Conditions = new GUIContent("Conditions");
         public static readonly GUIContent BlendParameter = new GUIContent("Blend Parameter");
         public static readonly GUIContent Min = new GUIContent("Min");

@@ -59,26 +59,19 @@ namespace DMotion.Editor
             var stateView = graphView.GetViewForState(state);
             if (stateView == null) return;
 
-            var inspectorModel = new AnimationStateInspectorModel
-            {
-                StateView = stateView
-            };
-
+            // Use UIToolkit for most state types
             switch (stateView)
             {
                 case SingleClipStateNodeView:
-                    inspectorView.SetInspector<SingleStateInspector, AnimationStateInspectorModel>(
-                        state, inspectorModel);
-                    break;
                 case LinearBlendStateNodeView:
-                    inspectorView.SetInspector<LinearBlendStateInspector, AnimationStateInspectorModel>(
-                        state, inspectorModel);
-                    break;
                 case Directional2DBlendStateNodeView:
-                    inspectorView.SetInspector<Directional2DBlendStateInspector, AnimationStateInspectorModel>(
-                        state, inspectorModel);
+                    // Use new UIToolkit inspector
+                    inspectorView.SetStateInspector(machine, state, stateView);
                     break;
+                    
                 case SubStateMachineStateNodeView:
+                    // Keep IMGUI for sub-state machine (more complex, migrate later)
+                    var inspectorModel = new AnimationStateInspectorModel { StateView = stateView };
                     inspectorView.SetInspector<SubStateMachineInspector, AnimationStateInspectorModel>(
                         state, inspectorModel);
                     break;
@@ -118,13 +111,13 @@ namespace DMotion.Editor
         private void OnExitNodeSelected(StateMachineAsset machine)
         {
             if (machine != currentMachine) return;
-            inspectorView.Clear();
+            inspectorView.Cleanup();
         }
 
         private void OnSelectionCleared(StateMachineAsset machine)
         {
             if (machine != currentMachine) return;
-            inspectorView.Clear();
+            inspectorView.Cleanup();
         }
     }
 }

@@ -37,7 +37,9 @@ namespace DMotion.Editor
         // Stable base range (doesn't change during drag)
         private float baseMin;
         private float baseMax;
-        private bool hasInitializedRange;
+        
+        // Clip label elements (pooled for performance)
+        private readonly System.Collections.Generic.List<Label> clipLabels = new();
         
         #endregion
         
@@ -72,6 +74,98 @@ namespace DMotion.Editor
             UpdateTrackGeometry();
         }
         
+        /// <summary>Ensures we have enough label elements for all clips.</summary>
+        private void EnsureClipLabels(int count)
+        {
+            // Add labels if needed (to clipLabelContainer so they render behind HUD)
+            while (clipLabels.Count < count)
+            {
+                var label = new Label();
+                label.AddToClassList("blend-space__clip-label");
+                label.pickingMode = PickingMode.Ignore;
+                clipLabelContainer.Add(label);
+                clipLabels.Add(label);
+            }
+            
+            // Hide extra labels
+            for (int i = 0; i < clipLabels.Count; i++)
+            {
+                clipLabels[i].style.display = i < count ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+        }
+        
+        /// <summary>Updates clip label positions and text.</summary>
+        private void UpdateClipLabels()
+        {
+            if (clips == null || clips.Length == 0)
+            {
+                EnsureClipLabels(0);
+                return;
+            }
+            
+            EnsureClipLabels(clips.Length);
+            
+            // Sort clips by threshold for proper staggering
+            var sortedIndices = new int[clips.Length];
+            for (var i = 0; i < clips.Length; i++) sortedIndices[i] = i;
+            Array.Sort(sortedIndices, (a, b) => clips[a].Threshold.CompareTo(clips[b].Threshold));
+            
+            float lastLabelX = float.MinValue;
+            bool alternateBelow = true;
+            
+            for (int idx = 0; idx < sortedIndices.Length; idx++)
+            {
+                var i = sortedIndices[idx];
+                var clip = clips[i];
+                var label = clipLabels[i];
+                var screenX = ThresholdToScreen(clip.Threshold);
+                
+                // Hide if outside visible area
+                if (screenX < trackRect.x - 20 || screenX > trackRect.xMax + 20)
+                {
+                    label.style.display = DisplayStyle.None;
+                    continue;
+                }
+                
+                label.style.display = DisplayStyle.Flex;
+                label.text = GetClipName(i);
+                
+                var lineHeight = editMode ? 20 : 12;
+                
+                // Stagger labels to avoid overlap
+                var labelOffset = 0f;
+                if (screenX - lastLabelX < 50)
+                {
+                    labelOffset = alternateBelow ? 0 : 14;
+                    alternateBelow = !alternateBelow;
+                }
+                else
+                {
+                    alternateBelow = true;
+                }
+                lastLabelX = screenX;
+                
+                float labelY;
+                if (editMode)
+                {
+                    labelY = lineY + lineHeight + ClipHandleRadius + 4 + labelOffset;
+                }
+                else
+                {
+                    labelY = lineY + lineHeight + 6 + labelOffset;
+                }
+                
+                // Position label centered on clip
+                label.style.left = screenX;
+                label.style.top = labelY;
+                label.style.translate = new Translate(Length.Percent(-50), 0);
+                
+                // Highlight selected using CSS class
+                var isSelected = i == selectedClipIndex;
+                label.EnableInClassList("blend-space__clip-label--selected", isSelected);
+            }
+        }
+        
         #endregion
         
         #region Public API
@@ -81,7 +175,6 @@ namespace DMotion.Editor
         {
             targetState = state;
             clips = state?.BlendClips;
-            hasInitializedRange = false;
             UpdateBaseRange();
             UpdateTrackGeometry();
             MarkDirtyRepaint();
@@ -91,7 +184,6 @@ namespace DMotion.Editor
         public void SetClips(ClipWithThreshold[] clipData)
         {
             clips = clipData;
-            hasInitializedRange = false;
             UpdateBaseRange();
             UpdateTrackGeometry();
             MarkDirtyRepaint();
@@ -115,7 +207,6 @@ namespace DMotion.Editor
         public override void ResetView()
         {
             base.ResetView();
-            hasInitializedRange = false;
             UpdateBaseRange();
         }
         
@@ -142,25 +233,19 @@ namespace DMotion.Editor
         
         protected override void DrawClips(Painter2D painter, Rect rect)
         {
-            if (clips == null) return;
-            
-            // Sort clips by threshold for proper z-ordering
-            var sortedIndices = new int[clips.Length];
-            for (var i = 0; i < clips.Length; i++) sortedIndices[i] = i;
-            Array.Sort(sortedIndices, (a, b) => clips[a].Threshold.CompareTo(clips[b].Threshold));
-            
-            // Track last label position to avoid overlap
-            float lastLabelX = float.MinValue;
-            bool alternateBelow = true;
-            
-            for (int idx = 0; idx < sortedIndices.Length; idx++)
+            if (clips == null)
             {
-                var i = sortedIndices[idx];
+                ScheduleOnce("clip-labels", () => EnsureClipLabels(0));
+                return;
+            }
+            
+            for (var i = 0; i < clips.Length; i++)
+            {
                 var clip = clips[i];
                 var screenX = ThresholdToScreen(clip.Threshold);
                 
                 // Skip if outside visible area
-                if (screenX < trackRect.x || screenX > trackRect.xMax)
+                if (screenX < trackRect.x - 10 || screenX > trackRect.xMax + 10)
                     continue;
                 
                 var clipColor = GetClipColor(i);
@@ -183,56 +268,16 @@ namespace DMotion.Editor
                     
                     // Handle circle
                     DrawFilledCircle(painter, circleCenter, ClipHandleRadius, clipColor);
-                    
-                    // Stagger labels
-                    var labelOffset = 0f;
-                    if (screenX - lastLabelX < 50)
-                    {
-                        labelOffset = alternateBelow ? 0 : 12;
-                        alternateBelow = !alternateBelow;
-                    }
-                    else
-                    {
-                        alternateBelow = true;
-                    }
-                    lastLabelX = screenX;
-                    
-                    // Draw label background
-                    var labelY = circleCenter.y + ClipHandleRadius + 2 + labelOffset;
-                    var clipName = GetClipName(i);
-                    var labelWidth = clipName.Length * 7f + 4f;
-                    var labelRect = new Rect(screenX - labelWidth / 2, labelY, labelWidth, 14);
-                    DrawFilledRect(painter, labelRect, LabelBackgroundColor);
                 }
                 else
                 {
                     // Preview mode: small tick below track
                     DrawFilledRect(painter, new Rect(screenX - 3, lineY + lineHeight, 6, 3), clipColor);
-                    
-                    // Stagger labels
-                    var labelOffset = 0f;
-                    if (screenX - lastLabelX < 50)
-                    {
-                        labelOffset = alternateBelow ? 0 : 12;
-                        alternateBelow = !alternateBelow;
-                    }
-                    else
-                    {
-                        alternateBelow = true;
-                    }
-                    lastLabelX = screenX;
-                    
-                    // Draw label background
-                    var labelY = lineY + lineHeight + 5 + labelOffset;
-                    var clipName = GetClipName(i);
-                    var labelWidth = clipName.Length * 7f + 4f;
-                    var labelRect = new Rect(screenX - labelWidth / 2, labelY, labelWidth, 14);
-                    
-                    // Highlight selected
-                    var bgColor = isSelected ? new Color(SelectionColor.r, SelectionColor.g, SelectionColor.b, 0.3f) : LabelBackgroundColor;
-                    DrawFilledRect(painter, labelRect, bgColor);
                 }
             }
+            
+            // Schedule clip label updates (debounced)
+            ScheduleOnce("clip-labels", UpdateClipLabels);
         }
         
         protected override void DrawPreviewIndicator(Painter2D painter, Rect rect)
@@ -352,11 +397,8 @@ namespace DMotion.Editor
         
         protected override void HandleZoom(float delta, Vector2 mousePos, Rect rect)
         {
-            WheelDebugLogger.LogWheelEvent("BlendSpace1D.HandleZoom", delta, mousePos, rect);
             var mouseThreshold = ScreenToThreshold(mousePos.x);
-            var oldZoom = zoom;
             ApplyZoomDelta(delta);
-            WheelDebugLogger.LogWheelEvent($"BlendSpace1D.HandleZoom - zoom changed from {oldZoom:F2} to {zoom:F2}", delta, mousePos, rect);
             var newMouseThreshold = ScreenToThreshold(mousePos.x);
             panOffset.x += (mouseThreshold - newMouseThreshold);
         }
@@ -455,8 +497,6 @@ namespace DMotion.Editor
                 baseMin -= range * DefaultRangePadding;
                 baseMax += range * DefaultRangePadding;
             }
-            
-            hasInitializedRange = true;
         }
         
         private void DrawTicks(Painter2D painter)

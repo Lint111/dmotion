@@ -1,4 +1,5 @@
 using System;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -34,11 +35,8 @@ namespace DMotion.Editor
         protected static readonly Color SelectionColor = new Color(1f, 0.8f, 0f, 1f);
         protected static readonly Color BackgroundColor = new Color(0.15f, 0.15f, 0.15f, 1f);
         protected static readonly Color PreviewIndicatorColor = new Color(1f, 0.5f, 0f, 1f);
-        protected static readonly Color ModeButtonBgColor = new Color(0.2f, 0.2f, 0.2f, 0.9f);
-        protected static readonly Color ModeButtonHoverColor = new Color(0.3f, 0.3f, 0.3f, 0.9f);
-        protected static readonly Color EditModeAccentColor = new Color(0.4f, 0.7f, 1f, 1f);
-        protected static readonly Color PreviewModeAccentColor = new Color(1f, 0.5f, 0f, 1f);
-        protected static readonly Color LabelBackgroundColor = new Color(0, 0, 0, 0.7f);
+        // Note: ModeButtonBgColor, ModeButtonHoverColor, EditModeAccentColor, 
+        // PreviewModeAccentColor, and LabelBackgroundColor moved to USS
         
         private static readonly Color[] ClipColors = GenerateClipColors(16);
         
@@ -63,12 +61,30 @@ namespace DMotion.Editor
         protected bool editMode;
         protected bool showModeToggle = true;
         
-        // Mode button hit rect (calculated during draw)
-        protected Rect modeButtonRect;
-        protected bool isModeButtonHovered;
-        
         // Pointer capture
         private int capturedPointerId = -1;
+        
+        // Scroll capture - smart handling for nested scroll contexts
+        private long pointerEnterTimeMs;
+        private long lastWheelEventTimeMs;
+        private bool hasDisabledParentScroll;
+        private bool lastWheelWentToParent;
+        private ScrollView cachedParentScrollView;
+        private float cachedOriginalScrollSize;
+        private const long ScrollCaptureDelayMs = 150; // Grace period after entering before capturing scroll
+        private const long ScrollSessionTimeoutMs = 400; // Scroll session continues if wheel events within this time
+        
+        // UI Label elements (since Painter2D can't draw text)
+        // Container for clip labels - added first so it renders behind HUD elements
+        protected VisualElement clipLabelContainer;
+        // HUD elements (rendered on top of clip labels)
+        private VisualElement modeButton;
+        private Label zoomLabel;
+        private Label modeLabel;
+        private Label infoLabel;
+        
+        // Scheduling utility state
+        private readonly System.Collections.Generic.Dictionary<string, bool> scheduledActions = new();
         
         #endregion
         
@@ -158,6 +174,14 @@ namespace DMotion.Editor
         
         public BlendSpaceVisualElement()
         {
+            // Load stylesheet
+            var uss = AssetDatabase.LoadAssetAtPath<StyleSheet>(
+                "Packages/com.gamedevpro.dmotion/Editor/EditorWindows/BlendSpaceVisualElement.uss");
+            if (uss != null)
+            {
+                styleSheets.Add(uss);
+            }
+            
             AddToClassList("blend-space");
             
             // Enable custom drawing
@@ -176,6 +200,151 @@ namespace DMotion.Editor
             // Wheel event for zoom - StopPropagation + PreventDefault prevents parent ScrollView from scrolling
             RegisterCallback<WheelEvent>(OnWheel, TrickleDown.TrickleDown);
             RegisterCallback<GeometryChangedEvent>(OnGeometryChanged);
+            
+            // Create clip label container FIRST (so it renders behind HUD elements)
+            clipLabelContainer = new VisualElement();
+            clipLabelContainer.name = "clip-labels";
+            clipLabelContainer.AddToClassList("blend-space__clip-labels");
+            clipLabelContainer.pickingMode = PickingMode.Ignore;
+            Add(clipLabelContainer);
+            
+            // Create HUD overlay labels (renders on top of clip labels)
+            CreateOverlayLabels();
+        }
+        
+        /// <summary>
+        /// Schedules an action to run after the current frame, with debouncing.
+        /// Only one action per key will be scheduled at a time.
+        /// </summary>
+        protected void ScheduleOnce(string key, System.Action action)
+        {
+            if (scheduledActions.TryGetValue(key, out bool isScheduled) && isScheduled)
+                return;
+            
+            scheduledActions[key] = true;
+            schedule.Execute(() =>
+            {
+                scheduledActions[key] = false;
+                action?.Invoke();
+            });
+        }
+        
+        private void CreateOverlayLabels()
+        {
+            // Mode toggle button (top-left) - UIToolkit element so it renders on top of clip labels
+            modeButton = new VisualElement();
+            modeButton.name = "mode-button";
+            modeButton.AddToClassList("blend-space__mode-button");
+            modeButton.AddToClassList("blend-space__mode-button--preview");
+            modeButton.pickingMode = PickingMode.Position;
+            modeButton.RegisterCallback<PointerDownEvent>(e =>
+            {
+                if (e.button == 0)
+                {
+                    EditMode = !editMode;
+                    e.StopPropagation();
+                }
+            });
+            
+            // Icon inside button
+            var iconLabel = new Label("▶");
+            iconLabel.name = "mode-icon";
+            iconLabel.AddToClassList("blend-space__mode-icon");
+            iconLabel.AddToClassList("blend-space__mode-icon--preview");
+            iconLabel.pickingMode = PickingMode.Ignore;
+            modeButton.Add(iconLabel);
+            Add(modeButton);
+            
+            // Zoom indicator label (top-right)
+            zoomLabel = new Label("1.0x");
+            zoomLabel.name = "zoom-label";
+            zoomLabel.AddToClassList("blend-space__zoom-label");
+            zoomLabel.pickingMode = PickingMode.Ignore;
+            Add(zoomLabel);
+            
+            // Mode label (top-left, next to mode button)
+            modeLabel = new Label("Preview");
+            modeLabel.name = "mode-label";
+            modeLabel.AddToClassList("blend-space__mode-label");
+            modeLabel.AddToClassList("blend-space__mode-label--preview");
+            modeLabel.pickingMode = PickingMode.Ignore;
+            Add(modeLabel);
+            
+            // Info label (shows selected clip or blend state)
+            infoLabel = new Label("");
+            infoLabel.name = "info-label";
+            infoLabel.AddToClassList("blend-space__info-label");
+            infoLabel.pickingMode = PickingMode.Ignore;
+            Add(infoLabel);
+        }
+        
+        /// <summary>Updates overlay label text and visibility.</summary>
+        protected void UpdateOverlayLabels()
+        {
+            // Update zoom label
+            if (zoomLabel != null)
+            {
+                zoomLabel.text = $"{zoom:F1}x";
+            }
+            
+            // Update mode button classes
+            if (modeButton != null)
+            {
+                modeButton.EnableInClassList("blend-space__mode-button--edit", editMode);
+                modeButton.EnableInClassList("blend-space__mode-button--preview", !editMode);
+                modeButton.EnableInClassList("blend-space__mode-button--hidden", !showModeToggle);
+                
+                // Update icon
+                var iconLabel = modeButton.Q<Label>("mode-icon");
+                if (iconLabel != null)
+                {
+                    iconLabel.text = editMode ? "✎" : "▶";
+                    iconLabel.EnableInClassList("blend-space__mode-icon--edit", editMode);
+                    iconLabel.EnableInClassList("blend-space__mode-icon--preview", !editMode);
+                }
+            }
+            
+            // Update mode label classes
+            if (modeLabel != null)
+            {
+                modeLabel.text = editMode ? "Edit" : "Preview";
+                modeLabel.EnableInClassList("blend-space__mode-label--edit", editMode);
+                modeLabel.EnableInClassList("blend-space__mode-label--preview", !editMode);
+                modeLabel.EnableInClassList("blend-space__mode-label--hidden", !showModeToggle);
+            }
+            
+            // Update info label classes
+            if (infoLabel != null)
+            {
+                // Clear all state classes first
+                infoLabel.RemoveFromClassList("blend-space__info-label--blended");
+                infoLabel.RemoveFromClassList("blend-space__info-label--clip-preview");
+                infoLabel.RemoveFromClassList("blend-space__info-label--selected");
+                
+                bool showInfo = false;
+                if (showPreviewIndicator && !editMode)
+                {
+                    if (previewClipIndex < 0)
+                    {
+                        infoLabel.text = "| Blended";
+                        infoLabel.AddToClassList("blend-space__info-label--blended");
+                    }
+                    else
+                    {
+                        infoLabel.text = $"| {GetClipName(previewClipIndex)}";
+                        infoLabel.AddToClassList("blend-space__info-label--clip-preview");
+                    }
+                    showInfo = true;
+                }
+                else if (selectedClipIndex >= 0)
+                {
+                    infoLabel.text = $"| {GetClipName(selectedClipIndex)}";
+                    infoLabel.AddToClassList("blend-space__info-label--selected");
+                    showInfo = true;
+                }
+                
+                infoLabel.EnableInClassList("blend-space__info-label--hidden", !showInfo);
+            }
         }
         
         #endregion
@@ -332,8 +501,8 @@ namespace DMotion.Editor
             // Draw preview indicator
             DrawPreviewIndicator(painter, rect);
             
-            // Draw overlay UI
-            DrawOverlayUI(painter, rect);
+            // Schedule HUD updates (mode button and labels are UIToolkit elements)
+            ScheduleOnce("overlay-labels", UpdateOverlayLabels);
         }
         
         /// <summary>Draws the preview position indicator.</summary>
@@ -370,126 +539,8 @@ namespace DMotion.Editor
             painter.Stroke();
         }
         
-        /// <summary>Draws all overlay UI elements (mode button, zoom indicator).</summary>
-        private void DrawOverlayUI(Painter2D painter, Rect rect)
-        {
-            if (showModeToggle)
-            {
-                DrawModeToggleButton(painter, rect);
-            }
-            
-            DrawOverlayInfoLabel(painter, rect);
-            DrawZoomIndicator(painter, rect);
-        }
-        
-        /// <summary>Draws the edit/preview mode toggle button.</summary>
-        private void DrawModeToggleButton(Painter2D painter, Rect rect)
-        {
-            modeButtonRect = new Rect(OverlayPadding, OverlayPadding, ModeButtonSize, ModeButtonSize);
-            
-            var bgColor = isModeButtonHovered ? ModeButtonHoverColor : ModeButtonBgColor;
-            var accentColor = editMode ? EditModeAccentColor : PreviewModeAccentColor;
-            
-            // Draw button background
-            painter.fillColor = bgColor;
-            painter.BeginPath();
-            painter.MoveTo(new Vector2(modeButtonRect.x, modeButtonRect.y));
-            painter.LineTo(new Vector2(modeButtonRect.xMax, modeButtonRect.y));
-            painter.LineTo(new Vector2(modeButtonRect.xMax, modeButtonRect.yMax));
-            painter.LineTo(new Vector2(modeButtonRect.x, modeButtonRect.yMax));
-            painter.ClosePath();
-            painter.Fill();
-            
-            // Draw accent border (left side)
-            painter.fillColor = accentColor;
-            painter.BeginPath();
-            painter.MoveTo(new Vector2(modeButtonRect.x, modeButtonRect.y));
-            painter.LineTo(new Vector2(modeButtonRect.x + 3, modeButtonRect.y));
-            painter.LineTo(new Vector2(modeButtonRect.x + 3, modeButtonRect.yMax));
-            painter.LineTo(new Vector2(modeButtonRect.x, modeButtonRect.yMax));
-            painter.ClosePath();
-            painter.Fill();
-            
-            // Draw icon (simple shapes)
-            var iconCenter = modeButtonRect.center;
-            if (editMode)
-            {
-                // Edit icon - pencil shape
-                painter.strokeColor = accentColor;
-                painter.lineWidth = 2f;
-                painter.BeginPath();
-                painter.MoveTo(iconCenter + new Vector2(-4, 4));
-                painter.LineTo(iconCenter + new Vector2(4, -4));
-                painter.Stroke();
-            }
-            else
-            {
-                // Preview icon - play triangle
-                painter.fillColor = accentColor;
-                painter.BeginPath();
-                painter.MoveTo(iconCenter + new Vector2(-3, -5));
-                painter.LineTo(iconCenter + new Vector2(5, 0));
-                painter.LineTo(iconCenter + new Vector2(-3, 5));
-                painter.ClosePath();
-                painter.Fill();
-            }
-        }
-        
-        /// <summary>Draws the info label (preview state or selection).</summary>
-        protected virtual void DrawOverlayInfoLabel(Painter2D painter, Rect rect)
-        {
-            string infoText;
-            Color textColor;
-            
-            if (showPreviewIndicator && !editMode)
-            {
-                if (previewClipIndex < 0)
-                {
-                    infoText = "Blended";
-                    textColor = PreviewIndicatorColor;
-                }
-                else
-                {
-                    infoText = GetClipName(previewClipIndex);
-                    textColor = new Color(0.4f, 0.8f, 1f);
-                }
-            }
-            else if (selectedClipIndex >= 0)
-            {
-                infoText = GetClipName(selectedClipIndex);
-                textColor = SelectionColor;
-            }
-            else
-            {
-                return;
-            }
-            
-            // Position after mode button
-            float labelX = showModeToggle ? 80 : OverlayPadding;
-            string displayText = showModeToggle ? $"| {infoText}" : infoText;
-            
-            // Note: Painter2D doesn't support text directly, we'd need a Label child element
-            // For now, the info is available via GetHelpText() for external labels
-        }
-        
-        /// <summary>Draws the zoom indicator in the top-right corner.</summary>
-        private void DrawZoomIndicator(Painter2D painter, Rect rect)
-        {
-            var zoomText = $"{zoom:F1}x";
-            var zoomRect = new Rect(rect.width - 35, OverlayPadding, 30, 16);
-            
-            // Draw background
-            painter.fillColor = new Color(0, 0, 0, 0.5f);
-            painter.BeginPath();
-            painter.MoveTo(new Vector2(zoomRect.x - 2, zoomRect.y - 1));
-            painter.LineTo(new Vector2(zoomRect.xMax + 2, zoomRect.y - 1));
-            painter.LineTo(new Vector2(zoomRect.xMax + 2, zoomRect.yMax + 1));
-            painter.LineTo(new Vector2(zoomRect.x - 2, zoomRect.yMax + 1));
-            painter.ClosePath();
-            painter.Fill();
-            
-            // Note: Text would need a Label child element
-        }
+        // Note: Mode button, info labels, and zoom indicator are now UIToolkit elements
+        // They render on top of clip labels and are updated in UpdateOverlayLabels()
         
         #endregion
         
@@ -617,20 +668,14 @@ namespace DMotion.Editor
             {
                 isPanning = true;
                 lastMousePos = mousePos;
-                CapturePointer(evt.pointerId);
+                TryCapturePointer(evt.pointerId);
                 evt.StopPropagation();
                 return;
             }
             
             if (evt.button == 0) // Left click
             {
-                // Check mode button first
-                if (showModeToggle && modeButtonRect.Contains(mousePos))
-                {
-                    EditMode = !editMode;
-                    evt.StopPropagation();
-                    return;
-                }
+                // Note: Mode button is now a UIToolkit element with its own click handler
                 
                 // Check preview indicator
                 if (showPreviewIndicator && IsMouseOverPreviewIndicator(rect, mousePos))
@@ -638,7 +683,7 @@ namespace DMotion.Editor
                     isDraggingPreviewIndicator = true;
                     lastMousePos = mousePos;
                     SetPreviewClip(-1);
-                    CapturePointer(evt.pointerId);
+                    TryCapturePointer(evt.pointerId);
                     evt.StopPropagation();
                     return;
                 }
@@ -657,7 +702,7 @@ namespace DMotion.Editor
                     {
                         isDraggingClip = true;
                         lastMousePos = mousePos;
-                        CapturePointer(evt.pointerId);
+                        TryCapturePointer(evt.pointerId);
                     }
                     
                     evt.StopPropagation();
@@ -669,7 +714,7 @@ namespace DMotion.Editor
                     isDraggingPreviewIndicator = true;
                     lastMousePos = mousePos;
                     SetPreviewClip(-1);
-                    CapturePointer(evt.pointerId);
+                    TryCapturePointer(evt.pointerId);
                     evt.StopPropagation();
                 }
                 else
@@ -683,14 +728,7 @@ namespace DMotion.Editor
         {
             var rect = contentRect;
             var mousePos = (Vector2)evt.localPosition;
-            
-            // Update mode button hover state
-            bool wasHovered = isModeButtonHovered;
-            isModeButtonHovered = showModeToggle && modeButtonRect.Contains(mousePos);
-            if (wasHovered != isModeButtonHovered)
-            {
-                MarkDirtyRepaint();
-            }
+            // Note: Mode button hover is now handled by the UIToolkit element
             
             if (isDraggingPreviewIndicator && !editMode)
             {
@@ -721,56 +759,42 @@ namespace DMotion.Editor
                 isDraggingClip = false;
                 isDraggingPreviewIndicator = false;
                 isPanning = false;
-                ReleasePointer(evt.pointerId);
+                TryReleasePointer(evt.pointerId);
                 evt.StopPropagation();
             }
         }
         
         private void OnPointerEnter(PointerEnterEvent evt)
         {
-            // Focus the element to capture wheel events
+            // Focus the element for keyboard input
             Focus();
             
-            // Disable parent ScrollView's wheel scrolling while mouse is over this element
-            var scrollView = GetFirstAncestorOfType<ScrollView>();
-            if (scrollView != null)
+            // Cache parent ScrollView and its original scroll size
+            cachedParentScrollView = GetFirstAncestorOfType<ScrollView>();
+            if (cachedParentScrollView != null)
             {
-                // Store the original value and set to 0 to disable wheel scrolling
-                var originalSize = scrollView.mouseWheelScrollSize;
-                scrollView.userData = originalSize;
-                scrollView.mouseWheelScrollSize = 0;
-                WheelDebugLogger.LogWheelEvent($"OnPointerEnter - disabled ScrollView wheel (was {originalSize})", 0, Vector2.zero, contentRect);
-            }
-            else
-            {
-                WheelDebugLogger.LogWheelEvent("OnPointerEnter - no parent ScrollView found", 0, Vector2.zero, contentRect);
-            }
-        }
-        }
-        private void OnPointerLeave(PointerLeaveEvent evt)
-        {
-            if (isModeButtonHovered)
-            {
-                isModeButtonHovered = false;
-                MarkDirtyRepaint();
+                cachedOriginalScrollSize = cachedParentScrollView.mouseWheelScrollSize;
             }
             
-            // Restore parent ScrollView's wheel scrolling
-            var scrollView = GetFirstAncestorOfType<ScrollView>();
-            if (scrollView != null && scrollView.userData is float originalSize)
-            {
-                scrollView.mouseWheelScrollSize = originalSize;
-                scrollView.userData = null;
-                WheelDebugLogger.LogWheelEvent($"OnPointerLeave - restored ScrollView wheel to {originalSize}", 0, Vector2.zero, contentRect);
-            }
-            else
-            {
-                WheelDebugLogger.LogWheelEvent("OnPointerLeave - no ScrollView to restore", 0, Vector2.zero, contentRect);
-            }
+            // Note when we entered - used for smart scroll capture
+            // We DON'T disable ScrollView here to allow scroll continuation from parent
+            pointerEnterTimeMs = System.DateTime.Now.Ticks / System.TimeSpan.TicksPerMillisecond;
+            hasDisabledParentScroll = false;
+            lastWheelWentToParent = true; // Assume any ongoing scroll was going to parent
         }
-                scrollView.mouseWheelScrollSize = originalSize;
-                scrollView.userData = null;
+        
+        private void OnPointerLeave(PointerLeaveEvent evt)
+        {
+            // Restore parent ScrollView's wheel scrolling if we disabled it
+            if (hasDisabledParentScroll && cachedParentScrollView != null)
+            {
+                cachedParentScrollView.mouseWheelScrollSize = cachedOriginalScrollSize;
+                hasDisabledParentScroll = false;
             }
+            
+            // Reset scroll session state
+            lastWheelWentToParent = false;
+            cachedParentScrollView = null;
         }
         
         private void OnWheel(WheelEvent evt)
@@ -778,39 +802,81 @@ namespace DMotion.Editor
             var rect = contentRect;
             var mousePos = evt.localMousePosition;
             
-            WheelDebugLogger.LogWheelEvent("OnWheel", evt.delta.y, mousePos, rect);
+            // Only handle if mouse is in bounds
+            if (!rect.Contains(mousePos)) return;
             
-            // Only zoom if mouse is in bounds
-            if (!rect.Contains(mousePos)) {
-                WheelDebugLogger.LogWheelEvent("OnWheel - OUT OF BOUNDS", evt.delta.y, mousePos, rect);
+            var nowMs = System.DateTime.Now.Ticks / System.TimeSpan.TicksPerMillisecond;
+            var timeSinceEnter = nowMs - pointerEnterTimeMs;
+            var timeSinceLastWheel = nowMs - lastWheelEventTimeMs;
+            
+            // Determine if this wheel event should go to parent or be captured
+            // Pass to parent if:
+            // 1. Mouse just entered (within grace period), OR
+            // 2. Last wheel went to parent AND we're still in the scroll session (within timeout)
+            bool shouldPassToParent = false;
+            
+            if (timeSinceEnter < ScrollCaptureDelayMs)
+            {
+                // Just entered - likely continuation of parent scroll
+                shouldPassToParent = true;
+            }
+            else if (lastWheelWentToParent && timeSinceLastWheel < ScrollSessionTimeoutMs)
+            {
+                // Previous wheel went to parent and we're still in active scroll session
+                shouldPassToParent = true;
+            }
+            
+            // Update timestamp
+            lastWheelEventTimeMs = nowMs;
+            
+            if (shouldPassToParent)
+            {
+                lastWheelWentToParent = true;
+                
+                // Ensure ScrollView is enabled for parent scroll
+                if (hasDisabledParentScroll && cachedParentScrollView != null)
+                {
+                    cachedParentScrollView.mouseWheelScrollSize = cachedOriginalScrollSize;
+                    hasDisabledParentScroll = false;
+                }
+                
+                // Let event propagate to parent ScrollView
                 return;
             }
             
+            // Capture for zoom - this is our scroll session now
+            lastWheelWentToParent = false;
+            
+            // Disable parent scroll only once per session
+            if (!hasDisabledParentScroll && cachedParentScrollView != null)
+            {
+                cachedParentScrollView.mouseWheelScrollSize = 0;
+                hasDisabledParentScroll = true;
+            }
+            
+            // Stop propagation and handle zoom
+            evt.StopImmediatePropagation();
+            
             float delta = -evt.delta.y * 0.05f;
-            WheelDebugLogger.LogWheelEvent("OnWheel - CALLING HandleZoom", delta, mousePos, rect);
             HandleZoom(delta, mousePos, rect);
             
             MarkDirtyRepaint();
-            
-            // Use all available methods to prevent parent ScrollView from handling this event
-            evt.StopImmediatePropagation();
-            evt.PreventDefault();
         }
         
-        private void CapturePointer(int pointerId)
+        private void TryCapturePointer(int pointerId)
         {
             if (capturedPointerId < 0)
             {
                 capturedPointerId = pointerId;
-                this.CapturePointer(pointerId);
+                PointerCaptureHelper.CapturePointer(this, pointerId);
             }
         }
         
-        private void ReleasePointer(int pointerId)
+        private void TryReleasePointer(int pointerId)
         {
             if (capturedPointerId == pointerId)
             {
-                this.ReleasePointer(pointerId);
+                PointerCaptureHelper.ReleasePointer(this, pointerId);
                 capturedPointerId = -1;
             }
         }

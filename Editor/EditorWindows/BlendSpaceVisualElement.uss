@@ -1,0 +1,190 @@
+/* Blend Space Visual Element Styles */
+/* Base styles for 1D and 2D blend space editors */
+
+/* ============================================
+   Base Element
+   ============================================ */
+
+.blend-space {
+    overflow: hidden;
+}
+
+/* ============================================
+   Clip Label Container
+   ============================================ */
+
+.blend-space__clip-labels {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+}
+
+/* ============================================
+   Mode Toggle Button
+   ============================================ */
+
+.blend-space__mode-button {
+    position: absolute;
+    left: 5px;
+    top: 5px;
+    width: 20px;
+    height: 20px;
+    background-color: rgba(51, 51, 51, 0.9);
+    border-left-width: 3px;
+    border-left-color: rgb(255, 128, 0);
+}
+
+.blend-space__mode-button:hover {
+    background-color: rgba(77, 77, 77, 0.9);
+}
+
+.blend-space__mode-button--edit {
+    border-left-color: rgb(102, 179, 255);
+}
+
+.blend-space__mode-button--preview {
+    border-left-color: rgb(255, 128, 0);
+}
+
+.blend-space__mode-button--hidden {
+    display: none;
+}
+
+/* Mode button icon */
+.blend-space__mode-icon {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    -unity-text-align: middle-center;
+    font-size: 10px;
+    color: rgb(255, 128, 0);
+}
+
+.blend-space__mode-icon--edit {
+    color: rgb(102, 179, 255);
+}
+
+.blend-space__mode-icon--preview {
+    color: rgb(255, 128, 0);
+}
+
+/* ============================================
+   HUD Labels
+   ============================================ */
+
+/* Zoom indicator (top-right) */
+.blend-space__zoom-label {
+    position: absolute;
+    right: 5px;
+    top: 5px;
+    font-size: 10px;
+    color: rgb(179, 179, 179);
+    background-color: rgba(0, 0, 0, 0.5);
+    padding-left: 4px;
+    padding-right: 4px;
+    padding-top: 2px;
+    padding-bottom: 2px;
+}
+
+/* Mode label (next to mode button) */
+.blend-space__mode-label {
+    position: absolute;
+    left: 29px;
+    top: 7px;
+    font-size: 11px;
+    -unity-font-style: bold;
+}
+
+.blend-space__mode-label--edit {
+    color: rgb(102, 179, 255);
+}
+
+.blend-space__mode-label--preview {
+    color: rgb(255, 128, 0);
+}
+
+.blend-space__mode-label--hidden {
+    display: none;
+}
+
+/* Info label (shows selected clip or blend state) */
+.blend-space__info-label {
+    position: absolute;
+    left: 95px;
+    top: 7px;
+    font-size: 11px;
+    color: rgb(153, 153, 153);
+}
+
+.blend-space__info-label--blended {
+    color: rgb(255, 128, 0);
+}
+
+.blend-space__info-label--clip-preview {
+    color: rgb(102, 204, 255);
+}
+
+.blend-space__info-label--selected {
+    color: rgb(255, 204, 0);
+}
+
+.blend-space__info-label--hidden {
+    display: none;
+}
+
+/* ============================================
+   Clip Labels (Common)
+   ============================================ */
+
+.blend-space__clip-label {
+    position: absolute;
+    font-size: 10px;
+    color: rgb(204, 204, 204);
+    background-color: rgba(0, 0, 0, 0.7);
+    padding-left: 4px;
+    padding-right: 4px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+    -unity-text-align: middle-center;
+}
+
+.blend-space__clip-label--selected {
+    background-color: rgba(255, 204, 0, 0.4);
+    color: rgb(255, 255, 255);
+}
+
+/* ============================================
+   2D Specific - Selected Value Label
+   ============================================ */
+
+.blend-space-2d__value-label {
+    position: absolute;
+    font-size: 9px;
+    color: rgb(179, 179, 179);
+    background-color: rgba(0, 0, 0, 0.7);
+    padding-left: 4px;
+    padding-right: 4px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+    -unity-text-align: middle-center;
+}
+
+/* ============================================
+   1D Specific
+   ============================================ */
+
+.blend-space-1d {
+    /* 1D-specific base styles if needed */
+}
+
+/* ============================================
+   2D Specific
+   ============================================ */
+
+.blend-space-2d {
+    /* 2D-specific base styles if needed */
+}

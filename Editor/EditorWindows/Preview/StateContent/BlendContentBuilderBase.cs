@@ -17,20 +17,13 @@ namespace DMotion.Editor
     {
         #region Constants
         
-        /// <summary>Height of the 1D blend space visualizer.</summary>
-        protected const float BlendSpace1DDefaultHeight = 120f;
-        
-        /// <summary>Height of the 2D blend space visualizer.</summary>
-        protected const float BlendSpace2DDefaultHeight = 180f;
+        private const string UssPath = "Packages/com.gamedevpro.dmotion/Editor/EditorWindows/Preview/StateContent/BlendContent.uss";
         
         // Use shared constants
         protected const float FloatFieldWidth = PreviewEditorConstants.FloatFieldWidth;
         protected const float SpacingSmall = PreviewEditorConstants.SpacingSmall;
         protected const float SpacingMedium = PreviewEditorConstants.SpacingMedium;
         protected const float SpacingLarge = PreviewEditorConstants.SpacingLarge;
-        
-        /// <summary>Text color for help/hint text.</summary>
-        protected static Color HelpTextColor => PreviewEditorColors.DimText;
         
         #endregion
         
@@ -64,9 +57,9 @@ namespace DMotion.Editor
         #region Abstract Members
         
         /// <summary>
-        /// Gets the height for the blend space visualizer.
+        /// Gets the CSS class for the blend space preview element.
         /// </summary>
-        protected abstract float BlendSpaceHeight { get; }
+        protected abstract string BlendSpacePreviewClass { get; }
         
         /// <summary>
         /// Gets the section title for this blend space type.
@@ -124,6 +117,13 @@ namespace DMotion.Editor
             
             serializedObject = context.SerializedObject;
             
+            // Load stylesheet if not already loaded
+            var uss = AssetDatabase.LoadAssetAtPath<StyleSheet>(UssPath);
+            if (uss != null && !container.styleSheets.Contains(uss))
+            {
+                container.styleSheets.Add(uss);
+            }
+            
             var blendSection = context.CreateSection(SectionTitle);
             
             // Parameter info (abstract - implemented by subclasses)
@@ -151,8 +151,7 @@ namespace DMotion.Editor
             blendSpaceElement.OnClipSelectedForPreview += cachedClipSelectedHandler;
             
             // Add blend space visual element directly (no IMGUIContainer wrapper needed)
-            blendSpaceElement.style.height = BlendSpaceHeight;
-            blendSpaceElement.style.marginTop = SpacingLarge;
+            blendSpaceElement.AddToClassList(BlendSpacePreviewClass);
             blendSection.Add(blendSpaceElement);
             
             // Help text (pure UIToolkit Label)
@@ -255,10 +254,6 @@ namespace DMotion.Editor
         {
             var label = new Label();
             label.AddToClassList("blend-space-help");
-            label.style.marginTop = SpacingSmall;
-            label.style.color = HelpTextColor;
-            label.style.fontSize = 10;
-            label.style.whiteSpace = WhiteSpace.Normal;
             
             // Update text when element is attached
             label.RegisterCallback<AttachToPanelEvent>(evt =>
@@ -280,8 +275,7 @@ namespace DMotion.Editor
         {
             var container = new VisualElement();
             container.AddToClassList("clip-edit-container");
-            container.style.marginTop = SpacingMedium;
-            container.style.display = DisplayStyle.None;
+            // Visibility controlled by clip-edit-container--visible class via edit mode handler
             
             // Subclasses populate this via BuildClipEditContent
             BuildClipEditContent(container, context);
@@ -302,8 +296,8 @@ namespace DMotion.Editor
         {
             cachedEditModeHandler = isEditMode =>
             {
-                slidersContainer.style.display = isEditMode ? DisplayStyle.None : DisplayStyle.Flex;
-                clipEditContainer.style.display = isEditMode ? DisplayStyle.Flex : DisplayStyle.None;
+                slidersContainer.EnableInClassList("property-row--hidden", isEditMode);
+                clipEditContainer.EnableInClassList("clip-edit-container--visible", isEditMode);
                 
                 // Update help text for current mode
                 if (blendSpaceElement != null && helpLabel != null)
@@ -332,18 +326,16 @@ namespace DMotion.Editor
             container.Add(labelElement);
             
             var valueContainer = new VisualElement();
-            valueContainer.style.flexDirection = FlexDirection.Row;
-            valueContainer.style.flexGrow = 1;
+            valueContainer.AddToClassList("blend-content__value-container");
             
             var slider = new Slider(min, max);
             slider.AddToClassList("property-slider");
-            slider.style.flexGrow = 1;
+            slider.AddToClassList("blend-content__slider");
             slider.value = value;
             
             var field = new FloatField();
             field.AddToClassList("property-float-field");
-            field.style.width = FloatFieldWidth;
-            field.style.marginLeft = SpacingMedium;
+            field.AddToClassList("blend-content__field");
             field.value = value;
             
             valueContainer.Add(slider);

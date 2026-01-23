@@ -87,5 +87,27 @@ namespace DMotion.Editor
         public static readonly Color ToStateHighlight = new Color(0.35f, 0.75f, 0.55f);
         
         #endregion
+        
+        #region Breadcrumb Navigation
+        
+        /// <summary>Breadcrumb bar background (0.22, 0.22, 0.22).</summary>
+        public static readonly Color BreadcrumbBackground = new Color(0.22f, 0.22f, 0.22f);
+        
+        /// <summary>Breadcrumb bar bottom border (0.1, 0.1, 0.1).</summary>
+        public static readonly Color BreadcrumbBorder = new Color(0.1f, 0.1f, 0.1f);
+        
+        /// <summary>Breadcrumb link color - light blue (0.6, 0.8, 1).</summary>
+        public static readonly Color BreadcrumbLink = new Color(0.6f, 0.8f, 1f);
+        
+        /// <summary>Breadcrumb link hover color - lighter blue (0.8, 0.9, 1).</summary>
+        public static readonly Color BreadcrumbLinkHover = new Color(0.8f, 0.9f, 1f);
+        
+        /// <summary>Breadcrumb current item - white (1, 1, 1).</summary>
+        public static readonly Color BreadcrumbCurrent = Color.white;
+        
+        /// <summary>Breadcrumb separator color (0.5, 0.5, 0.5).</summary>
+        public static readonly Color BreadcrumbSeparator = new Color(0.5f, 0.5f, 0.5f);
+        
+        #endregion
     }
 }

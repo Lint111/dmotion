@@ -1,0 +1,249 @@
+/* State Inspector Styles */
+/* UIToolkit styles for state inspectors in the Unity Inspector panel */
+
+/* ============================================
+   Dockable Foldout
+   ============================================ */
+
+.dockable-foldout {
+    margin-bottom: 4px;
+}
+
+.dockable-foldout__toolbar {
+    flex-direction: row;
+    margin-left: auto;
+    align-items: center;
+}
+
+.dockable-foldout__dock-button {
+    width: 20px;
+    height: 16px;
+    padding: 0;
+    margin-left: 4px;
+    font-size: 10px;
+    background-color: transparent;
+    border-width: 0;
+}
+
+.dockable-foldout__dock-button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.dockable-foldout__toolbar-button {
+    height: 16px;
+    padding: 0 4px;
+    margin-left: 2px;
+    font-size: 10px;
+    background-color: rgba(60, 60, 60, 0.8);
+    border-color: rgb(70, 70, 70);
+    border-radius: 2px;
+}
+
+.dockable-foldout__toolbar-button:hover {
+    background-color: rgba(80, 80, 80, 0.8);
+}
+
+/* ============================================
+   Sub-Asset Popup Field
+   ============================================ */
+
+.sub-asset-popup-field {
+    flex-grow: 1;
+}
+
+/* ============================================
+   State Inspector Layout
+   ============================================ */
+
+.state-inspector {
+    padding: 4px;
+}
+
+.state-inspector__header {
+    flex-direction: row;
+    padding: 6px 8px;
+    margin-bottom: 8px;
+    background-color: rgb(50, 50, 55);
+    border-radius: 4px;
+    border-left-width: 3px;
+    border-left-color: rgb(100, 150, 200);
+}
+
+.state-inspector__header-type {
+    background-color: rgb(70, 90, 110);
+    padding: 2px 8px;
+    border-radius: 3px;
+    color: rgb(180, 200, 220);
+    font-size: 10px;
+    margin-right: 8px;
+}
+
+.state-inspector__header-name {
+    color: rgb(220, 220, 220);
+    font-size: 13px;
+    -unity-font-style: bold;
+}
+
+/* ============================================
+   Property Rows
+   ============================================ */
+
+.property-row {
+    flex-direction: row;
+    padding: 2px 0;
+    align-items: center;
+}
+
+.property-label {
+    width: 100px;
+    min-width: 100px;
+    color: rgb(180, 180, 180);
+    font-size: 11px;
+}
+
+.property-value {
+    color: rgb(200, 200, 200);
+    font-size: 11px;
+    flex-grow: 1;
+}
+
+.property-field {
+    flex-grow: 1;
+}
+
+/* ============================================
+   Slider with Value Field
+   ============================================ */
+
+.slider-value-container {
+    flex-direction: row;
+    flex-grow: 1;
+    align-items: center;
+}
+
+.property-slider {
+    flex-grow: 1;
+    min-width: 80px;
+}
+
+.property-float-field {
+    width: 50px;
+    margin-left: 4px;
+}
+
+.suffix-label {
+    margin-left: 2px;
+    color: rgb(150, 150, 150);
+    font-size: 10px;
+}
+
+/* ============================================
+   Section Foldouts
+   ============================================ */
+
+.section-foldout {
+    margin-bottom: 4px;
+}
+
+.section-foldout > Toggle {
+    background-color: rgb(55, 55, 60);
+    padding: 4px 8px;
+    border-radius: 3px;
+}
+
+.section-foldout > Toggle:hover {
+    background-color: rgb(65, 65, 70);
+}
+
+.section-foldout > Toggle > Label {
+    color: rgb(200, 200, 200);
+    font-size: 11px;
+    -unity-font-style: bold;
+}
+
+.section-foldout > #unity-content {
+    padding: 6px;
+    margin-left: 4px;
+}
+
+/* ============================================
+   Blend Space Containers
+   ============================================ */
+
+.blend-space-inspector-1d {
+    height: 100px;
+    margin-top: 8px;
+    margin-bottom: 4px;
+}
+
+.blend-space-inspector-2d {
+    height: 200px;
+    margin-top: 8px;
+    margin-bottom: 4px;
+}
+
+/* ============================================
+   Undocked Message
+   ============================================ */
+
+.undocked-message {
+    flex-direction: row;
+    justify-content: center;
+    padding: 8px;
+}
+
+.undocked-message__button {
+    padding: 4px 16px;
+}
+
+/* ============================================
+   Help Box
+   ============================================ */
+
+.help-box {
+    padding: 8px;
+    margin: 4px 0;
+    background-color: rgb(60, 60, 65);
+    border-radius: 3px;
+    border-left-width: 3px;
+    border-left-color: rgb(100, 150, 200);
+}
+
+.help-box--info {
+    border-left-color: rgb(100, 150, 200);
+}
+
+.help-box--warning {
+    border-left-color: rgb(200, 150, 50);
+}
+
+.help-box__text {
+    color: rgb(180, 180, 180);
+    font-size: 11px;
+    white-space: normal;
+}
+
+/* ============================================
+   Motions List
+   ============================================ */
+
+.motions-list {
+    margin-top: 4px;
+}
+
+/* ============================================
+   Int Range Fields
+   ============================================ */
+
+.int-range-row {
+    flex-direction: row;
+}
+
+.int-range-row__field {
+    flex-grow: 1;
+    margin-right: 4px;
+}
+
+.int-range-row__field:last-child {
+    margin-right: 0;
+}

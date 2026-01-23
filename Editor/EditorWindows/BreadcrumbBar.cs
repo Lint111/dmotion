@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using DMotion.Authoring;
+using UnityEditor;
 using UnityEngine.UIElements;
 
 namespace DMotion.Editor
@@ -12,6 +13,8 @@ namespace DMotion.Editor
     [UxmlElement]
     internal partial class BreadcrumbBar : VisualElement
     {
+        private const string UssPath = "Packages/com.gamedevpro.dmotion/Editor/EditorWindows/BreadcrumbBar.uss";
+        
         /// <summary>
         /// Fired when user clicks a breadcrumb to navigate to that level.
         /// Parameter is the index in the navigation stack (0 = root).
@@ -20,25 +23,21 @@ namespace DMotion.Editor
 
         private readonly List<StateMachineAsset> navigationStack = new();
         private readonly VisualElement container;
+        
+        // SessionState key for persistence across domain reloads
+        private const string NavigationStackSessionKey = "DMotion.BreadcrumbBar.NavigationStack";
 
         public BreadcrumbBar()
         {
-            // Main container styling
-            style.flexDirection = FlexDirection.Row;
-            style.alignItems = Align.Center;
-            style.paddingLeft = 8;
-            style.paddingRight = 8;
-            style.paddingTop = 4;
-            style.paddingBottom = 4;
-            style.backgroundColor = new StyleColor(new UnityEngine.Color(0.22f, 0.22f, 0.22f, 1f));
-            style.minHeight = 24;
-            style.borderBottomWidth = 1;
-            style.borderBottomColor = new StyleColor(new UnityEngine.Color(0.1f, 0.1f, 0.1f, 1f));
+            // Load stylesheet
+            var uss = AssetDatabase.LoadAssetAtPath<StyleSheet>(UssPath);
+            if (uss != null)
+                styleSheets.Add(uss);
+            
+            AddToClassList("breadcrumb-bar");
 
             container = new VisualElement();
-            container.style.flexDirection = FlexDirection.Row;
-            container.style.alignItems = Align.Center;
-            container.style.flexWrap = Wrap.Wrap;
+            container.AddToClassList("breadcrumb-container");
             Add(container);
         }
 
@@ -125,37 +124,25 @@ namespace DMotion.Editor
                 if (i > 0)
                 {
                     var separator = new Label(">");
-                    separator.style.color = new StyleColor(new UnityEngine.Color(0.5f, 0.5f, 0.5f, 1f));
-                    separator.style.marginLeft = 6;
-                    separator.style.marginRight = 6;
-                    separator.style.unityFontStyleAndWeight = UnityEngine.FontStyle.Normal;
+                    separator.AddToClassList("breadcrumb-separator");
                     container.Add(separator);
                 }
 
                 // Breadcrumb button/label
                 var crumb = new Label(stateMachine.name);
-                crumb.style.unityFontStyleAndWeight = isLast 
-                    ? UnityEngine.FontStyle.Bold 
-                    : UnityEngine.FontStyle.Normal;
-                crumb.style.color = isLast
-                    ? new StyleColor(new UnityEngine.Color(1f, 1f, 1f, 1f))
-                    : new StyleColor(new UnityEngine.Color(0.6f, 0.8f, 1f, 1f));
+                crumb.AddToClassList("breadcrumb-item");
                 
-                if (!isLast)
+                if (isLast)
                 {
-                    // Make clickable - add underline on hover to indicate interactivity
+                    crumb.AddToClassList("breadcrumb-item--current");
+                }
+                else
+                {
+                    // Make clickable with hover effect
+                    crumb.AddToClassList("breadcrumb-item--link");
                     crumb.pickingMode = PickingMode.Position;
                     crumb.RegisterCallback<ClickEvent>(evt => NavigateTo(index));
-                    crumb.RegisterCallback<MouseEnterEvent>(evt =>
-                    {
-                        crumb.style.color = new StyleColor(new UnityEngine.Color(0.8f, 0.9f, 1f, 1f));
-                        crumb.style.unityFontStyleAndWeight = UnityEngine.FontStyle.BoldAndItalic;
-                    });
-                    crumb.RegisterCallback<MouseLeaveEvent>(evt =>
-                    {
-                        crumb.style.color = new StyleColor(new UnityEngine.Color(0.6f, 0.8f, 1f, 1f));
-                        crumb.style.unityFontStyleAndWeight = UnityEngine.FontStyle.Normal;
-                    });
+                    // Note: :hover pseudo-class in USS handles the hover styling
                 }
 
                 container.Add(crumb);
@@ -165,10 +152,78 @@ namespace DMotion.Editor
             if (navigationStack.Count == 0)
             {
                 var placeholder = new Label("No state machine selected");
-                placeholder.style.color = new StyleColor(new UnityEngine.Color(0.5f, 0.5f, 0.5f, 1f));
-                placeholder.style.unityFontStyleAndWeight = UnityEngine.FontStyle.Italic;
+                placeholder.AddToClassList("breadcrumb-placeholder");
                 container.Add(placeholder);
             }
+            
+            // Save state after any navigation change
+            SaveNavigationState();
         }
+        
+        #region Persistence
+        
+        /// <summary>
+        /// Saves the navigation stack to SessionState for domain reload persistence.
+        /// </summary>
+        private void SaveNavigationState()
+        {
+            if (navigationStack.Count == 0)
+            {
+                SessionState.EraseString(NavigationStackSessionKey);
+                return;
+            }
+            
+            // Convert to GUIDs for persistence
+            var guids = new List<string>();
+            foreach (var machine in navigationStack)
+            {
+                if (machine == null) continue;
+                var path = AssetDatabase.GetAssetPath(machine);
+                if (!string.IsNullOrEmpty(path))
+                {
+                    guids.Add(AssetDatabase.AssetPathToGUID(path));
+                }
+            }
+            
+            // Store as comma-separated GUIDs
+            SessionState.SetString(NavigationStackSessionKey, string.Join(",", guids));
+        }
+        
+        /// <summary>
+        /// Restores the navigation stack from SessionState after domain reload.
+        /// Call this after the BreadcrumbBar is created.
+        /// </summary>
+        internal void RestoreNavigationState()
+        {
+            var savedGuids = SessionState.GetString(NavigationStackSessionKey, string.Empty);
+            if (string.IsNullOrEmpty(savedGuids)) return;
+            
+            var guids = savedGuids.Split(',');
+            navigationStack.Clear();
+            
+            foreach (var guid in guids)
+            {
+                if (string.IsNullOrEmpty(guid)) continue;
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                if (string.IsNullOrEmpty(path)) continue;
+                var machine = AssetDatabase.LoadAssetAtPath<StateMachineAsset>(path);
+                if (machine != null)
+                {
+                    navigationStack.Add(machine);
+                }
+            }
+            
+            Rebuild();
+        }
+        
+        /// <summary>
+        /// Clears the persisted navigation state.
+        /// </summary>
+        internal void ClearNavigationState()
+        {
+            SessionState.EraseString(NavigationStackSessionKey);
+        }
+        
+        #endregion
     }
 }

@@ -34,7 +34,7 @@ namespace DMotion.Editor
         
         #region Abstract Implementations
         
-        protected override float BlendSpaceHeight => BlendSpace1DDefaultHeight;
+        protected override string BlendSpacePreviewClass => "blend-space-1d-preview";
         
         protected override string SectionTitle => "Blend Space 1D";
         
@@ -149,24 +149,19 @@ namespace DMotion.Editor
             // Create a container that updates based on selection
             var selectionInfo = new Label("Click a clip on the track to select it.");
             selectionInfo.AddToClassList("clip-edit-hint");
-            selectionInfo.style.color = new Color(0.6f, 0.6f, 0.6f);
-            selectionInfo.style.unityFontStyleAndWeight = FontStyle.Italic;
             container.Add(selectionInfo);
             
             var clipFields = new VisualElement();
             clipFields.AddToClassList("clip-edit-fields");
-            clipFields.style.display = DisplayStyle.None;
             container.Add(clipFields);
             
             // Threshold field
             var thresholdRow = new VisualElement();
-            thresholdRow.AddToClassList("property-row");
-            thresholdRow.style.flexDirection = FlexDirection.Row;
+            thresholdRow.AddToClassList("clip-edit-row");
             var thresholdLabel = new Label("Threshold");
-            thresholdLabel.AddToClassList("property-label");
-            thresholdLabel.style.width = 80;
+            thresholdLabel.AddToClassList("clip-edit-row__label");
             var thresholdField = new FloatField();
-            thresholdField.style.flexGrow = 1;
+            thresholdField.AddToClassList("clip-edit-row__field");
             thresholdRow.Add(thresholdLabel);
             thresholdRow.Add(thresholdField);
             clipFields.Add(thresholdRow);
@@ -176,16 +171,16 @@ namespace DMotion.Editor
             {
                 if (clipIndex >= 0 && state?.BlendClips != null && clipIndex < state.BlendClips.Length)
                 {
-                    selectionInfo.style.display = DisplayStyle.None;
-                    clipFields.style.display = DisplayStyle.Flex;
+                    selectionInfo.EnableInClassList("clip-edit-hint--hidden", true);
+                    clipFields.EnableInClassList("clip-edit-fields--visible", true);
                     
                     var clip = state.BlendClips[clipIndex];
                     thresholdField.SetValueWithoutNotify(clip.Threshold);
                 }
                 else
                 {
-                    selectionInfo.style.display = DisplayStyle.Flex;
-                    clipFields.style.display = DisplayStyle.None;
+                    selectionInfo.EnableInClassList("clip-edit-hint--hidden", false);
+                    clipFields.EnableInClassList("clip-edit-fields--visible", false);
                 }
             };
             

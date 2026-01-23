@@ -496,3 +496,5 @@ Before starting ECS preview work, complete these remaining authoring preview pha
 ## Related Documents
 
 - **[AnimationPreviewWindow.md](./AnimationPreviewWindow.md)** - Authoring preview implementation (foundation for this work)
+- **[UIToolkitMigration.md](./UIToolkitMigration.md)** - UIToolkit migration audit (✅ Complete)
+- **[TransitionBlendCurve.md](./TransitionBlendCurve.md)** - Transition curve runtime support (Planned)

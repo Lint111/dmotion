@@ -38,7 +38,7 @@ namespace DMotion.Editor
         
         #region Abstract Implementations
         
-        protected override float BlendSpaceHeight => BlendSpace2DDefaultHeight;
+        protected override string BlendSpacePreviewClass => "blend-space-2d-preview";
         
         protected override string SectionTitle => "Blend Space 2D";
         
@@ -194,37 +194,30 @@ namespace DMotion.Editor
             // Create a container that updates based on selection
             var selectionInfo = new Label("Click a clip in the blend space to select it.");
             selectionInfo.AddToClassList("clip-edit-hint");
-            selectionInfo.style.color = new Color(0.6f, 0.6f, 0.6f);
-            selectionInfo.style.unityFontStyleAndWeight = FontStyle.Italic;
             container.Add(selectionInfo);
             
             var clipFields = new VisualElement();
             clipFields.AddToClassList("clip-edit-fields");
-            clipFields.style.display = DisplayStyle.None;
             container.Add(clipFields);
             
             // Position X field
             var posXRow = new VisualElement();
-            posXRow.AddToClassList("property-row");
-            posXRow.style.flexDirection = FlexDirection.Row;
+            posXRow.AddToClassList("clip-edit-row");
             var posXLabel = new Label("Position X");
-            posXLabel.AddToClassList("property-label");
-            posXLabel.style.width = 80;
+            posXLabel.AddToClassList("clip-edit-row__label");
             var posXField = new FloatField();
-            posXField.style.flexGrow = 1;
+            posXField.AddToClassList("clip-edit-row__field");
             posXRow.Add(posXLabel);
             posXRow.Add(posXField);
             clipFields.Add(posXRow);
             
             // Position Y field
             var posYRow = new VisualElement();
-            posYRow.AddToClassList("property-row");
-            posYRow.style.flexDirection = FlexDirection.Row;
+            posYRow.AddToClassList("clip-edit-row");
             var posYLabel = new Label("Position Y");
-            posYLabel.AddToClassList("property-label");
-            posYLabel.style.width = 80;
+            posYLabel.AddToClassList("clip-edit-row__label");
             var posYField = new FloatField();
-            posYField.style.flexGrow = 1;
+            posYField.AddToClassList("clip-edit-row__field");
             posYRow.Add(posYLabel);
             posYRow.Add(posYField);
             clipFields.Add(posYRow);
@@ -234,8 +227,8 @@ namespace DMotion.Editor
             {
                 if (clipIndex >= 0 && state?.BlendClips != null && clipIndex < state.BlendClips.Length)
                 {
-                    selectionInfo.style.display = DisplayStyle.None;
-                    clipFields.style.display = DisplayStyle.Flex;
+                    selectionInfo.EnableInClassList("clip-edit-hint--hidden", true);
+                    clipFields.EnableInClassList("clip-edit-fields--visible", true);
                     
                     var clip = state.BlendClips[clipIndex];
                     posXField.SetValueWithoutNotify(clip.Position.x);
@@ -243,8 +236,8 @@ namespace DMotion.Editor
                 }
                 else
                 {
-                    selectionInfo.style.display = DisplayStyle.Flex;
-                    clipFields.style.display = DisplayStyle.None;
+                    selectionInfo.EnableInClassList("clip-edit-hint--hidden", false);
+                    clipFields.EnableInClassList("clip-edit-fields--visible", false);
                 }
             };
             

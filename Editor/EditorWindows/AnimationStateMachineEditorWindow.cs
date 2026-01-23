@@ -236,7 +236,19 @@ namespace DMotion.Editor
             if (hasRestoredAfterDomainReload) return;
             hasRestoredAfterDomainReload = true;
             
-            // Try to restore from serialized reference first
+            // Restore breadcrumb navigation state first
+            breadcrumbBar?.RestoreNavigationState();
+            
+            // Get the current state machine from breadcrumb (which may have been restored)
+            var currentFromBreadcrumb = breadcrumbBar?.CurrentStateMachine;
+            if (currentFromBreadcrumb != null)
+            {
+                // Load the current state machine without resetting breadcrumb
+                LoadStateMachineInternal(currentFromBreadcrumb, updateBreadcrumb: false);
+                return;
+            }
+            
+            // Fall back to serialized reference
             if (lastEditedStateMachine != null)
             {
                 LoadStateMachine(lastEditedStateMachine);

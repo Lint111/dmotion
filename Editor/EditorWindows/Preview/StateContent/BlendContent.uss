@@ -1,0 +1,107 @@
+/* Blend Content Builder Styles */
+/* Shared styles for LinearBlendContentBuilder and Directional2DBlendContentBuilder */
+
+/* ============================================
+   Help Text
+   ============================================ */
+
+.blend-space-help {
+    margin-top: 4px;
+    color: rgb(120, 120, 120);
+    font-size: 10px;
+    white-space: normal;
+}
+
+/* ============================================
+   Clip Edit Container
+   ============================================ */
+
+.clip-edit-container {
+    margin-top: 8px;
+    display: none;
+}
+
+.clip-edit-container--visible {
+    display: flex;
+}
+
+.clip-edit-hint {
+    color: rgb(153, 153, 153);
+    -unity-font-style: italic;
+}
+
+.clip-edit-hint--hidden {
+    display: none;
+}
+
+.clip-edit-fields {
+    display: none;
+}
+
+.clip-edit-fields--visible {
+    display: flex;
+}
+
+/* ============================================
+   Clip Edit Property Rows
+   ============================================ */
+
+.clip-edit-row {
+    flex-direction: row;
+}
+
+.clip-edit-row__label {
+    width: 80px;
+    min-width: 80px;
+}
+
+.clip-edit-row__field {
+    flex-grow: 1;
+}
+
+/* ============================================
+   Property Row Overrides
+   ============================================ */
+
+/* Hide property row (used for edit mode toggle) */
+.property-row--hidden {
+    display: none;
+}
+
+/* Compact label for blend content rows */
+.blend-content__property-label {
+    width: 80px;
+    min-width: 80px;
+}
+
+/* ============================================
+   Slider with Field Container
+   ============================================ */
+
+.blend-content__value-container {
+    flex-direction: row;
+    flex-grow: 1;
+}
+
+.blend-content__slider {
+    flex-grow: 1;
+}
+
+.blend-content__field {
+    width: 50px;
+    margin-left: 8px;
+}
+
+/* ============================================
+   Blend Space Element Sizing
+   ============================================ */
+
+.blend-space-1d-preview {
+    height: 120px;
+    margin-top: 12px;
+}
+
+.blend-space-2d-preview {
+    height: 180px;
+    margin-top: 12px;
+}

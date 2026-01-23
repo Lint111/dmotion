@@ -591,7 +591,7 @@ namespace DMotion.Editor
             footer.Add(timeLabel);
             
             var spacer = new VisualElement();
-            spacer.style.flexGrow = 1;
+            spacer.AddToClassList("toolbar-spacer");
             footer.Add(spacer);
             
             blendLabel = new Label("Blend: 0%");

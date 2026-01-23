@@ -1,0 +1,135 @@
+/* Transition Inspector Builder Styles */
+/* Styles for TransitionInspectorBuilder.cs */
+/* Note: Inherits shared styles from AnimationPreviewWindow.uss (slider-value-container, property-slider, etc.) */
+
+/* ============================================
+   Info Message
+   ============================================ */
+
+/* DimText = (0.6, 0.6, 0.6) = rgb(153, 153, 153) */
+.info-message {
+    white-space: normal;
+    color: rgb(153, 153, 153);
+}
+
+/* ============================================
+   Section Header
+   ============================================ */
+
+/* Border = (0.3, 0.3, 0.3) = rgb(77, 77, 77) */
+.section-header {
+    flex-direction: row;
+    padding-bottom: 4px;
+    border-bottom-width: 1px;
+    border-bottom-color: rgb(77, 77, 77);
+    margin-bottom: 8px;
+}
+
+.section-header--wrap {
+    flex-wrap: wrap;
+}
+
+/* DimText = (0.6, 0.6, 0.6) = rgb(153, 153, 153) */
+.header-type {
+    color: rgb(153, 153, 153);
+    margin-right: 8px;
+}
+
+.header-name {
+    -unity-font-style: bold;
+}
+
+/* ============================================
+   State Name Links (Clickable)
+   ============================================ */
+
+.state-link {
+    -unity-font-style: bold;
+}
+
+/* FromState = (0.25, 0.45, 0.75) = rgb(64, 115, 191) */
+.state-link--from {
+    color: rgb(64, 115, 191);
+}
+
+/* FromStateHighlight = (0.35, 0.55, 0.85) = rgb(89, 140, 217) */
+.state-link--from.state-link--hover {
+    color: rgb(89, 140, 217);
+}
+
+/* ToState = (0.25, 0.65, 0.45) = rgb(64, 166, 115) */
+.state-link--to {
+    color: rgb(64, 166, 115);
+}
+
+/* ToStateHighlight = (0.35, 0.75, 0.55) = rgb(89, 191, 140) */
+.state-link--to.state-link--hover {
+    color: rgb(89, 191, 140);
+}
+
+/* DimText = (0.6, 0.6, 0.6) = rgb(153, 153, 153) */
+.state-link--dim {
+    color: rgb(153, 153, 153);
+}
+
+.arrow-label {
+    color: rgb(153, 153, 153);
+}
+
+/* ============================================
+   Property Row
+   ============================================ */
+
+.property-row {
+    flex-direction: row;
+    margin-bottom: 2px;
+}
+
+.property-label {
+    width: 100px;
+    min-width: 100px;
+}
+
+/* ============================================
+   Foldout Sections
+   ============================================ */
+
+.state-info-foldout {
+    margin-top: 4px;
+}
+
+.conditions-foldout {
+    margin-top: 4px;
+}
+
+/* ============================================
+   Curve Section
+   ============================================ */
+
+.curve-section {
+    margin-top: 8px;
+}
+
+.curve-header-row {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.curve-label {
+    -unity-font-style: bold;
+}
+
+/* ============================================
+   Blend Space in Transition
+   ============================================ */
+
+.transition-blend-space-1d {
+    height: 60px;
+    margin-top: 8px;
+}
+
+.transition-blend-space-2d {
+    height: 150px;
+    margin-top: 8px;
+}

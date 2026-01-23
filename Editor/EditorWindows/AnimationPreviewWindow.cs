@@ -310,7 +310,7 @@ namespace DMotion.Editor
 
             // Spacer
             var spacer = new VisualElement();
-            spacer.style.flexGrow = 1;
+            spacer.AddToClassList("toolbar-spacer");
             toolbar.Add(spacer);
 
             // Selection label
@@ -323,7 +323,6 @@ namespace DMotion.Editor
             // Main content with split view
             var mainContent = new VisualElement();
             mainContent.AddToClassList("main-content");
-            mainContent.style.flexGrow = 1;
 
             // Create split view (horizontal: left = inspector, right = preview)
             splitView = new TwoPaneSplitView(0, SplitPosition, TwoPaneSplitViewOrientation.Horizontal);
@@ -336,10 +335,6 @@ namespace DMotion.Editor
 
             var inspectorScroll = new ScrollView(ScrollViewMode.Vertical);
             inspectorScroll.AddToClassList("inspector-scroll");
-            
-            // Disable the ScrollView's built-in wheel handling when mouse is over BlendSpaceVisualElement
-            // We do this by setting mouseWheelScrollSize to 0 when entering blend space, and restoring on leave
-            // This is handled by BlendSpaceVisualElement.OnPointerEnter/OnPointerLeave
 
             inspectorContent = new VisualElement();
             inspectorContent.AddToClassList("inspector-content");
@@ -356,10 +351,6 @@ namespace DMotion.Editor
             // Preview toolbar with controls
             var previewToolbar = new VisualElement();
             previewToolbar.AddToClassList("preview-toolbar-overlay");
-            previewToolbar.style.flexDirection = FlexDirection.Row;
-            previewToolbar.style.position = Position.Absolute;
-            previewToolbar.style.top = 4;
-            previewToolbar.style.right = 4;
             
             var resetViewButton = new Button(OnResetViewClicked) { text = "Reset View", tooltip = "Reset camera to default position" };
             resetViewButton.AddToClassList("preview-control-button");
@@ -368,31 +359,15 @@ namespace DMotion.Editor
             // Preview model selection (bottom of preview panel)
             var modelSelectionBar = new VisualElement();
             modelSelectionBar.AddToClassList("preview-model-bar");
-            modelSelectionBar.style.flexDirection = FlexDirection.Row;
-            modelSelectionBar.style.position = Position.Absolute;
-            modelSelectionBar.style.bottom = 4;
-            modelSelectionBar.style.left = 4;
-            modelSelectionBar.style.right = 4;
-            modelSelectionBar.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f, 0.8f);
-            modelSelectionBar.style.paddingLeft = 4;
-            modelSelectionBar.style.paddingRight = 4;
-            modelSelectionBar.style.paddingTop = 2;
-            modelSelectionBar.style.paddingBottom = 2;
-            modelSelectionBar.style.borderTopLeftRadius = 3;
-            modelSelectionBar.style.borderTopRightRadius = 3;
-            modelSelectionBar.style.borderBottomLeftRadius = 3;
-            modelSelectionBar.style.borderBottomRightRadius = 3;
             
             var modelLabel = new Label("Preview Model:");
-            modelLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
-            modelLabel.style.marginRight = 4;
-            modelLabel.style.color = new Color(0.8f, 0.8f, 0.8f);
+            modelLabel.AddToClassList("preview-model-label");
             modelSelectionBar.Add(modelLabel);
             
             previewModelField = new ObjectField();
             previewModelField.objectType = typeof(GameObject);
             previewModelField.allowSceneObjects = false;
-            previewModelField.style.flexGrow = 1;
+            previewModelField.AddToClassList("preview-model-field");
             previewModelField.tooltip = "Drag a model prefab with Animator and SkinnedMeshRenderer";
             previewModelField.RegisterValueChangedCallback(OnPreviewModelChanged);
             modelSelectionBar.Add(previewModelField);
@@ -404,7 +379,7 @@ namespace DMotion.Editor
             // IMGUI container for 3D preview
             previewContainer = new IMGUIContainer(OnPreviewGUI);
             previewContainer.AddToClassList("preview-imgui");
-            previewContainer.style.display = DisplayStyle.None;
+            previewContainer.AddToClassList("preview-imgui--hidden");
             
             // Click on 3D preview focuses the timeline for keyboard shortcuts
             previewContainer.RegisterCallback<PointerDownEvent>(OnPreviewClicked);
@@ -821,8 +796,8 @@ namespace DMotion.Editor
 
             bool hasPreview = previewRenderer?.HasContent ?? false;
 
-            previewPlaceholder.style.display = hasPreview ? DisplayStyle.None : DisplayStyle.Flex;
-            previewContainer.style.display = hasPreview ? DisplayStyle.Flex : DisplayStyle.None;
+            previewPlaceholder.EnableInClassList("preview-placeholder--hidden", hasPreview);
+            previewContainer.EnableInClassList("preview-imgui--hidden", !hasPreview);
         }
 
         #endregion
@@ -1051,10 +1026,10 @@ namespace DMotion.Editor
                     transitionTimeline.ToStateNormalizedTime);
                 
                 // Apply blend curve to get actual blend weight
-                // Curve Y = "from" weight (1→0), so "to" weight = 1 - curveY
+                // Uses CurveUtils for runtime-identical evaluation
                 float rawProgress = transitionTimeline.TransitionProgress;
-                float curveValue = transitionTimeline.BlendCurve?.Evaluate(rawProgress) ?? (1f - rawProgress);
-                float blendWeight = 1f - curveValue;
+                var keyframes = transitionInspectorBuilder?.BlendCurveKeyframes;
+                float blendWeight = CurveUtils.EvaluateCurveManaged(keyframes, rawProgress);
                 
                 // Set transition progress for blend weights (from→to crossfade)
                 previewRenderer.SetTransitionProgress(blendWeight);

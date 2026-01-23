@@ -92,9 +92,18 @@ namespace DMotion.Authoring
                 DefaultStateIndex = (byte)assetToIndex[resolvedDefault]
             };
 
-            BuildFlattenedStates(stateMachineAsset, flattenedStates, assetToIndex, ref converter, Allocator.Persistent);
-            BuildAnyStateTransitions(stateMachineAsset, assetToIndex, ref converter, Allocator.Persistent);
-            BuildExitTransitionGroups(stateMachineAsset, exitTransitionInfos, assetToIndex, ref converter, Allocator.Persistent);
+            try
+            {
+                BuildFlattenedStates(stateMachineAsset, flattenedStates, assetToIndex, ref converter, Allocator.Persistent);
+                BuildAnyStateTransitions(stateMachineAsset, assetToIndex, ref converter, Allocator.Persistent);
+                BuildExitTransitionGroups(stateMachineAsset, exitTransitionInfos, assetToIndex, ref converter, Allocator.Persistent);
+            }
+            catch
+            {
+                // Dispose partially-built converter to prevent native memory leaks
+                converter.Dispose();
+                throw;
+            }
 
             return converter;
         }
@@ -352,7 +361,65 @@ namespace DMotion.Authoring
                 };
             }
 
+            // Convert blend curve (empty = linear fast-path)
+            transitionData.CurveKeyframes = ConvertBlendCurve(transition.BlendCurve, allocator);
+
             return transitionData;
+        }
+
+        /// <summary>
+        /// Converts an AnimationCurve to blittable CurveKeyframes.
+        /// Returns empty list for linear curves (fast-path optimization).
+        /// </summary>
+        private static UnsafeList<CurveKeyframe> ConvertBlendCurve(AnimationCurve curve, Allocator allocator)
+        {
+            // Fast-path: linear curve = empty keyframes = zero storage, zero runtime cost
+            if (IsLinearCurve(curve))
+            {
+                return new UnsafeList<CurveKeyframe>(0, allocator);
+            }
+
+            // Custom curve: convert keyframes for Hermite evaluation
+            var keyframes = new UnsafeList<CurveKeyframe>(curve.length, allocator);
+            keyframes.Resize(curve.length);
+
+            for (int i = 0; i < curve.length; i++)
+            {
+                var key = curve.keys[i];
+                // Invert Y: Unity stores "From" weight (1→0), DMotion uses "To" weight (0→1)
+                // Negate tangents due to Y inversion
+                keyframes[i] = CurveKeyframe.Create(
+                    key.time,
+                    1f - key.value,
+                    -key.inTangent,
+                    -key.outTangent);
+            }
+
+            return keyframes;
+        }
+
+        /// <summary>
+        /// Detects if curve is the default linear transition (0,1) → (1,0).
+        /// Linear curves get empty keyframes array for zero-cost runtime.
+        /// </summary>
+        private static bool IsLinearCurve(AnimationCurve curve)
+        {
+            if (curve == null || curve.length == 0) return true;
+            if (curve.length != 2) return false;
+
+            var k0 = curve.keys[0];
+            var k1 = curve.keys[1];
+
+            // Use shared epsilon constant for consistency with CurveUtils
+            const float epsilon = CurveUtils.LinearCurveEpsilon;
+
+            // Check: (0,1) → (1,0) with tangent ≈ -1 (Unity's default linear)
+            return Mathf.Abs(k0.time) < epsilon &&
+                   Mathf.Abs(k0.value - 1f) < epsilon &&
+                   Mathf.Abs(k1.time - 1f) < epsilon &&
+                   Mathf.Abs(k1.value) < epsilon &&
+                   Mathf.Abs(k0.outTangent + 1f) < epsilon &&
+                   Mathf.Abs(k1.inTangent + 1f) < epsilon;
         }
 
         /// <summary>

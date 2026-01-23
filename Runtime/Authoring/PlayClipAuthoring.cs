@@ -1,4 +1,4 @@
-﻿using Latios.Authoring;
+using Latios.Authoring;
 using Latios.Kinemation;
 using Unity.Entities;
 using UnityEngine;
@@ -91,11 +91,9 @@ namespace DMotion.Authoring
                         ref animationStates,
                         ref clipSamplers);
 
-                    entityManager.SetComponentData(entity, new AnimationStateTransitionRequest
-                    {
-                        AnimationStateId = (sbyte)singleClipState.AnimationStateId,
-                        TransitionDuration = 0
-                    });
+                    entityManager.SetComponentData(entity, AnimationStateTransitionRequest.New(
+                        singleClipState.AnimationStateId,
+                        transitionDuration: 0));
                 }
             }
         }

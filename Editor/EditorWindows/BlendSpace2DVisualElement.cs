@@ -26,6 +26,13 @@ namespace DMotion.Editor
         private Directional2DBlendStateAsset targetState;
         private Directional2DClipWithPosition[] clips;
         
+        // Clip label elements (pooled for performance)
+        private readonly System.Collections.Generic.List<Label> clipLabels = new();
+        private Label selectedValueLabel;
+        
+        // Cached rect for deferred label updates
+        private Rect cachedContentRect;
+        
         #endregion
         
         #region Events
@@ -49,6 +56,92 @@ namespace DMotion.Editor
         public BlendSpace2DVisualElement()
         {
             AddToClassList("blend-space-2d");
+            
+            // Create selected value label (shows position of selected clip)
+            // Added to clipLabelContainer so it renders behind HUD elements
+            selectedValueLabel = new Label();
+            selectedValueLabel.AddToClassList("blend-space-2d__value-label");
+            selectedValueLabel.style.display = DisplayStyle.None;
+            selectedValueLabel.pickingMode = PickingMode.Ignore;
+            clipLabelContainer.Add(selectedValueLabel);
+        }
+        
+        /// <summary>Ensures we have enough label elements for all clips.</summary>
+        private void EnsureClipLabels(int count)
+        {
+            // Add labels if needed (to clipLabelContainer so they render behind HUD)
+            while (clipLabels.Count < count)
+            {
+                var label = new Label();
+                label.AddToClassList("blend-space__clip-label");
+                label.pickingMode = PickingMode.Ignore;
+                clipLabelContainer.Add(label);
+                clipLabels.Add(label);
+            }
+            
+            // Hide extra labels
+            for (int i = 0; i < clipLabels.Count; i++)
+            {
+                clipLabels[i].style.display = i < count ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+        }
+        
+        /// <summary>Updates clip label positions and text.</summary>
+        private void UpdateClipLabels(Rect rect)
+        {
+            if (clips == null || clips.Length == 0)
+            {
+                EnsureClipLabels(0);
+                selectedValueLabel.style.display = DisplayStyle.None;
+                return;
+            }
+            
+            EnsureClipLabels(clips.Length);
+            
+            for (int i = 0; i < clips.Length; i++)
+            {
+                var clip = clips[i];
+                var label = clipLabels[i];
+                var screenPos = BlendSpaceToScreen(clip.Position, rect);
+                
+                // Hide if outside visible area
+                if (screenPos.x < -20 || screenPos.x > rect.width + 20 ||
+                    screenPos.y < -20 || screenPos.y > rect.height + 20)
+                {
+                    label.style.display = DisplayStyle.None;
+                    continue;
+                }
+                
+                label.style.display = DisplayStyle.Flex;
+                label.text = GetClipName(i);
+                
+                // Position label above clip
+                var labelY = screenPos.y - ClipCircleRadius - 18;
+                label.style.left = screenPos.x;
+                label.style.top = labelY;
+                label.style.translate = new Translate(Length.Percent(-50), 0);
+                
+                // Highlight selected using CSS class
+                var isSelected = i == selectedClipIndex;
+                label.EnableInClassList("blend-space__clip-label--selected", isSelected);
+            }
+            
+            // Update selected value label
+            if (selectedClipIndex >= 0 && selectedClipIndex < clips.Length)
+            {
+                var clip = clips[selectedClipIndex];
+                var screenPos = BlendSpaceToScreen(clip.Position, rect);
+                
+                selectedValueLabel.text = $"({clip.Position.x:F2}, {clip.Position.y:F2})";
+                selectedValueLabel.style.left = screenPos.x;
+                selectedValueLabel.style.top = screenPos.y + ClipCircleRadius + 4;
+                selectedValueLabel.style.translate = new Translate(Length.Percent(-50), 0);
+                selectedValueLabel.style.display = DisplayStyle.Flex;
+            }
+            else
+            {
+                selectedValueLabel.style.display = DisplayStyle.None;
+            }
         }
         
         #endregion
@@ -100,7 +193,11 @@ namespace DMotion.Editor
         
         protected override void DrawClips(Painter2D painter, Rect rect)
         {
-            if (clips == null) return;
+            if (clips == null)
+            {
+                ScheduleOnce("clip-labels", () => EnsureClipLabels(0));
+                return;
+            }
             
             for (var i = 0; i < clips.Length; i++)
             {
@@ -115,8 +212,11 @@ namespace DMotion.Editor
                 }
                 
                 DrawClipCircle(painter, screenPos, i);
-                DrawClipLabel(painter, screenPos, i, rect);
             }
+            
+            // Schedule clip label updates (debounced)
+            cachedContentRect = rect;
+            ScheduleOnce("clip-labels", () => UpdateClipLabels(cachedContentRect));
         }
         
         protected override Vector2 GetClipScreenPosition(int index, Rect rect)
@@ -152,11 +252,8 @@ namespace DMotion.Editor
         
         protected override void HandleZoom(float delta, Vector2 mousePos, Rect rect)
         {
-            WheelDebugLogger.LogWheelEvent("BlendSpace2D.HandleZoom", delta, mousePos, rect);
             var mouseBlendPos = ScreenToBlendSpace(mousePos, rect);
-            var oldZoom = zoom;
             ApplyZoomDelta(delta);
-            WheelDebugLogger.LogWheelEvent($"BlendSpace2D.HandleZoom - zoom changed from {oldZoom:F2} to {zoom:F2}", delta, mousePos, rect);
             var newMouseBlendPos = ScreenToBlendSpace(mousePos, rect);
             panOffset += (mouseBlendPos - newMouseBlendPos) * zoom;
         }
@@ -289,39 +386,6 @@ namespace DMotion.Editor
                 painter.MoveTo(new Vector2(center.x, 0));
                 painter.LineTo(new Vector2(center.x, rect.height));
                 painter.Stroke();
-            }
-        }
-        
-        private void DrawClipLabel(Painter2D painter, Vector2 screenPos, int clipIndex, Rect rect)
-        {
-            var clipName = GetClipName(clipIndex);
-            var isSelected = clipIndex == selectedClipIndex;
-            
-            // Calculate label position (above clip)
-            var labelWidth = clipName.Length * 7f + 8f;
-            var labelHeight = 14f;
-            var labelX = screenPos.x - labelWidth / 2;
-            var labelY = screenPos.y - ClipCircleRadius - labelHeight - 4;
-            
-            // Draw label background
-            var labelRect = new Rect(labelX - 2, labelY, labelWidth + 4, labelHeight + 2);
-            DrawFilledRect(painter, labelRect, LabelBackgroundColor);
-            
-            // Note: Painter2D doesn't support text. Labels would need child Label elements
-            // or we accept that clip names won't be drawn in the pure Painter2D version.
-            // The clip colors and selection rings provide visual identification.
-            
-            // Draw value below selected clip
-            if (isSelected && clips != null && clipIndex < clips.Length)
-            {
-                var clip = clips[clipIndex];
-                var valueText = $"({clip.Position.x:F2}, {clip.Position.y:F2})";
-                var valueWidth = valueText.Length * 6f + 4f;
-                var valueX = screenPos.x - valueWidth / 2;
-                var valueY = screenPos.y + ClipCircleRadius + 4;
-                
-                var valueRect = new Rect(valueX - 2, valueY, valueWidth + 4, 14);
-                DrawFilledRect(painter, valueRect, LabelBackgroundColor);
             }
         }
         

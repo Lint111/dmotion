@@ -1,0 +1,48 @@
+/* BreadcrumbBar styles */
+/* Colors match PreviewEditorColors.Breadcrumb* constants */
+
+.breadcrumb-bar {
+    flex-direction: row;
+    align-items: center;
+    padding-left: 8px;
+    padding-right: 8px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+    background-color: rgb(56, 56, 56); /* BreadcrumbBackground: 0.22 */
+    min-height: 24px;
+    border-bottom-width: 1px;
+    border-bottom-color: rgb(26, 26, 26); /* BreadcrumbBorder: 0.1 */
+}
+
+.breadcrumb-container {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.breadcrumb-separator {
+    color: rgb(128, 128, 128); /* BreadcrumbSeparator: 0.5 */
+    margin-left: 6px;
+    margin-right: 6px;
+    -unity-font-style: normal;
+}
+
+.breadcrumb-item {
+    -unity-font-style: normal;
+    color: rgb(153, 204, 255); /* BreadcrumbLink: 0.6, 0.8, 1.0 */
+}
+
+.breadcrumb-item--current {
+    -unity-font-style: bold;
+    color: rgb(255, 255, 255); /* BreadcrumbCurrent: white */
+}
+
+.breadcrumb-item--link:hover {
+    color: rgb(204, 230, 255); /* BreadcrumbLinkHover: 0.8, 0.9, 1.0 */
+    -unity-font-style: bold-and-italic;
+}
+
+.breadcrumb-placeholder {
+    color: rgb(128, 128, 128); /* BreadcrumbSeparator */
+    -unity-font-style: italic;
+}
