@@ -165,9 +165,7 @@ namespace DMotion.Editor
                     break;
                     
                 case PreviewMode.EcsRuntime:
-                    // TODO: Implement EcsPreviewBackend in Phase 5
-                    Debug.LogWarning("[PreviewSession] ECS Runtime preview not yet implemented. Falling back to Authoring mode.");
-                    activeBackend = new PlayableGraphBackend();
+                    activeBackend = new EcsPreviewBackend();
                     break;
                     
                 default:
