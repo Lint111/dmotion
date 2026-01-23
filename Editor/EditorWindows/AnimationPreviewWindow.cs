@@ -20,6 +20,7 @@ namespace DMotion.Editor
         private const float MinPreviewHeight = 200f;
         private const float DefaultSplitPosition = 300f;
         private const string PreviewModelPrefKeyPrefix = "DMotion.AnimationPreview.PreviewModel.";
+        private const string PreviewModePrefKey = "DMotion.AnimationPreview.PreviewMode";
 
         #region Serialized State
 
@@ -134,7 +135,10 @@ namespace DMotion.Editor
             
             // Create extracted components
             CreateBuilders();
-            previewSession = new PreviewSession(PreviewMode.Authoring);
+            
+            // Create preview session with saved mode preference
+            var savedMode = LoadSavedPreviewMode();
+            previewSession = new PreviewSession(savedMode);
             
             // Restore saved camera state
             if (savedCameraState.IsValid)
@@ -303,9 +307,22 @@ namespace DMotion.Editor
             var toolbar = new Toolbar();
             toolbar.AddToClassList("preview-toolbar");
 
-            // Mode dropdown (placeholder for future implementation)
-            modeDropdown = new ToolbarMenu { text = "Preview" };
-            modeDropdown.menu.AppendAction("Preview Mode", _ => { }, DropdownMenuAction.Status.Checked);
+            // Mode dropdown for switching between Authoring and ECS preview
+            modeDropdown = new ToolbarMenu();
+            UpdateModeDropdownText();
+            modeDropdown.menu.AppendAction(
+                "Authoring (PlayableGraph)", 
+                _ => SetPreviewMode(PreviewMode.Authoring),
+                action => previewSession?.Mode == PreviewMode.Authoring 
+                    ? DropdownMenuAction.Status.Checked 
+                    : DropdownMenuAction.Status.Normal);
+            modeDropdown.menu.AppendAction(
+                "ECS Runtime", 
+                _ => SetPreviewMode(PreviewMode.EcsRuntime),
+                action => previewSession?.Mode == PreviewMode.EcsRuntime 
+                    ? DropdownMenuAction.Status.Checked 
+                    : DropdownMenuAction.Status.Normal);
+            modeDropdown.tooltip = "Switch between authoring preview (PlayableGraph) and runtime preview (ECS)";
             toolbar.Add(modeDropdown);
 
             // Spacer
@@ -427,6 +444,45 @@ namespace DMotion.Editor
             return null;
         }
 
+        #endregion
+        
+        #region Preview Mode
+        
+        private void SetPreviewMode(PreviewMode mode)
+        {
+            if (previewSession == null) return;
+            if (previewSession.Mode == mode) return;
+            
+            previewSession.Mode = mode;
+            UpdateModeDropdownText();
+            
+            // Persist the selection
+            EditorPrefs.SetInt(PreviewModePrefKey, (int)mode);
+            
+            // Recreate preview with new mode
+            UpdateSelectionUI();
+            Repaint();
+        }
+        
+        private void UpdateModeDropdownText()
+        {
+            if (modeDropdown == null) return;
+            
+            var mode = previewSession?.Mode ?? PreviewMode.Authoring;
+            modeDropdown.text = mode switch
+            {
+                PreviewMode.Authoring => "Authoring",
+                PreviewMode.EcsRuntime => "ECS Runtime",
+                _ => "Preview"
+            };
+        }
+        
+        private PreviewMode LoadSavedPreviewMode()
+        {
+            var savedMode = EditorPrefs.GetInt(PreviewModePrefKey, (int)PreviewMode.Authoring);
+            return (PreviewMode)savedMode;
+        }
+        
         #endregion
 
         #region Selection Event Handlers
