@@ -610,7 +610,8 @@ namespace DMotion.Editor
                 else if (condition.Parameter is IntParameterAsset)
                 {
                     // Int condition - set to a value that satisfies the comparison
-                    int targetValue = GetSatisfyingIntValue((IntConditionComparison)condition.ComparisonMode, condition.ComparisonValue);
+                    // ComparisonValue is stored as float in TransitionCondition, cast to int
+                    int targetValue = GetSatisfyingIntValue((IntConditionComparison)condition.ComparisonMode, (int)condition.ComparisonValue);
                     SetIntParameterOnEntity(em, entity, paramHash, targetValue);
                 }
             }
