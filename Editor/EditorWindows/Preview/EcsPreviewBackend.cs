@@ -79,7 +79,7 @@ namespace DMotion.Editor
         {
             worldService = new EcsPreviewWorldService();
             entityBrowser = new EcsEntityBrowser();
-            sceneManager = new EcsPreviewSceneManager();
+            sceneManager = EcsPreviewSceneManager.Instance;
         }
         
         #endregion

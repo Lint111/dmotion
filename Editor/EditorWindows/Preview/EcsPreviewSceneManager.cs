@@ -12,9 +12,55 @@ namespace DMotion.Editor
     /// <summary>
     /// Manages automatic creation and setup of preview scenes for ECS animation preview.
     /// Creates a temporary scene with SubScene containing the preview entity.
+    /// Singleton to ensure all preview backends share the same scene.
     /// </summary>
     internal class EcsPreviewSceneManager : IDisposable
     {
+        #region Singleton
+        
+        private static EcsPreviewSceneManager instance;
+        private static readonly object lockObj = new object();
+        private int referenceCount;
+        
+        /// <summary>
+        /// Gets the singleton instance, creating it if necessary.
+        /// Call Release() when done to allow cleanup.
+        /// </summary>
+        public static EcsPreviewSceneManager Instance
+        {
+            get
+            {
+                lock (lockObj)
+                {
+                    if (instance == null)
+                    {
+                        instance = new EcsPreviewSceneManager();
+                    }
+                    instance.referenceCount++;
+                    return instance;
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Releases a reference to the singleton.
+        /// When all references are released, the instance can be cleaned up.
+        /// </summary>
+        public void Release()
+        {
+            lock (lockObj)
+            {
+                referenceCount--;
+                if (referenceCount <= 0 && instance != null)
+                {
+                    instance.DisposeInternal();
+                    instance = null;
+                }
+            }
+        }
+        
+        #endregion
+        
         #region Constants
         
         private const string PreviewFolderPath = "Assets/DMotion_PreviewTemp";
@@ -394,7 +440,18 @@ namespace DMotion.Editor
         
         #region IDisposable
         
+        /// <summary>
+        /// Releases a reference to the singleton. Use this instead of Dispose().
+        /// </summary>
         public void Dispose()
+        {
+            Release();
+        }
+        
+        /// <summary>
+        /// Internal disposal - only called when all references are released.
+        /// </summary>
+        private void DisposeInternal()
         {
             Close();
         }
