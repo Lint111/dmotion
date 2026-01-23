@@ -45,7 +45,11 @@ namespace DMotion.Editor
         private bool isInitialized;
         private bool entityCreated;
         
-        // Camera state (not used in ECS mode, but required by interface)
+        // Hybrid renderer for 3D preview
+        private EcsHybridRenderer hybridRenderer;
+        private bool rendererInitialized;
+        
+        // Camera state
         private PlayableGraphPreview.CameraState cameraState;
         
         // Preview model
@@ -76,8 +80,15 @@ namespace DMotion.Editor
         
         public PlayableGraphPreview.CameraState CameraState
         {
-            get => cameraState;
-            set => cameraState = value;
+            get => rendererInitialized ? hybridRenderer.CameraState : cameraState;
+            set
+            {
+                cameraState = value;
+                if (rendererInitialized)
+                {
+                    hybridRenderer.CameraState = value;
+                }
+            }
         }
         
         #endregion
@@ -188,7 +199,12 @@ namespace DMotion.Editor
         public void SetPreviewModel(GameObject model)
         {
             previewModel = model;
-            // Phase 6B: Use model to set up skeleton components for rendering
+            
+            // Initialize or reinitialize the hybrid renderer with the new model
+            if (entityCreated)
+            {
+                TryInitializeRenderer();
+            }
         }
         
         public void Clear()
@@ -199,6 +215,11 @@ namespace DMotion.Editor
             errorMessage = null;
             isInitialized = false;
             entityCreated = false;
+            
+            // Dispose renderer
+            hybridRenderer?.Dispose();
+            hybridRenderer = null;
+            rendererInitialized = false;
             
             worldService.DestroyPreviewEntity();
         }
@@ -362,6 +383,10 @@ namespace DMotion.Editor
                 }
                 
                 entityCreated = true;
+                
+                // Try to initialize the hybrid renderer if we have a model
+                TryInitializeRenderer();
+                
                 return true;
             }
             catch (Exception e)
@@ -369,6 +394,45 @@ namespace DMotion.Editor
                 errorMessage = $"Entity creation failed:\n{e.Message}";
                 Debug.LogError($"[EcsPreviewBackend] {errorMessage}\n{e.StackTrace}");
                 return false;
+            }
+        }
+        
+        /// <summary>
+        /// Tries to initialize the hybrid renderer for 3D preview.
+        /// Requires both a StateMachineAsset and a preview model.
+        /// </summary>
+        private void TryInitializeRenderer()
+        {
+            // Dispose existing renderer
+            if (hybridRenderer != null)
+            {
+                hybridRenderer.Dispose();
+                hybridRenderer = null;
+                rendererInitialized = false;
+            }
+            
+            // Need both state machine and model
+            if (stateMachineAsset == null || previewModel == null)
+            {
+                return;
+            }
+            
+            try
+            {
+                hybridRenderer = new EcsHybridRenderer();
+                rendererInitialized = hybridRenderer.Initialize(stateMachineAsset, previewModel);
+                
+                if (rendererInitialized && cameraState.IsValid)
+                {
+                    hybridRenderer.CameraState = cameraState;
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[EcsPreviewBackend] Failed to initialize hybrid renderer: {e.Message}");
+                hybridRenderer?.Dispose();
+                hybridRenderer = null;
+                rendererInitialized = false;
             }
         }
         
@@ -472,9 +536,15 @@ namespace DMotion.Editor
                 };
                 GUI.Label(rect, errorMessage, style);
             }
+            else if (isInitialized && entityCreated && rendererInitialized)
+            {
+                // Phase 6B: 3D rendering via hybrid renderer
+                var samplers = worldService.GetActiveSamplers();
+                hybridRenderer.Render(samplers, rect);
+            }
             else if (isInitialized && entityCreated)
             {
-                // Phase 6A: Show state machine info (no 3D rendering yet)
+                // Phase 6A: Show state machine info (no model available for 3D rendering)
                 DrawStateInfo(rect);
             }
             else if (isInitialized)
@@ -578,24 +648,39 @@ namespace DMotion.Editor
                 }
             }
             
-            // Note about Phase 6B - positioned at ~70% down
+            // Note - positioned at ~70% down
             var noteHeight = 36f;
             var noteY = rect.y + rect.height * 0.7f;
             var noteRect = new Rect(rect.x, noteY, rect.width, noteHeight);
-            GUI.Label(noteRect, "State machine logic active.\n3D rendering coming in Phase 6B.", noteStyle);
+            GUI.Label(noteRect, "Drag a model prefab to the\nPreview Model field for 3D preview.", noteStyle);
         }
         
         public bool HandleInput(Rect rect)
         {
-            // Camera controls would go here
-            // For now, no input handling in ECS mode
+            if (!rendererInitialized) return false;
+            
+            // Forward camera controls to hybrid renderer
+            if (rect.Contains(Event.current.mousePosition))
+            {
+                hybridRenderer.HandleCamera();
+                
+                if (Event.current.type == EventType.MouseDrag || Event.current.type == EventType.ScrollWheel)
+                {
+                    return true;
+                }
+            }
+            
             return false;
         }
         
         public void ResetCameraView()
         {
-            // Reset camera state
             cameraState = PlayableGraphPreview.CameraState.Invalid;
+            
+            if (rendererInitialized)
+            {
+                hybridRenderer.ResetCameraView();
+            }
         }
         
         public PreviewSnapshot GetSnapshot()
@@ -631,6 +716,10 @@ namespace DMotion.Editor
         
         public void Dispose()
         {
+            hybridRenderer?.Dispose();
+            hybridRenderer = null;
+            rendererInitialized = false;
+            
             worldService?.Dispose();
             worldService = null;
             

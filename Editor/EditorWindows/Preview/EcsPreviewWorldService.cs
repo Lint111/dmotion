@@ -436,6 +436,59 @@ namespace DMotion.Editor
         
         #endregion
         
+        #region Sampler Extraction
+        
+        /// <summary>
+        /// Extracted clip sampler data for driving external rendering.
+        /// </summary>
+        public struct ExtractedSampler
+        {
+            public ushort ClipIndex;
+            public float Time;
+            public float Weight;
+        }
+        
+        /// <summary>
+        /// Extracts active clip samplers from the preview entity.
+        /// Used for hybrid rendering where ECS drives logic but PlayableGraph samples poses.
+        /// </summary>
+        /// <returns>Array of active samplers with clip index, time, and weight.</returns>
+        public ExtractedSampler[] GetActiveSamplers()
+        {
+            if (!IsInitialized || previewEntity == Entity.Null)
+            {
+                return Array.Empty<ExtractedSampler>();
+            }
+            
+            var em = world.EntityManager;
+            if (!em.HasBuffer<ClipSampler>(previewEntity))
+            {
+                return Array.Empty<ExtractedSampler>();
+            }
+            
+            var samplers = em.GetBuffer<ClipSampler>(previewEntity);
+            if (samplers.Length == 0)
+            {
+                return Array.Empty<ExtractedSampler>();
+            }
+            
+            var result = new ExtractedSampler[samplers.Length];
+            for (int i = 0; i < samplers.Length; i++)
+            {
+                var sampler = samplers[i];
+                result[i] = new ExtractedSampler
+                {
+                    ClipIndex = sampler.ClipIndex,
+                    Time = sampler.Time,
+                    Weight = sampler.Weight
+                };
+            }
+            
+            return result;
+        }
+        
+        #endregion
+        
         #region IDisposable
         
         public void Dispose()
