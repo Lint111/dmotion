@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using DMotion;
 using DMotion.Authoring;
 using Latios.Kinemation;
 using Unity.Collections;
@@ -523,7 +524,8 @@ namespace DMotion.Editor
         }
         
         /// <summary>
-        /// Triggers a state transition on the selected browser entity.
+        /// Triggers a state transition on the selected browser entity by setting
+        /// the parameters to satisfy the transition conditions.
         /// </summary>
         private void TriggerTransitionOnBrowserEntity()
         {
@@ -538,33 +540,137 @@ namespace DMotion.Editor
             var em = world.EntityManager;
             if (!em.Exists(entity)) return;
             
-            // Find the target state index in the state machine
-            int toStateIndex = stateMachineAsset.States.IndexOf(transitionToState);
-            if (toStateIndex < 0) return;
+            // Find the transition definition
+            StateOutTransition transition = FindTransitionDefinition();
+            if (transition == null)
+            {
+                UnityEngine.Debug.LogWarning($"[EcsPreviewBackend] Could not find transition from {transitionFromState?.name ?? "Any"} to {transitionToState.name}");
+                return;
+            }
             
-            // Get the AnimationStateMachine to find the animation state ID
-            if (!em.HasComponent<AnimationStateMachine>(entity)) return;
+            // Set parameters to satisfy transition conditions
+            SetTransitionConditionsOnEntity(em, entity, transition);
             
-            var stateMachine = em.GetComponentData<AnimationStateMachine>(entity);
-            ref var blob = ref stateMachine.StateMachineBlob.Value;
+            UnityEngine.Debug.Log($"[EcsPreviewBackend] Set conditions for transition to {transitionToState.name}");
+        }
+        
+        /// <summary>
+        /// Finds the StateOutTransition definition for the current transition preview.
+        /// </summary>
+        private StateOutTransition FindTransitionDefinition()
+        {
+            if (transitionToState == null) return null;
             
-            // Validate state index
-            if (toStateIndex >= blob.States.Length) return;
+            // Check from state's out transitions
+            if (transitionFromState != null && transitionFromState.OutTransitions != null)
+            {
+                foreach (var t in transitionFromState.OutTransitions)
+                {
+                    if (t.ToState == transitionToState)
+                        return t;
+                }
+            }
             
-            // The animation state for this state machine state
-            // Note: In ECS, animation states are created dynamically when entering states
-            // For preview, we need to request a transition
-            if (!em.HasComponent<AnimationStateTransitionRequest>(entity)) return;
+            // Check any state transitions
+            if (stateMachineAsset != null && stateMachineAsset.AnyStateTransitions != null)
+            {
+                foreach (var t in stateMachineAsset.AnyStateTransitions)
+                {
+                    if (t.ToState == transitionToState)
+                        return t;
+                }
+            }
             
-            // Create transition request
-            var request = AnimationStateTransitionRequest.New(
-                (byte)toStateIndex, // This is state machine state index, not animation state ID
-                transitionDuration,
-                transitionFromState != null ? (short)stateMachineAsset.States.IndexOf(transitionFromState) : (short)-1,
-                (short)0, // TODO: Find correct transition index
-                TransitionSource.State);
+            return null;
+        }
+        
+        /// <summary>
+        /// Sets parameters on the entity to satisfy transition conditions.
+        /// </summary>
+        private void SetTransitionConditionsOnEntity(EntityManager em, Entity entity, StateOutTransition transition)
+        {
+            if (transition.Conditions == null || transition.Conditions.Count == 0)
+            {
+                // No conditions - transition might be exit-time only
+                return;
+            }
             
-            em.SetComponentData(entity, request);
+            foreach (var condition in transition.Conditions)
+            {
+                if (condition.Parameter == null) continue;
+                
+                int paramHash = condition.Parameter.Hash;
+                
+                if (condition.Parameter is BoolParameterAsset)
+                {
+                    // Bool condition - set to the expected value
+                    bool targetValue = (BoolConditionComparison)condition.ComparisonMode == BoolConditionComparison.True;
+                    SetBoolParameterOnEntity(em, entity, paramHash, targetValue);
+                }
+                else if (condition.Parameter is IntParameterAsset)
+                {
+                    // Int condition - set to a value that satisfies the comparison
+                    int targetValue = GetSatisfyingIntValue((IntConditionComparison)condition.ComparisonMode, condition.ComparisonValue);
+                    SetIntParameterOnEntity(em, entity, paramHash, targetValue);
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Gets an int value that satisfies the given comparison.
+        /// </summary>
+        private static int GetSatisfyingIntValue(IntConditionComparison comparison, int comparisonValue)
+        {
+            return comparison switch
+            {
+                IntConditionComparison.Equal => comparisonValue,
+                IntConditionComparison.NotEqual => comparisonValue + 1,
+                IntConditionComparison.Greater => comparisonValue + 1,
+                IntConditionComparison.GreaterOrEqual => comparisonValue,
+                IntConditionComparison.Less => comparisonValue - 1,
+                IntConditionComparison.LessOrEqual => comparisonValue,
+                _ => comparisonValue
+            };
+        }
+        
+        /// <summary>
+        /// Sets a bool parameter on the entity by hash.
+        /// </summary>
+        private static void SetBoolParameterOnEntity(EntityManager em, Entity entity, int hash, bool value)
+        {
+            if (!em.HasBuffer<BoolParameter>(entity)) return;
+            
+            var buffer = em.GetBuffer<BoolParameter>(entity);
+            for (int i = 0; i < buffer.Length; i++)
+            {
+                if (buffer[i].Hash == hash)
+                {
+                    var param = buffer[i];
+                    param.Value = value;
+                    buffer[i] = param;
+                    return;
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Sets an int parameter on the entity by hash.
+        /// </summary>
+        private static void SetIntParameterOnEntity(EntityManager em, Entity entity, int hash, int value)
+        {
+            if (!em.HasBuffer<IntParameter>(entity)) return;
+            
+            var buffer = em.GetBuffer<IntParameter>(entity);
+            for (int i = 0; i < buffer.Length; i++)
+            {
+                if (buffer[i].Hash == hash)
+                {
+                    var param = buffer[i];
+                    param.Value = value;
+                    buffer[i] = param;
+                    return;
+                }
+            }
         }
         
         /// <summary>
