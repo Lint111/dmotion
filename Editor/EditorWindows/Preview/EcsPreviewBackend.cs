@@ -1064,37 +1064,152 @@ namespace DMotion.Editor
             // This prevents ECS systems from advancing time
             if (isPreviewTimeControlled && !isPreviewPlaying && entityBrowser.HasSelection)
             {
-                // Re-apply sampler times each frame to override system updates
-                SetSamplerTimesOnBrowserEntity(normalizedTime);
+                if (IsTransitionPreview)
+                {
+                    SetTransitionProgressOnBrowserEntity(transitionProgress);
+                }
+                else
+                {
+                    SetSamplerTimesOnBrowserEntity(normalizedTime);
+                }
                 needsRepaint = true;
             }
             else if (isPreviewPlaying && entityBrowser.HasSelection)
             {
-                // When playing, sync normalizedTime from entity for UI display
-                float clipDuration = GetSelectedEntityClipDuration();
-                
-                if (clipDuration <= 0) return needsRepaint;
-
-                var entity = entityBrowser.SelectedEntity;
-                var world = entityBrowser.SelectedWorld;
-
-                bool worldValid = world != null && world.IsCreated;
-
-                if(!worldValid) return needsRepaint;
-
-                var em = world.EntityManager;
-                bool entityValid = em.Exists(entity) && em.HasBuffer<ClipSampler>(entity);
-
-                if (!entityValid) return needsRepaint;
-
-                var samplers = em.GetBuffer<ClipSampler>(entity);
-                bool hasSamplers = entityValid && samplers.Length > 0;
-
-                return needsRepaint;
+                // When playing, sync state from entity for UI display
+                SyncStateFromEntity();
+                needsRepaint = true;
             }
 
-
             return needsRepaint;
+        }
+        
+        /// <summary>
+        /// Syncs normalizedTime, transitionProgress, and blendPosition from the entity.
+        /// </summary>
+        private void SyncStateFromEntity()
+        {
+            if (!entityBrowser.HasSelection) return;
+            
+            var entity = entityBrowser.SelectedEntity;
+            var world = entityBrowser.SelectedWorld;
+            
+            if (world == null || !world.IsCreated) return;
+            
+            var em = world.EntityManager;
+            if (!em.Exists(entity)) return;
+            
+            // Sync normalized time from samplers
+            if (em.HasBuffer<ClipSampler>(entity))
+            {
+                var samplers = em.GetBuffer<ClipSampler>(entity);
+                if (samplers.Length > 0)
+                {
+                    float clipDuration = samplers[0].Duration;
+                    if (clipDuration > 0)
+                    {
+                        normalizedTime = samplers[0].Time / clipDuration;
+                        normalizedTime = normalizedTime - math.floor(normalizedTime); // Wrap to 0-1
+                    }
+                }
+            }
+            
+            // Sync transition progress if in transition
+            if (IsTransitionPreview && em.HasComponent<AnimationStateTransition>(entity))
+            {
+                var transition = em.GetComponentData<AnimationStateTransition>(entity);
+                if (transition.IsValid && em.HasBuffer<AnimationState>(entity))
+                {
+                    var animationStates = em.GetBuffer<AnimationState>(entity);
+                    int toStateIndex = animationStates.IdToIndex((byte)transition.AnimationStateId);
+                    
+                    if (toStateIndex >= 0 && transition.TransitionDuration > 0)
+                    {
+                        var toState = animationStates[toStateIndex];
+                        transitionProgress = math.clamp(toState.Time / transition.TransitionDuration, 0, 1);
+                    }
+                }
+            }
+            
+            // Sync blend position from float parameters
+            SyncBlendPositionFromEntity(em, entity);
+        }
+        
+        /// <summary>
+        /// Reads blend parameter values from the entity and updates local blendPosition.
+        /// </summary>
+        private void SyncBlendPositionFromEntity(EntityManager em, Entity entity)
+        {
+            if (!em.HasBuffer<FloatParameter>(entity)) return;
+            
+            var floatParams = em.GetBuffer<FloatParameter>(entity);
+            
+            // Get blend parameter hash from current state
+            if (currentState is LinearBlendStateAsset linearBlend && linearBlend.BlendParameter != null)
+            {
+                if (!linearBlend.UsesIntParameter)
+                {
+                    int hash = linearBlend.BlendParameter.Hash;
+                    for (int i = 0; i < floatParams.Length; i++)
+                    {
+                        if (floatParams[i].Hash == hash)
+                        {
+                            blendPosition.x = floatParams[i].Value;
+                            targetBlendPosition.x = blendPosition.x;
+                            break;
+                        }
+                    }
+                }
+                else if (em.HasBuffer<IntParameter>(entity))
+                {
+                    // Int parameter - read and convert to normalized 0-1
+                    var intParams = em.GetBuffer<IntParameter>(entity);
+                    int hash = linearBlend.BlendParameter.Hash;
+                    for (int i = 0; i < intParams.Length; i++)
+                    {
+                        if (intParams[i].Hash == hash)
+                        {
+                            int range = linearBlend.IntRangeMax - linearBlend.IntRangeMin;
+                            if (range > 0)
+                            {
+                                blendPosition.x = (float)(intParams[i].Value - linearBlend.IntRangeMin) / range;
+                                targetBlendPosition.x = blendPosition.x;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            else if (currentState is Directional2DBlendStateAsset blend2D)
+            {
+                // 2D blend - read X and Y parameters
+                if (blend2D.BlendParameterX != null)
+                {
+                    int hashX = blend2D.BlendParameterX.Hash;
+                    for (int i = 0; i < floatParams.Length; i++)
+                    {
+                        if (floatParams[i].Hash == hashX)
+                        {
+                            blendPosition.x = floatParams[i].Value;
+                            targetBlendPosition.x = blendPosition.x;
+                            break;
+                        }
+                    }
+                }
+                if (blend2D.BlendParameterY != null)
+                {
+                    int hashY = blend2D.BlendParameterY.Hash;
+                    for (int i = 0; i < floatParams.Length; i++)
+                    {
+                        if (floatParams[i].Hash == hashY)
+                        {
+                            blendPosition.y = floatParams[i].Value;
+                            targetBlendPosition.y = blendPosition.y;
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
 
