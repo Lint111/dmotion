@@ -998,11 +998,17 @@ namespace DMotion.Editor
 
         #region IPreviewBackend Blend Control
 
+        public void SetBlendPosition1D(float value)
+        {
+            Debug.Log($"[EcsPreviewBackend] SetBlendPosition1D called: value={value}");
+            targetBlendPosition = new float2(value, 0);
+        }
 
-        public void SetBlendPosition1D(float value) => targetBlendPosition = new float2(value, 0);
-
-
-        public void SetBlendPosition2D(float2 position) => targetBlendPosition = position;
+        public void SetBlendPosition2D(float2 position)
+        {
+            Debug.Log($"[EcsPreviewBackend] SetBlendPosition2D called: position={position}");
+            targetBlendPosition = position;
+        }
         
         public void SetBlendPosition1DImmediate(float value)
         {
@@ -1185,14 +1191,22 @@ namespace DMotion.Editor
         
         #region IPreviewBackend Update & Render
         
+        private static int tickLogCounter = 0;
+        
         public bool Tick(float deltaTime)
         {
             bool needsRepaint = false;
+            
+            // Log occasionally to confirm Tick is running
+            if (++tickLogCounter % 60 == 0)
+            {
+                Debug.Log($"[EcsPreviewBackend] Tick running. blendPos={blendPosition}, targetBlendPos={targetBlendPosition}, useEntityBrowserMode={useEntityBrowserMode}");
+            }
 
             // Smooth blend position interpolation
-
             if (math.any(blendPosition != targetBlendPosition))
             {
+                Debug.Log($"[EcsPreviewBackend] Blend interpolating: {blendPosition} -> {targetBlendPosition}");
                 // Lerp towards target
                 var diff = targetBlendPosition - blendPosition;
                 var maxStep = BlendSmoothSpeed * deltaTime;
