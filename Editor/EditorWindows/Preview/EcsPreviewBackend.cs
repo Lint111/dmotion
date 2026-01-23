@@ -53,6 +53,10 @@ namespace DMotion.Editor
         private EcsEntityBrowser entityBrowser;
         private bool useEntityBrowserMode = true; // Default to entity browser mode
         
+        // Scene manager for automatic SubScene setup
+        private EcsPreviewSceneManager sceneManager;
+        private bool sceneSetupRequested;
+        
         // Camera state
         private PlayableGraphPreview.CameraState cameraState;
         
@@ -67,6 +71,7 @@ namespace DMotion.Editor
         {
             worldService = new EcsPreviewWorldService();
             entityBrowser = new EcsEntityBrowser();
+            sceneManager = new EcsPreviewSceneManager();
         }
         
         #endregion
@@ -108,6 +113,7 @@ namespace DMotion.Editor
             errorMessage = null;
             isInitialized = false;
             entityCreated = false;
+            sceneSetupRequested = false;
             
             if (state == null)
             {
@@ -123,6 +129,18 @@ namespace DMotion.Editor
                 return;
             }
             
+            // Store the state machine for scene setup
+            stateMachineAsset = newStateMachineAsset;
+            
+            // In entity browser mode, we set up the preview scene automatically
+            if (useEntityBrowserMode)
+            {
+                sceneSetupRequested = true;
+                isInitialized = true;
+                return;
+            }
+            
+            // Legacy isolated preview mode (below)
             // Create world if not already created
             if (!worldService.IsInitialized)
             {
@@ -130,15 +148,11 @@ namespace DMotion.Editor
             }
             
             // Rebuild blobs if state machine changed
-            if (stateMachineAsset != newStateMachineAsset)
+            DisposeBlobs();
+            
+            if (!TryCreateBlobs())
             {
-                DisposeBlobs();
-                stateMachineAsset = newStateMachineAsset;
-                
-                if (!TryCreateBlobs())
-                {
-                    return;
-                }
+                return;
             }
             
             // Create preview entity
@@ -578,7 +592,7 @@ namespace DMotion.Editor
         private void DrawEntityBrowserMode(Rect rect)
         {
             // Toolbar at top
-            var toolbarHeight = 20f;
+            var toolbarHeight = 22f;
             var toolbarRect = new Rect(rect.x, rect.y, rect.width, toolbarHeight);
             
             EditorGUI.DrawRect(toolbarRect, new Color(0.2f, 0.2f, 0.2f));
@@ -589,11 +603,28 @@ namespace DMotion.Editor
             GUILayout.Label("ECS Entity Browser", EditorStyles.boldLabel);
             GUILayout.FlexibleSpace();
             
-            // Mode toggle (for future - switch between browser and isolated preview)
-            // if (GUILayout.Button("Isolated Preview", EditorStyles.miniButton, GUILayout.Width(100)))
-            // {
-            //     useEntityBrowserMode = false;
-            // }
+            // Setup preview scene button
+            if (stateMachineAsset != null)
+            {
+                if (sceneManager.IsSetup)
+                {
+                    if (GUILayout.Button("Rebake", EditorStyles.miniButton, GUILayout.Width(60)))
+                    {
+                        sceneManager.ForceBake();
+                    }
+                    if (GUILayout.Button("Close Scene", EditorStyles.miniButton, GUILayout.Width(80)))
+                    {
+                        sceneManager.Close();
+                    }
+                }
+                else
+                {
+                    if (GUILayout.Button("Open Preview Scene", EditorStyles.miniButton, GUILayout.Width(120)))
+                    {
+                        SetupPreviewScene();
+                    }
+                }
+            }
             
             EditorGUILayout.EndHorizontal();
             GUILayout.EndArea();
@@ -621,6 +652,29 @@ namespace DMotion.Editor
             // Draw browser and inspector
             entityBrowser.DrawBrowser(browserRect);
             entityBrowser.DrawInspector(inspectorRect);
+        }
+        
+        /// <summary>
+        /// Sets up the preview scene with the current state machine and model.
+        /// </summary>
+        private void SetupPreviewScene()
+        {
+            if (stateMachineAsset == null)
+            {
+                errorMessage = "No state machine selected";
+                return;
+            }
+            
+            // Use the preview model if set, otherwise let scene manager find one
+            if (sceneManager.Setup(stateMachineAsset, previewModel))
+            {
+                // Refresh entity browser after scene setup
+                entityBrowser.RefreshEntityList();
+            }
+            else
+            {
+                errorMessage = "Failed to set up preview scene.\nEnsure a preview model is assigned.";
+            }
         }
         
         /// <summary>
@@ -781,6 +835,9 @@ namespace DMotion.Editor
         
         public void Dispose()
         {
+            sceneManager?.Dispose();
+            sceneManager = null;
+            
             entityBrowser?.Dispose();
             entityBrowser = null;
             
