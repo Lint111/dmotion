@@ -79,10 +79,7 @@ namespace DMotion.Editor
         {
             Dispose();
             
-            if (stateMachine == null || model == null)
-            {
-                return false;
-            }
+            if (stateMachine == null || model == null) return false;
             
             // Extract all clips from the state machine
             var clipList = new List<AnimationClip>();

@@ -45,9 +45,13 @@ namespace DMotion.Editor
         private bool isInitialized;
         private bool entityCreated;
         
-        // Hybrid renderer for 3D preview
+        // Hybrid renderer for 3D preview (legacy - for isolated preview)
         private EcsHybridRenderer hybridRenderer;
         private bool rendererInitialized;
+        
+        // Entity browser for live entity inspection
+        private EcsEntityBrowser entityBrowser;
+        private bool useEntityBrowserMode = true; // Default to entity browser mode
         
         // Camera state
         private PlayableGraphPreview.CameraState cameraState;
@@ -62,6 +66,7 @@ namespace DMotion.Editor
         public EcsPreviewBackend()
         {
             worldService = new EcsPreviewWorldService();
+            entityBrowser = new EcsEntityBrowser();
         }
         
         #endregion
@@ -525,6 +530,14 @@ namespace DMotion.Editor
             // Draw background
             EditorGUI.DrawRect(rect, new Color(0.15f, 0.15f, 0.15f));
             
+            // Always show entity browser mode for live entity inspection
+            if (useEntityBrowserMode)
+            {
+                DrawEntityBrowserMode(rect);
+                return;
+            }
+            
+            // Legacy isolated preview mode (below)
             // Show error/info message
             if (!string.IsNullOrEmpty(errorMessage))
             {
@@ -556,6 +569,58 @@ namespace DMotion.Editor
                 };
                 GUI.Label(rect, "ECS Preview\nInitializing...", style);
             }
+        }
+        
+        /// <summary>
+        /// Draws the entity browser mode UI.
+        /// Shows list of animation entities and allows inspection/modification.
+        /// </summary>
+        private void DrawEntityBrowserMode(Rect rect)
+        {
+            // Toolbar at top
+            var toolbarHeight = 20f;
+            var toolbarRect = new Rect(rect.x, rect.y, rect.width, toolbarHeight);
+            
+            EditorGUI.DrawRect(toolbarRect, new Color(0.2f, 0.2f, 0.2f));
+            
+            GUILayout.BeginArea(toolbarRect);
+            EditorGUILayout.BeginHorizontal();
+            
+            GUILayout.Label("ECS Entity Browser", EditorStyles.boldLabel);
+            GUILayout.FlexibleSpace();
+            
+            // Mode toggle (for future - switch between browser and isolated preview)
+            // if (GUILayout.Button("Isolated Preview", EditorStyles.miniButton, GUILayout.Width(100)))
+            // {
+            //     useEntityBrowserMode = false;
+            // }
+            
+            EditorGUILayout.EndHorizontal();
+            GUILayout.EndArea();
+            
+            // Split remaining area between browser and inspector
+            var contentRect = new Rect(rect.x, rect.y + toolbarHeight, rect.width, rect.height - toolbarHeight);
+            var splitRatio = 0.5f;
+            
+            var browserRect = new Rect(
+                contentRect.x, 
+                contentRect.y, 
+                contentRect.width * splitRatio, 
+                contentRect.height);
+            
+            var inspectorRect = new Rect(
+                contentRect.x + contentRect.width * splitRatio, 
+                contentRect.y, 
+                contentRect.width * (1 - splitRatio), 
+                contentRect.height);
+            
+            // Draw separator
+            EditorGUI.DrawRect(new Rect(inspectorRect.x - 1, inspectorRect.y, 2, inspectorRect.height), 
+                new Color(0.1f, 0.1f, 0.1f));
+            
+            // Draw browser and inspector
+            entityBrowser.DrawBrowser(browserRect);
+            entityBrowser.DrawInspector(inspectorRect);
         }
         
         /// <summary>
@@ -716,6 +781,9 @@ namespace DMotion.Editor
         
         public void Dispose()
         {
+            entityBrowser?.Dispose();
+            entityBrowser = null;
+            
             hybridRenderer?.Dispose();
             hybridRenderer = null;
             rendererInitialized = false;
