@@ -1,0 +1,455 @@
+using System;
+using Latios;
+using Latios.Kinemation;
+using Unity.Collections;
+using Unity.Entities;
+using UnityEditor;
+using UnityEngine;
+
+namespace DMotion.Editor
+{
+    /// <summary>
+    /// Manages an isolated ECS world for preview purposes.
+    /// The world contains DMotion and Kinemation systems but is NOT connected
+    /// to the player loop - it's updated manually when needed.
+    /// </summary>
+    internal class EcsPreviewWorldService : IDisposable
+    {
+        #region Constants
+        
+        private const string WorldName = "DMotion Preview World";
+        
+        #endregion
+        
+        #region State
+        
+        private LatiosWorld world;
+        private bool isInitialized;
+        private bool isDisposed;
+        
+        // Preview entity
+        private Entity previewEntity;
+        
+        // Systems we need to update manually
+        private SystemHandle animationStateMachineSystem;
+        private SystemHandle blendAnimationStatesSystem;
+        private SystemHandle updateAnimationStatesSystem;
+        private SystemHandle clipSamplingSystem;
+        
+        #endregion
+        
+        #region Properties
+        
+        /// <summary>
+        /// Whether the world is initialized and ready for preview.
+        /// </summary>
+        public bool IsInitialized => isInitialized && !isDisposed && world != null && world.IsCreated;
+        
+        /// <summary>
+        /// The preview world's EntityManager.
+        /// </summary>
+        public EntityManager EntityManager => world?.EntityManager ?? default;
+        
+        /// <summary>
+        /// The preview entity (animated character).
+        /// </summary>
+        public Entity PreviewEntity => previewEntity;
+        
+        #endregion
+        
+        #region Lifecycle
+        
+        /// <summary>
+        /// Creates and initializes the preview world.
+        /// </summary>
+        public void CreateWorld()
+        {
+            if (isInitialized)
+            {
+                Debug.LogWarning("[EcsPreviewWorldService] World already created. Call DestroyWorld first.");
+                return;
+            }
+            
+            if (isDisposed)
+            {
+                Debug.LogError("[EcsPreviewWorldService] Cannot create world - service has been disposed.");
+                return;
+            }
+            
+            try
+            {
+                // Create a Latios World (NOT the default world)
+                world = new LatiosWorld(WorldName);
+                
+                // Get all system types
+                var systems = DefaultWorldInitialization.GetAllSystemTypeIndices(WorldSystemFilterFlags.Default);
+                
+                // Install Unity systems
+                BootstrapTools.InjectUnitySystems(systems, world, world.simulationSystemGroup);
+                
+                // Install Kinemation (required for bone sampling)
+                KinemationBootstrap.InstallKinemation(world);
+                
+                // Install user systems (includes DMotion systems)
+                BootstrapTools.InjectUserSystems(systems, world, world.simulationSystemGroup);
+                
+                // Cache system handles for manual updates
+                CacheSystemHandles();
+                
+                // DO NOT add to player loop - we update manually
+                // ScriptBehaviourUpdateOrder.AppendWorldToCurrentPlayerLoop(world);
+                
+                isInitialized = true;
+                
+                Debug.Log($"[EcsPreviewWorldService] Created preview world: {WorldName}");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[EcsPreviewWorldService] Failed to create world: {e.Message}\n{e.StackTrace}");
+                DestroyWorld();
+            }
+        }
+        
+        /// <summary>
+        /// Destroys the preview world and releases all resources.
+        /// </summary>
+        public void DestroyWorld()
+        {
+            if (world != null && world.IsCreated)
+            {
+                try
+                {
+                    // Complete any pending jobs
+                    world.EntityManager.CompleteAllTrackedJobs();
+                    
+                    // Destroy the preview entity if it exists
+                    if (previewEntity != Entity.Null && world.EntityManager.Exists(previewEntity))
+                    {
+                        world.EntityManager.DestroyEntity(previewEntity);
+                    }
+                    
+                    // Dispose the world
+                    world.Dispose();
+                    
+                    Debug.Log($"[EcsPreviewWorldService] Destroyed preview world: {WorldName}");
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"[EcsPreviewWorldService] Error during world disposal: {e.Message}");
+                }
+            }
+            
+            world = null;
+            previewEntity = Entity.Null;
+            isInitialized = false;
+        }
+        
+        private void CacheSystemHandles()
+        {
+            if (world == null) return;
+            
+            // Get handles to the systems we need to update
+            // These will be used for targeted updates instead of full world.Update()
+            animationStateMachineSystem = world.GetExistingSystem<AnimationStateMachineSystem>();
+            blendAnimationStatesSystem = world.GetExistingSystem<BlendAnimationStatesSystem>();
+            updateAnimationStatesSystem = world.GetExistingSystem<UpdateAnimationStatesSystem>();
+            clipSamplingSystem = world.GetExistingSystem<ClipSamplingSystem>();
+        }
+        
+        #endregion
+        
+        #region Update
+        
+        /// <summary>
+        /// Updates the preview world with the given delta time.
+        /// Call this during preview playback.
+        /// </summary>
+        /// <param name="deltaTime">Time elapsed since last update.</param>
+        public void Update(float deltaTime)
+        {
+            if (!IsInitialized) return;
+            
+            try
+            {
+                // Update time
+                var timeData = new Unity.Core.TimeData(
+                    (float)EditorApplication.timeSinceStartup,
+                    deltaTime);
+                world.SetTime(timeData);
+                
+                // Update the simulation system group (runs all animation systems)
+                world.simulationSystemGroup.Update();
+                
+                // Complete jobs before accessing results
+                world.EntityManager.CompleteAllTrackedJobs();
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[EcsPreviewWorldService] Error during update: {e.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Updates the world for paused preview (dirty check updates).
+        /// Only updates if state has changed.
+        /// </summary>
+        public void UpdateWhilePaused()
+        {
+            if (!IsInitialized) return;
+            
+            // For paused updates, we still need to run systems but with zero delta time
+            Update(0f);
+        }
+        
+        /// <summary>
+        /// Completes all pending jobs. Call before reading entity data.
+        /// </summary>
+        public void CompleteJobs()
+        {
+            if (!IsInitialized) return;
+            world.EntityManager.CompleteAllTrackedJobs();
+        }
+        
+        #endregion
+        
+        #region Entity Management
+        
+        /// <summary>
+        /// Creates the preview entity from a state machine blob.
+        /// Note: Full entity setup requires additional Kinemation components (skeleton, etc.)
+        /// that are typically set up during baking. This method provides basic setup.
+        /// </summary>
+        /// <param name="stateMachineBlob">The baked state machine blob.</param>
+        /// <param name="clipsBlob">The skeleton clip set blob (from Kinemation).</param>
+        /// <param name="clipEventsBlob">Optional clip events blob.</param>
+        /// <returns>The created entity, or Entity.Null if creation failed.</returns>
+        public Entity CreatePreviewEntity(
+            BlobAssetReference<StateMachineBlob> stateMachineBlob,
+            BlobAssetReference<Latios.Kinemation.SkeletonClipSetBlob> clipsBlob,
+            BlobAssetReference<ClipEventsBlob> clipEventsBlob = default)
+        {
+            if (!IsInitialized)
+            {
+                Debug.LogWarning("[EcsPreviewWorldService] Cannot create entity - world not initialized.");
+                return Entity.Null;
+            }
+            
+            // Destroy existing preview entity
+            if (previewEntity != Entity.Null && world.EntityManager.Exists(previewEntity))
+            {
+                world.EntityManager.DestroyEntity(previewEntity);
+            }
+            
+            try
+            {
+                var em = world.EntityManager;
+                
+                // Create the entity with required components
+                previewEntity = em.CreateEntity();
+                
+                // Add state machine component with all required blob references
+                em.AddComponentData(previewEntity, new AnimationStateMachine
+                {
+                    ClipsBlob = clipsBlob,
+                    ClipEventsBlob = clipEventsBlob,
+                    StateMachineBlob = stateMachineBlob,
+                    CurrentState = new StateMachineStateRef { StateIndex = 0, AnimationStateId = 0 }
+                });
+                
+                // Add animation state buffers
+                em.AddBuffer<AnimationState>(previewEntity);
+                em.AddBuffer<AnimationStateTransition>(previewEntity);
+                em.AddBuffer<AnimationStateTransitionRequest>(previewEntity);
+                
+                // Add parameter buffers
+                em.AddBuffer<FloatParameter>(previewEntity);
+                em.AddBuffer<IntParameter>(previewEntity);
+                em.AddBuffer<BoolParameter>(previewEntity);
+                
+                // Add clip samplers buffer (needed for Kinemation)
+                em.AddBuffer<ClipSampler>(previewEntity);
+                
+                // TODO: Additional Kinemation components may be needed:
+                // - OptimizedBoneToRoot
+                // - OptimizedSkeletonState
+                // - etc.
+                // These are typically set up during baking from the skeleton asset.
+                
+                Debug.Log($"[EcsPreviewWorldService] Created preview entity: {previewEntity}");
+                return previewEntity;
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[EcsPreviewWorldService] Failed to create preview entity: {e.Message}");
+                return Entity.Null;
+            }
+        }
+        
+        /// <summary>
+        /// Destroys the current preview entity.
+        /// </summary>
+        public void DestroyPreviewEntity()
+        {
+            if (!IsInitialized) return;
+            
+            if (previewEntity != Entity.Null && world.EntityManager.Exists(previewEntity))
+            {
+                world.EntityManager.DestroyEntity(previewEntity);
+                previewEntity = Entity.Null;
+            }
+        }
+        
+        #endregion
+        
+        #region Parameters
+        
+        /// <summary>
+        /// Sets a float parameter on the preview entity.
+        /// </summary>
+        public void SetFloatParameter(int parameterHash, float value)
+        {
+            if (!IsInitialized || previewEntity == Entity.Null) return;
+            
+            var buffer = world.EntityManager.GetBuffer<FloatParameter>(previewEntity);
+            StateMachineParameterUtils.SetFloat(ref buffer, parameterHash, value);
+        }
+        
+        /// <summary>
+        /// Sets an int parameter on the preview entity.
+        /// </summary>
+        public void SetIntParameter(int parameterHash, int value)
+        {
+            if (!IsInitialized || previewEntity == Entity.Null) return;
+            
+            var buffer = world.EntityManager.GetBuffer<IntParameter>(previewEntity);
+            StateMachineParameterUtils.SetInt(ref buffer, parameterHash, value);
+        }
+        
+        /// <summary>
+        /// Sets a bool parameter on the preview entity.
+        /// </summary>
+        public void SetBoolParameter(int parameterHash, bool value)
+        {
+            if (!IsInitialized || previewEntity == Entity.Null) return;
+            
+            var buffer = world.EntityManager.GetBuffer<BoolParameter>(previewEntity);
+            StateMachineParameterUtils.SetBool(ref buffer, parameterHash, value);
+        }
+        
+        #endregion
+        
+        #region Snapshot
+        
+        /// <summary>
+        /// Gets a snapshot of the current preview state for UI display.
+        /// </summary>
+        public PreviewSnapshot GetSnapshot()
+        {
+            if (!IsInitialized || previewEntity == Entity.Null)
+            {
+                return new PreviewSnapshot
+                {
+                    IsInitialized = false,
+                    ErrorMessage = "Preview world not initialized"
+                };
+            }
+            
+            try
+            {
+                var em = world.EntityManager;
+                
+                if (!em.Exists(previewEntity))
+                {
+                    return new PreviewSnapshot
+                    {
+                        IsInitialized = false,
+                        ErrorMessage = "Preview entity no longer exists"
+                    };
+                }
+                
+                var stateMachine = em.GetComponentData<AnimationStateMachine>(previewEntity);
+                
+                // Get current state time and weights from AnimationState buffer
+                float currentTime = 0f;
+                float[] weights = null;
+                if (em.HasBuffer<AnimationState>(previewEntity))
+                {
+                    var states = em.GetBuffer<AnimationState>(previewEntity);
+                    if (states.Length > 0)
+                    {
+                        weights = new float[states.Length];
+                        for (int i = 0; i < states.Length; i++)
+                        {
+                            weights[i] = states[i].Weight;
+                            
+                            // Get time from current state
+                            if (states[i].Id == stateMachine.CurrentState.AnimationStateId)
+                            {
+                                currentTime = states[i].Time;
+                            }
+                        }
+                    }
+                }
+                
+                // Check for active transition
+                float transitionProgress = -1f;
+                if (em.HasBuffer<AnimationStateTransition>(previewEntity))
+                {
+                    var transitions = em.GetBuffer<AnimationStateTransition>(previewEntity);
+                    if (transitions.Length > 0)
+                    {
+                        var activeTransition = transitions[0];
+                        if (activeTransition.IsValid && activeTransition.TransitionDuration > 0)
+                        {
+                            // Find the transitioning state to get progress
+                            if (em.HasBuffer<AnimationState>(previewEntity))
+                            {
+                                var states = em.GetBuffer<AnimationState>(previewEntity);
+                                for (int i = 0; i < states.Length; i++)
+                                {
+                                    if (states[i].Id == activeTransition.AnimationStateId)
+                                    {
+                                        transitionProgress = states[i].Time / activeTransition.TransitionDuration;
+                                        transitionProgress = Unity.Mathematics.math.saturate(transitionProgress);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                return new PreviewSnapshot
+                {
+                    IsInitialized = true,
+                    NormalizedTime = currentTime,
+                    BlendWeights = weights,
+                    TransitionProgress = transitionProgress,
+                    IsPlaying = true // ECS is always "playing" when updated
+                };
+            }
+            catch (Exception e)
+            {
+                return new PreviewSnapshot
+                {
+                    IsInitialized = false,
+                    ErrorMessage = $"Error reading state: {e.Message}"
+                };
+            }
+        }
+        
+        #endregion
+        
+        #region IDisposable
+        
+        public void Dispose()
+        {
+            if (isDisposed) return;
+            
+            DestroyWorld();
+            isDisposed = true;
+        }
+        
+        #endregion
+    }
+}
