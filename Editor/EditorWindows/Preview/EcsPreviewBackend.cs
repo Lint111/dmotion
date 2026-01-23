@@ -498,14 +498,14 @@ namespace DMotion.Editor
             // Header style
             var headerStyle = new GUIStyle(EditorStyles.boldLabel)
             {
-                alignment = TextAnchor.MiddleCenter,
+                alignment = TextAnchor.UpperCenter,
                 normal = { textColor = new Color(0.9f, 0.9f, 0.9f) }
             };
             
             // Info style
             var infoStyle = new GUIStyle(EditorStyles.label)
             {
-                alignment = TextAnchor.MiddleLeft,
+                alignment = TextAnchor.UpperLeft,
                 wordWrap = true,
                 normal = { textColor = new Color(0.75f, 0.75f, 0.75f) }
             };
@@ -513,63 +513,75 @@ namespace DMotion.Editor
             // Note style
             var noteStyle = new GUIStyle(EditorStyles.miniLabel)
             {
-                alignment = TextAnchor.MiddleCenter,
+                alignment = TextAnchor.LowerCenter,
                 wordWrap = true,
                 normal = { textColor = new Color(0.5f, 0.5f, 0.5f) }
             };
             
-            // Layout
+            // Layout - use manual positioning instead of GUILayout
             var padding = 10f;
-            var contentRect = new Rect(rect.x + padding, rect.y + padding, 
-                                       rect.width - padding * 2, rect.height - padding * 2);
-            
-            GUILayout.BeginArea(contentRect);
-            GUILayout.BeginVertical();
+            var lineHeight = 18f;
+            var y = rect.y + padding;
             
             // Header
-            GUILayout.Label("ECS Runtime Preview", headerStyle);
-            GUILayout.Space(10);
+            GUI.Label(new Rect(rect.x, y, rect.width, lineHeight), "ECS Runtime Preview", headerStyle);
+            y += lineHeight + 10f;
             
             // State info
             if (currentState != null)
             {
-                GUILayout.Label($"State: {currentState.name}", infoStyle);
-                GUILayout.Label($"Type: {currentState.Type}", infoStyle);
+                GUI.Label(new Rect(rect.x + padding, y, rect.width - padding * 2, lineHeight), 
+                    $"State: {currentState.name}", infoStyle);
+                y += lineHeight;
+                GUI.Label(new Rect(rect.x + padding, y, rect.width - padding * 2, lineHeight), 
+                    $"Type: {currentState.Type}", infoStyle);
+                y += lineHeight;
             }
             else if (transitionToState != null)
             {
-                GUILayout.Label($"Transition Preview", infoStyle);
-                GUILayout.Label($"From: {transitionFromState?.name ?? "Any State"}", infoStyle);
-                GUILayout.Label($"To: {transitionToState.name}", infoStyle);
-                GUILayout.Label($"Duration: {transitionDuration:F2}s", infoStyle);
+                GUI.Label(new Rect(rect.x + padding, y, rect.width - padding * 2, lineHeight), 
+                    "Transition Preview", infoStyle);
+                y += lineHeight;
+                GUI.Label(new Rect(rect.x + padding, y, rect.width - padding * 2, lineHeight), 
+                    $"From: {transitionFromState?.name ?? "Any State"}", infoStyle);
+                y += lineHeight;
+                GUI.Label(new Rect(rect.x + padding, y, rect.width - padding * 2, lineHeight), 
+                    $"To: {transitionToState.name}", infoStyle);
+                y += lineHeight;
+                GUI.Label(new Rect(rect.x + padding, y, rect.width - padding * 2, lineHeight), 
+                    $"Duration: {transitionDuration:F2}s", infoStyle);
+                y += lineHeight;
             }
             
-            GUILayout.Space(10);
+            y += 10f;
             
             // Snapshot info
             if (snapshot.IsInitialized)
             {
-                GUILayout.Label($"Time: {snapshot.NormalizedTime:F3}", infoStyle);
+                GUI.Label(new Rect(rect.x + padding, y, rect.width - padding * 2, lineHeight), 
+                    $"Time: {snapshot.NormalizedTime:F3}", infoStyle);
+                y += lineHeight;
                 
                 if (snapshot.BlendWeights != null && snapshot.BlendWeights.Length > 0)
                 {
                     var weightsStr = string.Join(", ", snapshot.BlendWeights.Select(w => w.ToString("F2")));
-                    GUILayout.Label($"Weights: [{weightsStr}]", infoStyle);
+                    GUI.Label(new Rect(rect.x + padding, y, rect.width - padding * 2, lineHeight), 
+                        $"Weights: [{weightsStr}]", infoStyle);
+                    y += lineHeight;
                 }
                 
                 if (snapshot.TransitionProgress >= 0)
                 {
-                    GUILayout.Label($"Transition: {snapshot.TransitionProgress:P0}", infoStyle);
+                    GUI.Label(new Rect(rect.x + padding, y, rect.width - padding * 2, lineHeight), 
+                        $"Transition: {snapshot.TransitionProgress:P0}", infoStyle);
+                    y += lineHeight;
                 }
             }
             
-            GUILayout.FlexibleSpace();
-            
-            // Note about Phase 6B
-            GUILayout.Label("State machine logic active.\n3D rendering coming in Phase 6B.", noteStyle);
-            
-            GUILayout.EndVertical();
-            GUILayout.EndArea();
+            // Note about Phase 6B - positioned at bottom
+            var noteHeight = 36f;
+            var noteRect = new Rect(rect.x, rect.y + rect.height - noteHeight - padding, rect.width, noteHeight);
+            GUI.Label(noteRect, "State machine logic active.\n3D rendering coming in Phase 6B.", noteStyle);
         }
         
         public bool HandleInput(Rect rect)
