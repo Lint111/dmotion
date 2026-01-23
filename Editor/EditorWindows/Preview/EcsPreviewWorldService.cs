@@ -489,6 +489,392 @@ namespace DMotion.Editor
         
         #endregion
         
+        #region Full Preview Entity (All States Pre-Initialized)
+        
+        /// <summary>
+        /// Creates a preview entity with ALL animation states pre-initialized.
+        /// This allows previewing any state or transition without waiting for ECS systems.
+        /// </summary>
+        /// <param name="stateMachineBlob">The baked state machine blob.</param>
+        /// <param name="clipsBlob">The skeleton clip set blob.</param>
+        /// <param name="clipEventsBlob">Optional clip events blob.</param>
+        /// <returns>The created entity, or Entity.Null if creation failed.</returns>
+        public Entity CreateFullPreviewEntity(
+            BlobAssetReference<StateMachineBlob> stateMachineBlob,
+            BlobAssetReference<SkeletonClipSetBlob> clipsBlob,
+            BlobAssetReference<ClipEventsBlob> clipEventsBlob = default)
+        {
+            if (!IsInitialized)
+            {
+                Debug.LogWarning("[EcsPreviewWorldService] Cannot create entity - world not initialized.");
+                return Entity.Null;
+            }
+            
+            // Destroy existing preview entity
+            if (previewEntity != Entity.Null && world.EntityManager.Exists(previewEntity))
+            {
+                world.EntityManager.DestroyEntity(previewEntity);
+            }
+            
+            try
+            {
+                var em = world.EntityManager;
+                ref var smBlob = ref stateMachineBlob.Value;
+                
+                // Create the entity
+                previewEntity = em.CreateEntity();
+                
+                // Add state machine component
+                em.AddComponentData(previewEntity, new AnimationStateMachine
+                {
+                    ClipsBlob = clipsBlob,
+                    ClipEventsBlob = clipEventsBlob,
+                    StateMachineBlob = stateMachineBlob,
+                    CurrentState = new StateMachineStateRef { StateIndex = 0, AnimationStateId = 0 }
+                });
+                
+                // Add required components
+                em.AddComponentData(previewEntity, AnimationStateTransition.Null);
+                em.AddComponentData(previewEntity, AnimationStateTransitionRequest.Null);
+                em.AddComponentData(previewEntity, AnimationCurrentState.Null);
+                
+                // Add parameter buffers
+                em.AddBuffer<FloatParameter>(previewEntity);
+                em.AddBuffer<IntParameter>(previewEntity);
+                em.AddBuffer<BoolParameter>(previewEntity);
+                
+                // Add animation state and sampler buffers
+                var animationStates = em.AddBuffer<AnimationState>(previewEntity);
+                var clipSamplers = em.AddBuffer<ClipSampler>(previewEntity);
+                
+                // Pre-create ALL animation states and their samplers
+                int stateCount = smBlob.States.Length;
+                byte nextSamplerId = 0;
+                
+                for (int stateIndex = 0; stateIndex < stateCount; stateIndex++)
+                {
+                    ref var stateBlob = ref smBlob.States[stateIndex];
+                    
+                    // Determine clip count and indices based on state type
+                    int clipCount = GetClipCount(ref smBlob, ref stateBlob);
+                    
+                    // Create AnimationState entry
+                    var animState = new AnimationState
+                    {
+                        Id = (byte)stateIndex,
+                        Time = 0f,
+                        Weight = stateIndex == 0 ? 1f : 0f, // Default state gets weight 1
+                        Speed = stateBlob.Speed,
+                        Loop = stateBlob.Loop,
+                        StartSamplerId = nextSamplerId,
+                        ClipCount = (byte)clipCount
+                    };
+                    animationStates.Add(animState);
+                    
+                    // Create ClipSampler entries for this state
+                    CreateSamplersForState(ref smBlob, ref stateBlob, stateIndex, clipSamplers, clipsBlob, clipEventsBlob, ref nextSamplerId);
+                }
+                
+                Debug.Log($"[EcsPreviewWorldService] Created full preview entity with {stateCount} states, {clipSamplers.Length} samplers");
+                return previewEntity;
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[EcsPreviewWorldService] Failed to create full preview entity: {e.Message}\n{e.StackTrace}");
+                return Entity.Null;
+            }
+        }
+        
+        private int GetClipCount(ref StateMachineBlob smBlob, ref AnimationStateBlob stateBlob)
+        {
+            switch (stateBlob.Type)
+            {
+                case StateType.Single:
+                    return 1;
+                    
+                case StateType.LinearBlend:
+                    ref var linearState = ref smBlob.LinearBlendStates[stateBlob.StateIndex];
+                    return linearState.SortedClipIndexes.Length;
+                    
+                case StateType.Directional2DBlend:
+                    ref var dir2DState = ref smBlob.Directional2DBlendStates[stateBlob.StateIndex];
+                    return dir2DState.ClipIndexes.Length;
+                    
+                default:
+                    return 1;
+            }
+        }
+        
+        private void CreateSamplersForState(
+            ref StateMachineBlob smBlob,
+            ref AnimationStateBlob stateBlob,
+            int stateIndex,
+            DynamicBuffer<ClipSampler> samplers,
+            BlobAssetReference<SkeletonClipSetBlob> clipsBlob,
+            BlobAssetReference<ClipEventsBlob> clipEventsBlob,
+            ref byte nextSamplerId)
+        {
+            switch (stateBlob.Type)
+            {
+                case StateType.Single:
+                {
+                    ref var singleState = ref smBlob.SingleClipStates[stateBlob.StateIndex];
+                    samplers.Add(new ClipSampler
+                    {
+                        Id = nextSamplerId++,
+                        Clips = clipsBlob,
+                        ClipEventsBlob = clipEventsBlob,
+                        ClipIndex = singleState.ClipIndex,
+                        Time = 0f,
+                        PreviousTime = 0f,
+                        Weight = stateIndex == 0 ? 1f : 0f
+                    });
+                    break;
+                }
+                
+                case StateType.LinearBlend:
+                {
+                    ref var linearState = ref smBlob.LinearBlendStates[stateBlob.StateIndex];
+                    for (int i = 0; i < linearState.SortedClipIndexes.Length; i++)
+                    {
+                        samplers.Add(new ClipSampler
+                        {
+                            Id = nextSamplerId++,
+                            Clips = clipsBlob,
+                            ClipEventsBlob = clipEventsBlob,
+                            ClipIndex = (ushort)linearState.SortedClipIndexes[i],
+                            Time = 0f,
+                            PreviousTime = 0f,
+                            Weight = 0f // Will be set by blend logic
+                        });
+                    }
+                    break;
+                }
+                
+                case StateType.Directional2DBlend:
+                {
+                    ref var dir2DState = ref smBlob.Directional2DBlendStates[stateBlob.StateIndex];
+                    for (int i = 0; i < dir2DState.ClipIndexes.Length; i++)
+                    {
+                        samplers.Add(new ClipSampler
+                        {
+                            Id = nextSamplerId++,
+                            Clips = clipsBlob,
+                            ClipEventsBlob = clipEventsBlob,
+                            ClipIndex = (ushort)dir2DState.ClipIndexes[i],
+                            Time = 0f,
+                            PreviousTime = 0f,
+                            Weight = 0f // Will be set by blend logic
+                        });
+                    }
+                    break;
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Sets up preview for a single state (no transition).
+        /// </summary>
+        /// <param name="stateIndex">Index of the state to preview.</param>
+        /// <param name="normalizedTime">Normalized playback time (0-1).</param>
+        public void SetPreviewState(int stateIndex, float normalizedTime)
+        {
+            if (!IsInitialized || previewEntity == Entity.Null) return;
+            
+            var em = world.EntityManager;
+            if (!em.HasBuffer<AnimationState>(previewEntity)) return;
+            
+            var states = em.GetBuffer<AnimationState>(previewEntity);
+            var samplers = em.GetBuffer<ClipSampler>(previewEntity);
+            
+            // Set weights: target state = 1, others = 0
+            for (int i = 0; i < states.Length; i++)
+            {
+                var state = states[i];
+                state.Weight = (state.Id == stateIndex) ? 1f : 0f;
+                
+                if (state.Id == stateIndex)
+                {
+                    // Set time on target state's samplers
+                    SetStateSamplerTimes(samplers, state, normalizedTime);
+                }
+                
+                states[i] = state;
+            }
+            
+            // Clear any active transition
+            em.SetComponentData(previewEntity, AnimationStateTransition.Null);
+        }
+        
+        /// <summary>
+        /// Sets up preview for a transition between two states.
+        /// </summary>
+        /// <param name="fromStateIndex">Index of the source state.</param>
+        /// <param name="toStateIndex">Index of the target state.</param>
+        /// <param name="progress">Transition progress (0 = fully from, 1 = fully to).</param>
+        /// <param name="fromNormalizedTime">Normalized time in from-state.</param>
+        /// <param name="toNormalizedTime">Normalized time in to-state.</param>
+        public void SetPreviewTransition(int fromStateIndex, int toStateIndex, float progress, float fromNormalizedTime, float toNormalizedTime)
+        {
+            if (!IsInitialized || previewEntity == Entity.Null) return;
+            
+            var em = world.EntityManager;
+            if (!em.HasBuffer<AnimationState>(previewEntity)) return;
+            
+            var states = em.GetBuffer<AnimationState>(previewEntity);
+            var samplers = em.GetBuffer<ClipSampler>(previewEntity);
+            
+            float fromWeight = 1f - progress;
+            float toWeight = progress;
+            
+            // Set weights and times
+            for (int i = 0; i < states.Length; i++)
+            {
+                var state = states[i];
+                
+                if (state.Id == fromStateIndex)
+                {
+                    state.Weight = fromWeight;
+                    SetStateSamplerTimes(samplers, state, fromNormalizedTime);
+                    SetStateSamplerWeights(samplers, state, fromWeight);
+                }
+                else if (state.Id == toStateIndex)
+                {
+                    state.Weight = toWeight;
+                    SetStateSamplerTimes(samplers, state, toNormalizedTime);
+                    SetStateSamplerWeights(samplers, state, toWeight);
+                }
+                else
+                {
+                    state.Weight = 0f;
+                }
+                
+                states[i] = state;
+            }
+        }
+        
+        private void SetStateSamplerTimes(DynamicBuffer<ClipSampler> samplers, AnimationState state, float normalizedTime)
+        {
+            for (int i = 0; i < state.ClipCount; i++)
+            {
+                int samplerIndex = samplers.IdToIndex((byte)(state.StartSamplerId + i));
+                if (samplerIndex < 0) continue;
+                
+                var sampler = samplers[samplerIndex];
+                float clipDuration = sampler.Clips.Value.clips[sampler.ClipIndex].duration;
+                sampler.PreviousTime = sampler.Time;
+                sampler.Time = normalizedTime * clipDuration;
+                samplers[samplerIndex] = sampler;
+            }
+        }
+        
+        private void SetStateSamplerWeights(DynamicBuffer<ClipSampler> samplers, AnimationState state, float stateWeight)
+        {
+            // For single clip states, weight = stateWeight
+            // For blend states, individual clip weights should be calculated separately
+            // This is a simplified version - blend weights need blend parameter calculation
+            
+            if (state.ClipCount == 1)
+            {
+                int samplerIndex = samplers.IdToIndex(state.StartSamplerId);
+                if (samplerIndex >= 0)
+                {
+                    var sampler = samplers[samplerIndex];
+                    sampler.Weight = stateWeight;
+                    samplers[samplerIndex] = sampler;
+                }
+            }
+            // For blend states, weights are handled separately via SetBlendWeights
+        }
+        
+        /// <summary>
+        /// Sets blend weights for a linear blend state.
+        /// </summary>
+        /// <param name="stateIndex">Index of the blend state.</param>
+        /// <param name="blendParameter">Current blend parameter value.</param>
+        /// <param name="stateWeight">Overall weight of this state (for transitions).</param>
+        public void SetLinearBlendWeights(int stateIndex, float blendParameter, float stateWeight)
+        {
+            if (!IsInitialized || previewEntity == Entity.Null) return;
+            
+            var em = world.EntityManager;
+            var sm = em.GetComponentData<AnimationStateMachine>(previewEntity);
+            ref var smBlob = ref sm.StateMachineBlob.Value;
+            
+            if (stateIndex < 0 || stateIndex >= smBlob.States.Length) return;
+            ref var stateBlob = ref smBlob.States[stateIndex];
+            
+            if (stateBlob.Type != StateType.LinearBlend) return;
+            
+            ref var linearState = ref smBlob.LinearBlendStates[stateBlob.StateIndex];
+            
+            var states = em.GetBuffer<AnimationState>(previewEntity);
+            var samplers = em.GetBuffer<ClipSampler>(previewEntity);
+            
+            // Find the AnimationState
+            int animStateIndex = states.IdToIndex((byte)stateIndex);
+            if (animStateIndex < 0) return;
+            
+            var animState = states[animStateIndex];
+            
+            // Calculate blend weights using thresholds
+            int clipCount = linearState.SortedClipIndexes.Length;
+            float[] weights = new float[clipCount];
+            CalculateLinearBlendWeights(ref linearState, blendParameter, weights);
+            
+            // Apply weights to samplers
+            for (int i = 0; i < clipCount && i < animState.ClipCount; i++)
+            {
+                int samplerIndex = samplers.IdToIndex((byte)(animState.StartSamplerId + i));
+                if (samplerIndex < 0) continue;
+                
+                var sampler = samplers[samplerIndex];
+                sampler.Weight = weights[i] * stateWeight;
+                samplers[samplerIndex] = sampler;
+            }
+        }
+        
+        private void CalculateLinearBlendWeights(ref LinearBlendStateBlob linearState, float blendParam, float[] outWeights)
+        {
+            int count = linearState.SortedClipThresholds.Length;
+            if (count == 0) return;
+            if (count == 1)
+            {
+                outWeights[0] = 1f;
+                return;
+            }
+            
+            // Clamp to threshold range
+            float minThreshold = linearState.SortedClipThresholds[0];
+            float maxThreshold = linearState.SortedClipThresholds[count - 1];
+            blendParam = Unity.Mathematics.math.clamp(blendParam, minThreshold, maxThreshold);
+            
+            // Find surrounding thresholds and interpolate
+            for (int i = 0; i < count - 1; i++)
+            {
+                float lowThreshold = linearState.SortedClipThresholds[i];
+                float highThreshold = linearState.SortedClipThresholds[i + 1];
+                
+                if (blendParam >= lowThreshold && blendParam <= highThreshold)
+                {
+                    float range = highThreshold - lowThreshold;
+                    float t = range > 0 ? (blendParam - lowThreshold) / range : 0f;
+                    
+                    outWeights[i] = 1f - t;
+                    outWeights[i + 1] = t;
+                    return;
+                }
+            }
+            
+            // Fallback: closest clip
+            if (blendParam <= minThreshold)
+                outWeights[0] = 1f;
+            else
+                outWeights[count - 1] = 1f;
+        }
+        
+        #endregion
+        
         #region IDisposable
         
         public void Dispose()
