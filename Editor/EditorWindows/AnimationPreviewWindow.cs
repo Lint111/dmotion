@@ -78,7 +78,7 @@ namespace DMotion.Editor
 
         private StateInspectorBuilder stateInspectorBuilder;
         private TransitionInspectorBuilder transitionInspectorBuilder;
-        private PreviewRenderer previewRenderer;
+        private PreviewSession previewSession;
 
         #endregion
 
@@ -134,12 +134,12 @@ namespace DMotion.Editor
             
             // Create extracted components
             CreateBuilders();
-            previewRenderer = new PreviewRenderer();
+            previewSession = new PreviewSession(PreviewMode.Authoring);
             
             // Restore saved camera state
             if (savedCameraState.IsValid)
             {
-                previewRenderer.CameraState = savedCameraState;
+                previewSession.CameraState = savedCameraState;
             }
         }
 
@@ -172,9 +172,9 @@ namespace DMotion.Editor
             AnimationPreviewEvents.ClearAllSubscriptions();
 
             // Save camera state before disposing
-            if (previewRenderer != null)
+            if (previewSession != null)
             { 
-                var camState = previewRenderer.CameraState;
+                var camState = previewSession.CameraState;
                 if (camState.IsValid)
                 {
                     savedCameraState = camState;
@@ -184,7 +184,7 @@ namespace DMotion.Editor
             // Dispose resources
             stateInspectorBuilder?.Cleanup();
             transitionInspectorBuilder?.Cleanup();
-            previewRenderer?.Dispose();
+            previewSession?.Dispose();
         }
 
         private void CreateGUI()
@@ -223,7 +223,7 @@ namespace DMotion.Editor
             bool needsRepaint = false;
 
             // Update smooth blend transitions (do this first so weights are updated)
-            if (previewRenderer != null && previewRenderer.Tick(deltaTime))
+            if (previewSession != null && previewSession.Tick(deltaTime))
             {
                 needsRepaint = true;
             }
@@ -610,9 +610,9 @@ namespace DMotion.Editor
                 previewModelField.SetValueWithoutNotify(model);
             }
             
-            if (previewRenderer != null)
+            if (previewSession != null)
             {
-                previewRenderer.PreviewModel = model;
+                previewSession.PreviewModel = model;
             }
         }
 
@@ -635,10 +635,10 @@ namespace DMotion.Editor
             UpdateInspectorContent();
             
             // Create 3D preview for the selected state or transition
-            // Note: PreviewRenderer reads initial blend positions from PreviewSettings internally
+            // Note: PreviewSession reads initial blend positions from PreviewSettings internally
             if (currentSelectionType == SelectionType.State && selectedState != null)
             {
-                previewRenderer.CreatePreviewForState(selectedState);
+                previewSession.CreatePreviewForState(selectedState);
             }
             else if (currentSelectionType == SelectionType.Transition || currentSelectionType == SelectionType.AnyStateTransition)
             {
@@ -654,9 +654,9 @@ namespace DMotion.Editor
                 };
                 
                 if (message != null)
-                    previewRenderer.SetMessage(message);
+                    previewSession.SetMessage(message);
                 else
-                    previewRenderer.Clear();
+                    previewSession.Clear();
             }
             
             UpdatePreviewVisibility();
@@ -753,7 +753,7 @@ namespace DMotion.Editor
         {
             if (selectedTransitionTo == null)
             {
-                previewRenderer.SetMessage("No target state\nfor transition");
+                previewSession.SetMessage("No target state\nfor transition");
                 return;
             }
             
@@ -787,14 +787,14 @@ namespace DMotion.Editor
             
             // For Any State transitions, fromState is null
             var fromState = isAnyStateSelected ? null : selectedTransitionFrom;
-            previewRenderer.CreateTransitionPreview(fromState, selectedTransitionTo, transitionDuration);
+            previewSession.CreateTransitionPreview(fromState, selectedTransitionTo, transitionDuration);
         }
         
         private void UpdatePreviewVisibility()
         {
             if (previewPlaceholder == null || previewContainer == null) return;
 
-            bool hasPreview = previewRenderer?.HasContent ?? false;
+            bool hasPreview = previewSession?.HasContent ?? false;
 
             previewPlaceholder.EnableInClassList("preview-placeholder--hidden", hasPreview);
             previewContainer.EnableInClassList("preview-imgui--hidden", !hasPreview);
@@ -870,7 +870,7 @@ namespace DMotion.Editor
         {
             // Update preview sample time
             var timelineScrubber = stateInspectorBuilder?.TimelineScrubber;
-            previewRenderer?.SetNormalizedTime(timelineScrubber?.NormalizedTime ?? 0);
+            previewSession?.SetNormalizedTime(timelineScrubber?.NormalizedTime ?? 0);
             
             // Raise centralized event for other listeners
             if (selectedState != null)
@@ -896,7 +896,7 @@ namespace DMotion.Editor
             // Only update if this is the currently selected state
             if (selectedState != state) return;
             
-            previewRenderer?.SetBlendPosition1D(blendValue);
+            previewSession?.SetBlendPosition1D(blendValue);
             Repaint();
         }
         
@@ -905,7 +905,7 @@ namespace DMotion.Editor
             // Only update if this is the currently selected state
             if (selectedState != state) return;
             
-            previewRenderer?.SetBlendPosition2D(blendPosition);
+            previewSession?.SetBlendPosition2D(new Unity.Mathematics.float2(blendPosition.x, blendPosition.y));
             Repaint();
         }
         
@@ -915,7 +915,7 @@ namespace DMotion.Editor
             if (selectedState != state) return;
             
             // Set solo clip mode: -1 = blended, >= 0 = individual clip
-            previewRenderer?.SetSoloClip(clipIndex);
+            previewSession?.SetSoloClip(clipIndex);
             Repaint();
         }
         
@@ -935,7 +935,7 @@ namespace DMotion.Editor
             
             if (!matchesFrom || !matchesTo) return;
             
-            previewRenderer?.SetTransitionProgress(progress);
+            previewSession?.SetTransitionProgress(progress);
             Repaint();
         }
         
@@ -949,7 +949,7 @@ namespace DMotion.Editor
             var currentFromState = isAnyStateSelected ? null : selectedTransitionFrom;
             if (fromState != currentFromState) return;
             
-            previewRenderer?.SetTransitionFromBlendPosition(blendPosition);
+            previewSession?.SetTransitionFromBlendPosition(new Unity.Mathematics.float2(blendPosition.x, blendPosition.y));
             
             // Update timeline durations to reflect new blend position
             var toBlendPos = PreviewSettings.GetBlendPosition(selectedTransitionTo);
@@ -967,7 +967,7 @@ namespace DMotion.Editor
             // Check if this matches the to state of the current transition
             if (toState != selectedTransitionTo) return;
             
-            previewRenderer?.SetTransitionToBlendPosition(blendPosition);
+            previewSession?.SetTransitionToBlendPosition(new Unity.Mathematics.float2(blendPosition.x, blendPosition.y));
             
             // Update timeline durations to reflect new blend position
             var fromBlendPos = PreviewSettings.GetBlendPosition(selectedTransitionFrom);
@@ -992,7 +992,7 @@ namespace DMotion.Editor
             var timeline = transitionInspectorBuilder?.Timeline;
             if (timeline != null)
             {
-                previewRenderer?.SetTransitionStateNormalizedTimes(
+                previewSession?.SetTransitionStateNormalizedTimes(
                     timeline.FromStateNormalizedTime,
                     timeline.ToStateNormalizedTime);
             }
@@ -1005,7 +1005,7 @@ namespace DMotion.Editor
 
         private void OnPreviewGUI()
         {
-            if (previewRenderer == null) return;
+            if (previewSession == null) return;
             
             var rect = previewContainer.contentRect;
             
@@ -1013,15 +1013,15 @@ namespace DMotion.Editor
             var stateTimeline = stateInspectorBuilder?.TimelineScrubber;
             if (stateTimeline != null && currentSelectionType == SelectionType.State)
             {
-                previewRenderer.SetNormalizedTime(stateTimeline.NormalizedTime);
+                previewSession.SetNormalizedTime(stateTimeline.NormalizedTime);
             }
             
             // Sync time and progress from transition timeline
             var transitionTimeline = transitionInspectorBuilder?.Timeline;
-            if (transitionTimeline != null && previewRenderer.IsTransitionPreview)
+            if (transitionTimeline != null && previewSession.IsTransitionPreview)
             {
                 // Set per-state normalized times for proper clip sampling
-                previewRenderer.SetTransitionStateNormalizedTimes(
+                previewSession.SetTransitionStateNormalizedTimes(
                     transitionTimeline.FromStateNormalizedTime,
                     transitionTimeline.ToStateNormalizedTime);
                 
@@ -1032,16 +1032,16 @@ namespace DMotion.Editor
                 float blendWeight = CurveUtils.EvaluateCurveManaged(keyframes, rawProgress);
                 
                 // Set transition progress for blend weights (from→to crossfade)
-                previewRenderer.SetTransitionProgress(blendWeight);
+                previewSession.SetTransitionProgress(blendWeight);
             }
             
             // Draw the preview
-            previewRenderer.Draw(rect);
+            previewSession.Draw(rect);
             
             // Handle camera input (but not if any timeline is dragging)
             bool transitionTimelineDragging = transitionInspectorBuilder?.Timeline?.IsDragging ?? false;
             bool stateTimelineDragging = stateInspectorBuilder?.TimelineScrubber?.IsDragging ?? false;
-            if (!transitionTimelineDragging && !stateTimelineDragging && previewRenderer.HandleInput(rect))
+            if (!transitionTimelineDragging && !stateTimelineDragging && previewSession.HandleInput(rect))
             {
                 Repaint();
             }
@@ -1049,7 +1049,7 @@ namespace DMotion.Editor
 
         private void OnResetViewClicked()
         {
-            previewRenderer?.ResetCameraView();
+            previewSession?.ResetCameraView();
             Repaint();
         }
         
@@ -1071,10 +1071,10 @@ namespace DMotion.Editor
                 }
             }
             
-            // Update the renderer
-            if (previewRenderer != null)
+            // Update the session
+            if (previewSession != null)
             {
-                previewRenderer.PreviewModel = newModel;
+                previewSession.PreviewModel = newModel;
             }
             
             // Save to EditorPrefs for this state machine
