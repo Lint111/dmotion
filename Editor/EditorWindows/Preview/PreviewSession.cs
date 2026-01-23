@@ -201,6 +201,8 @@ namespace DMotion.Editor
         /// </summary>
         public void CreateTransitionPreview(AnimationStateAsset fromState, AnimationStateAsset toState, float transitionDuration)
         {
+            Debug.Log($"[PreviewSession] CreateTransitionPreview: Mode={currentMode}, Backend={activeBackend?.GetType().Name ?? "null"}");
+            
             cachedState = null;
             cachedTransitionFrom = fromState;
             cachedTransitionTo = toState;

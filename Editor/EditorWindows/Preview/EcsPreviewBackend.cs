@@ -184,6 +184,8 @@ namespace DMotion.Editor
         
         public void CreateTransitionPreview(AnimationStateAsset fromState, AnimationStateAsset toState, float duration)
         {
+            Debug.Log($"[EcsPreviewBackend] CreateTransitionPreview: {fromState?.name ?? "Any"} -> {toState?.name ?? "null"}, duration={duration}");
+            
             currentState = null;
             transitionFromState = fromState;
             transitionToState = toState;
@@ -194,6 +196,7 @@ namespace DMotion.Editor
             
             if (toState == null)
             {
+                Debug.LogWarning("[EcsPreviewBackend] CreateTransitionPreview: toState is null");
                 errorMessage = "No target state for transition";
                 return;
             }
@@ -202,9 +205,12 @@ namespace DMotion.Editor
             var newStateMachineAsset = FindOwningStateMachine(toState);
             if (newStateMachineAsset == null)
             {
+                Debug.LogWarning($"[EcsPreviewBackend] CreateTransitionPreview: Could not find StateMachineAsset for {toState.name}");
                 errorMessage = $"Could not find StateMachineAsset\nfor state: {toState.name}";
                 return;
             }
+            
+            Debug.Log($"[EcsPreviewBackend] Found StateMachineAsset: {newStateMachineAsset.name}");
             
             // Store the state machine for scene setup
             stateMachineAsset = newStateMachineAsset;
@@ -212,6 +218,8 @@ namespace DMotion.Editor
             // In entity browser mode, handle transition preview on live entities
             if (useEntityBrowserMode)
             {
+                Debug.Log($"[EcsPreviewBackend] Entity browser mode. SceneManager.IsSetup={sceneManager.IsSetup}");
+                
                 // Auto-setup preview scene if not already set up
                 if (!sceneManager.IsSetup)
                 {
@@ -221,10 +229,16 @@ namespace DMotion.Editor
                 // Initialize entity browser and auto-select an entity
                 InitializeEntityBrowser(stateMachineAsset);
                 
+                Debug.Log($"[EcsPreviewBackend] After InitializeEntityBrowser: HasSelection={entityBrowser.HasSelection}, EntityCount={entityBrowser.EntityCount}");
+                
                 // If we have a selected entity, trigger a transition on it
                 if (entityBrowser.HasSelection)
                 {
                     TriggerTransitionOnBrowserEntity();
+                }
+                else
+                {
+                    Debug.LogWarning("[EcsPreviewBackend] No entity selected - cannot trigger transition");
                 }
                 
                 isInitialized = true;
