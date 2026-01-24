@@ -179,10 +179,13 @@ namespace DMotion.Editor
             setupStartTime = (float)EditorApplication.timeSinceStartup;
             errorMessage = "Waiting for animation entity...";
             
+            Debug.Log($"[EcsPreviewBackend] StartSetupCoroutine: type={setupType}, coroutineRunning={isSetupCoroutineRunning}");
+            
             if (!isSetupCoroutineRunning)
             {
                 isSetupCoroutineRunning = true;
                 EditorApplication.update += SetupCoroutineUpdate;
+                Debug.Log("[EcsPreviewBackend] EditorApplication.update += SetupCoroutineUpdate");
             }
         }
         
@@ -194,6 +197,7 @@ namespace DMotion.Editor
         {
             if (pendingSetup == PendingSetupType.None)
             {
+                Debug.Log("[EcsPreviewBackend] SetupCoroutineUpdate: pendingSetup is None, stopping");
                 StopSetupCoroutine();
                 return;
             }
@@ -202,6 +206,7 @@ namespace DMotion.Editor
             float elapsed = (float)EditorApplication.timeSinceStartup - setupStartTime;
             if (elapsed > SetupTimeoutSeconds)
             {
+                Debug.Log($"[EcsPreviewBackend] SetupCoroutineUpdate: timeout after {elapsed}s");
                 errorMessage = "No animation entity found.\nEnter Play mode with an animated character.";
                 StopSetupCoroutine();
                 return;
@@ -210,8 +215,15 @@ namespace DMotion.Editor
             // Try to select entity
             if (!TrySelectEntity())
             {
+                // Only log occasionally to avoid spam
+                if ((int)(elapsed * 10) % 10 == 0)
+                {
+                    Debug.Log($"[EcsPreviewBackend] SetupCoroutineUpdate: waiting for entity... ({elapsed:F1}s)");
+                }
                 return; // Keep waiting
             }
+            
+            Debug.Log($"[EcsPreviewBackend] SetupCoroutineUpdate: entity found! HasSelection={entityBrowser.HasSelection}");
             
             // Entity found - complete setup based on type
             bool success = pendingSetup switch
@@ -220,6 +232,8 @@ namespace DMotion.Editor
                 PendingSetupType.Transition => TryCompleteTransitionSetup(),
                 _ => false
             };
+            
+            Debug.Log($"[EcsPreviewBackend] SetupCoroutineUpdate: setup complete, success={success}, isInitialized={isInitialized}");
             
             if (success)
             {
@@ -245,15 +259,20 @@ namespace DMotion.Editor
         /// </summary>
         private bool TryCompleteStateSetup()
         {
+            Debug.Log($"[EcsPreviewBackend] TryCompleteStateSetup: state={currentState?.name}, blendPos={blendPosition}");
+            
             if (!InitializeTimelineHelper())
             {
+                Debug.LogWarning("[EcsPreviewBackend] TryCompleteStateSetup: InitializeTimelineHelper failed");
                 errorMessage = "Failed to initialize timeline control";
                 return true;
             }
             
+            Debug.Log($"[EcsPreviewBackend] TryCompleteStateSetup: calling SetupStatePreview");
             timelineHelper.SetupStatePreview(currentState, blendPosition);
             isInitialized = true;
             errorMessage = null;
+            Debug.Log($"[EcsPreviewBackend] TryCompleteStateSetup: complete, isInitialized={isInitialized}");
             return true;
         }
         
@@ -262,14 +281,20 @@ namespace DMotion.Editor
         /// </summary>
         private bool TryCompleteTransitionSetup()
         {
+            Debug.Log($"[EcsPreviewBackend] TryCompleteTransitionSetup: from={transitionFromState?.name}, to={transitionToState?.name}");
+            Debug.Log($"[EcsPreviewBackend] TryCompleteTransitionSetup: fromBlendPos={blendPosition}, toBlendPos={toBlendPosition}");
+            
             if (!InitializeTimelineHelper())
             {
+                Debug.LogWarning("[EcsPreviewBackend] TryCompleteTransitionSetup: InitializeTimelineHelper failed");
                 errorMessage = "Failed to initialize timeline control";
                 return true;
             }
             
             var (transitionIndex, curveSource) = FindTransitionIndices(transitionFromState, transitionToState);
-            var (transition, _, _, _) = GetTransitionInfo();
+            var (transition, duration, exitTime, hasExitTime) = GetTransitionInfo();
+            
+            Debug.Log($"[EcsPreviewBackend] TryCompleteTransitionSetup: transitionIndex={transitionIndex}, duration={duration}, exitTime={exitTime}, hasExitTime={hasExitTime}");
             
             timelineHelper.SetupTransitionPreview(
                 transitionFromState,
@@ -282,6 +307,7 @@ namespace DMotion.Editor
             
             isInitialized = true;
             errorMessage = null;
+            Debug.Log($"[EcsPreviewBackend] TryCompleteTransitionSetup: complete, isInitialized={isInitialized}");
             return true;
         }
         

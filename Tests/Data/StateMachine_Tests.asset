@@ -39,6 +39,7 @@ MonoBehaviour:
     HasEndTime: 0
     EndTime: 0
     TransitionDuration: 0
+    Offset: 0
     Conditions: []
     CanTransitionToSelf: 0
     BlendCurve:
@@ -72,8 +73,9 @@ MonoBehaviour:
   OutTransitions:
   - ToState: {fileID: 5953759798062009019}
     HasEndTime: 1
-    EndTime: 0.57756805
-    TransitionDuration: 1.4758563
+    EndTime: 0.776119
+    TransitionDuration: 2.0117064
+    Offset: 0
     Conditions:
     - Parameter: {fileID: 9102714923962245846}
       ComparisonValue: 1
@@ -148,6 +150,7 @@ MonoBehaviour:
     HasEndTime: 0
     EndTime: 0
     TransitionDuration: 1
+    Offset: 0
     Conditions:
     - Parameter: {fileID: 9102714923962245846}
       ComparisonValue: 0

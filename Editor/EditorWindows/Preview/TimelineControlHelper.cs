@@ -100,14 +100,22 @@ namespace DMotion.Editor
             float2 fromBlendPosition = default,
             float2 toBlendPosition = default)
         {
-            if (!ValidateState()) return;
+            Debug.Log($"[TimelineControlHelper] SetupTransitionPreview: from={fromState?.name}, to={toState?.name}");
+            
+            if (!ValidateState())
+            {
+                Debug.LogWarning("[TimelineControlHelper] ValidateState failed");
+                return;
+            }
             
             int fromIndex = fromState != null ? GetStateIndex(fromState) : -1;
             int toIndex = GetStateIndex(toState);
             
+            Debug.Log($"[TimelineControlHelper] fromIndex={fromIndex}, toIndex={toIndex}");
+            
             if (toIndex < 0)
             {
-                Debug.LogWarning($"[TimelineControlHelper] To-state {toState?.name} not found");
+                Debug.LogWarning($"[TimelineControlHelper] To-state {toState?.name} not found in state machine");
                 return;
             }
             
@@ -130,14 +138,17 @@ namespace DMotion.Editor
             float fromStateDuration = fromState != null ? GetStateDuration(fromState, fromBlendPosition) : 0f;
             float toStateDuration = GetStateDuration(toState, toBlendPosition);
             
+            Debug.Log($"[TimelineControlHelper] Timing: reqTransDur={requestedTransitionDuration:F3}, reqExitTime={requestedExitTime:F3}, hasExitTime={hasExitTime}");
+            Debug.Log($"[TimelineControlHelper] Durations: fromStateDur={fromStateDuration:F3}, toStateDur={toStateDuration:F3}");
+            
             // Clamp values for logic (matching TransitionTimeline)
             float minExitTime = Mathf.Max(0f, fromStateDuration - toStateDuration);
             float exitTime = Mathf.Clamp(requestedExitTime, minExitTime, fromStateDuration);
             float transitionDuration = Mathf.Clamp(requestedTransitionDuration, 0.01f, toStateDuration);
             
+            Debug.Log($"[TimelineControlHelper] Clamped: minExitTime={minExitTime:F3}, exitTime={exitTime:F3}, transitionDuration={transitionDuration:F3}");
+            
             // Calculate FROM visual cycles (ghost bars LEFT of from-bar)
-            // Case 1: Duration shrunk - requestedExitTime exceeds fromStateDuration
-            // Case 2: Context ghost - exitTime is at zero (full overlap)
             int fromVisualCycles = 1;
             if (fromStateDuration > 0.001f)
             {
@@ -147,14 +158,12 @@ namespace DMotion.Editor
                 }
                 else if (exitTime < 0.001f && minExitTime < 0.001f)
                 {
-                    fromVisualCycles = 2; // Context ghost for full overlap
+                    fromVisualCycles = 2;
                 }
             }
             fromVisualCycles = Mathf.Clamp(fromVisualCycles, 1, 4);
             
             // Calculate TO visual cycles (ghost bars RIGHT of to-bar)
-            // Case 1: Duration shrunk - transitionDuration exceeds toStateDuration
-            // Case 2: Bars end together - context ghost
             int toVisualCycles = 1;
             if (toStateDuration > 0.001f)
             {
@@ -164,29 +173,23 @@ namespace DMotion.Editor
                 }
                 else
                 {
-                    // Check if bars end together
                     bool barsEndTogether = (exitTime + toStateDuration) <= (fromStateDuration + 0.001f);
                     if (barsEndTogether)
                     {
-                        toVisualCycles = 2; // Context ghost when bars end together
+                        toVisualCycles = 2;
                     }
                 }
             }
             toVisualCycles = Mathf.Clamp(toVisualCycles, 1, 4);
             
             // Calculate section durations
-            // FromBar: FROM state at 100% weight until exitTime
             float fromBarDuration = exitTime;
-            
-            // ToBar: TO state at 100% after transition completes
-            // This is the remaining TO state duration after the crossfade
             float toBarDuration = Mathf.Max(0f, toStateDuration - transitionDuration);
-            
-            // Ghost durations (only if cycles > 1)
-            // GhostFrom goes BEFORE fromBar, showing previous cycles
             float ghostFromDuration = (fromVisualCycles > 1) ? (fromVisualCycles - 1) * fromStateDuration : 0f;
-            // GhostTo goes AFTER toBar, showing continuation cycles  
             float ghostToDuration = (toVisualCycles > 1) ? (toVisualCycles - 1) * toStateDuration : 0f;
+            
+            Debug.Log($"[TimelineControlHelper] Cycles: fromVisualCycles={fromVisualCycles}, toVisualCycles={toVisualCycles}");
+            Debug.Log($"[TimelineControlHelper] Sections: ghostFrom={ghostFromDuration:F3}, fromBar={fromBarDuration:F3}, trans={transitionDuration:F3}, toBar={toBarDuration:F3}, ghostTo={ghostToDuration:F3}");
             
             em.SetupTransitionPreview(
                 targetEntity,
@@ -203,6 +206,7 @@ namespace DMotion.Editor
                 toBarDuration);
             
             em.ActivateTimelineControl(targetEntity, startPaused: true);
+            Debug.Log("[TimelineControlHelper] SetupTransitionPreview complete");
         }
         
         /// <summary>
