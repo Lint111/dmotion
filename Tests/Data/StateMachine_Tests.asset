@@ -72,7 +72,7 @@ MonoBehaviour:
   OutTransitions:
   - ToState: {fileID: 5953759798062009019}
     HasEndTime: 1
-    EndTime: 0
+    EndTime: 0.57756805
     TransitionDuration: 1.4758563
     Conditions:
     - Parameter: {fileID: 9102714923962245846}
@@ -113,7 +113,7 @@ MonoBehaviour:
       m_PostInfinity: 2
       m_RotationOrder: 4
   StateEditorData:
-    GraphPosition: {x: 333, y: 202}
+    GraphPosition: {x: 333.00003, y: 202.00003}
     Guid: 039c0298c5d43d943b7bc7b34f1395c0
   BlendClips:
   - Clip: {fileID: 11400000, guid: 2d8b5b7a11d7f3c418b9a6677c0cc292, type: 2}

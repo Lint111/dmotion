@@ -36,6 +36,9 @@ namespace DMotion.Editor
         private readonly bool is2D;
         private readonly Blend2DAlgorithm algorithm;
         private readonly float2[] cachedPositions; // Cached positions for weight calculation
+        private readonly float[] cachedThresholds; // Cached 1D thresholds
+        private readonly float[] cachedDurations;  // Cached clip durations
+        private readonly float[] cachedSpeeds;     // Cached clip speeds
         private AnimationMixerPlayable mixer;
         private AnimationClipPlayable[] clipPlayables; // Store references to set individual clip times
         private float2 currentBlendPosition;
@@ -139,6 +142,12 @@ namespace DMotion.Editor
             this.algorithm = algorithm;
             cachedWeights = new float[clipData.Length];
             cachedPositions = clipData.Select(c => c.Position).ToArray();
+            
+            // Cache data for shared utils
+            cachedThresholds = clipData.Select(c => c.Position.x).ToArray();
+            cachedDurations = clipData.Select(c => c.Clip != null ? c.Clip.length : 1f).ToArray();
+            cachedSpeeds = clipData.Select(c => c.Speed).ToArray();
+            
             clipPlayables = null; // Initialized in BuildGraph
             normalizedSampleTime = 0;
             currentBlendPosition = float2.zero;
@@ -434,81 +443,13 @@ namespace DMotion.Editor
         }
         
         /// <summary>
-        /// Calculates 1D blend weights using linear interpolation between adjacent thresholds.
+        /// Calculates 1D blend weights using shared utility (matches ECS logic).
         /// </summary>
         private void Calculate1DWeights()
         {
-            float blendValue = currentBlendPosition.x;
-            
-            // Reset all weights
-            for (int i = 0; i < cachedWeights.Length; i++)
-            {
-                cachedWeights[i] = 0;
-            }
-            
             if (clipData.Length == 0) return;
             
-            if (clipData.Length == 1)
-            {
-                cachedWeights[0] = 1;
-                return;
-            }
-            
-            // Find the two clips to blend between
-            int lowerIndex = -1;
-            int upperIndex = -1;
-            
-            for (int i = 0; i < clipData.Length; i++)
-            {
-                float threshold = clipData[i].Position.x;
-                
-                if (threshold <= blendValue)
-                {
-                    lowerIndex = i;
-                }
-                
-                if (threshold >= blendValue && upperIndex == -1)
-                {
-                    upperIndex = i;
-                }
-            }
-            
-            // Handle edge cases
-            if (lowerIndex == -1)
-            {
-                // Below all thresholds
-                cachedWeights[0] = 1;
-                return;
-            }
-            
-            if (upperIndex == -1)
-            {
-                // Above all thresholds
-                cachedWeights[clipData.Length - 1] = 1;
-                return;
-            }
-            
-            if (lowerIndex == upperIndex)
-            {
-                // Exactly on a threshold
-                cachedWeights[lowerIndex] = 1;
-                return;
-            }
-            
-            // Linear interpolation between lower and upper
-            float lowerThreshold = clipData[lowerIndex].Position.x;
-            float upperThreshold = clipData[upperIndex].Position.x;
-            float range = upperThreshold - lowerThreshold;
-            
-            if (range <= 0.0001f)
-            {
-                cachedWeights[lowerIndex] = 1;
-                return;
-            }
-            
-            float t = (blendValue - lowerThreshold) / range;
-            cachedWeights[lowerIndex] = 1 - t;
-            cachedWeights[upperIndex] = t;
+            LinearBlendStateUtils.CalculateWeights(currentBlendPosition.x, cachedThresholds, cachedWeights);
         }
         
         /// <summary>
@@ -525,60 +466,24 @@ namespace DMotion.Editor
         
         /// <summary>
         /// Gets the weighted average duration based on current blend weights.
-        /// Uses weighted average to ensure smooth duration changes when moving through blend space.
+        /// Uses shared utility to match runtime logic.
         /// </summary>
         private float GetWeightedDuration()
         {
             if (clipData.Length == 0) return 1f;
             
-            float weightedDuration = 0f;
-            float totalWeight = 0f;
-            
-            for (int i = 0; i < clipData.Length; i++)
-            {
-                if (clipData[i].Clip != null && cachedWeights[i] > 0.001f)
-                {
-                    // Duration is clip length divided by speed (faster speed = shorter effective duration)
-                    float clipDuration = clipData[i].Clip.length / clipData[i].Speed;
-                    weightedDuration += cachedWeights[i] * clipDuration;
-                    totalWeight += cachedWeights[i];
-                }
-            }
-            
-            if (totalWeight > 0.001f)
-            {
-                return weightedDuration / totalWeight;
-            }
-            
-            return 1f;
+            return LinearBlendStateUtils.CalculateEffectiveDuration(cachedWeights, cachedDurations, cachedSpeeds);
         }
         
         /// <summary>
         /// Gets the weighted average speed based on current blend weights.
-        /// Returns 1.0 if no valid clips or weights.
+        /// Uses shared utility to match runtime logic.
         /// </summary>
         private float GetWeightedSpeed()
         {
             if (clipData.Length == 0) return 1f;
             
-            float weightedSpeed = 0f;
-            float totalWeight = 0f;
-            
-            for (int i = 0; i < clipData.Length; i++)
-            {
-                if (clipData[i].Clip != null && cachedWeights[i] > 0.001f)
-                {
-                    weightedSpeed += cachedWeights[i] * clipData[i].Speed;
-                    totalWeight += cachedWeights[i];
-                }
-            }
-            
-            if (totalWeight > 0.001f)
-            {
-                return weightedSpeed / totalWeight;
-            }
-            
-            return 1f;
+            return LinearBlendStateUtils.CalculateEffectiveSpeed(cachedWeights, cachedSpeeds);
         }
         
         #endregion

@@ -71,6 +71,7 @@ namespace DMotion
         internal short ToStateIndex;
         internal float TransitionDuration;
         internal float TransitionEndTime;
+        internal float Offset; // Normalized offset (0-1)
         internal BlobArray<BoolTransition> BoolTransitions;
         internal BlobArray<IntTransition> IntTransitions;
         
@@ -136,6 +137,9 @@ namespace DMotion
 
         /// <summary>Blend duration in seconds</summary>
         internal float TransitionDuration;
+
+        /// <summary>Normalized offset for the target state (0-1)</summary>
+        internal float Offset;
 
         /// <summary>
         /// End time in seconds (converted from Unity's normalized exit time).

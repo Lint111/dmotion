@@ -42,6 +42,7 @@ namespace DMotion
     {
         internal sbyte AnimationStateId;
         internal float TransitionDuration;
+        internal float TimeElapsed;
         
         // Curve lookup info (Phase 0: Transition Blend Curve feature)
         /// <summary>Source state index for curve lookup. -1 for Any State transitions.</summary>
@@ -54,6 +55,7 @@ namespace DMotion
         internal static AnimationStateTransition Null => new () 
         { 
             AnimationStateId = -1,
+            TimeElapsed = 0,
             CurveSourceStateIndex = -1,
             CurveSourceTransitionIndex = -1,
             CurveSource = TransitionSource.State
@@ -66,7 +68,7 @@ namespace DMotion
         internal readonly bool HasEnded(in AnimationState animationState)
         {
             Assert.AreEqual(animationState.Id, AnimationStateId);
-            return animationState.Time > TransitionDuration;
+            return TimeElapsed > TransitionDuration;
         }
     }
 
@@ -151,18 +153,20 @@ namespace DMotion
             ref DynamicBuffer<AnimationState> animationStates,
             ref DynamicBuffer<ClipSampler> samplers,
             ClipSampler singleClipSampler,
-            float speed, bool loop)
+            float speed, bool loop,
+            float initialTime = 0f)
         {
             var newSamplers = new NativeArray<ClipSampler>(1, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
             newSamplers[0] = singleClipSampler;
-            return AnimationState.New(ref animationStates, ref samplers, newSamplers, speed, loop);
+            return AnimationState.New(ref animationStates, ref samplers, newSamplers, speed, loop, initialTime);
         }
 
         internal static int New(
             ref DynamicBuffer<AnimationState> animationStates,
             ref DynamicBuffer<ClipSampler> samplers,
             NativeArray<ClipSampler> newSamplers,
-            float speed, bool loop)
+            float speed, bool loop,
+            float initialTime = 0f)
         {
             Assert.IsTrue(newSamplers.IsCreated, "Trying to create animationState with Null sampler array");
             Assert.IsTrue(newSamplers.Length > 0, "Trying to create animationState with no samplers");
@@ -184,7 +188,8 @@ namespace DMotion
                 Speed = speed,
                 Loop = loop,
                 ClipCount = clipCount,
-                StartSamplerId = samplerId
+                StartSamplerId = samplerId,
+                Time = initialTime
             }, out _, out var animationStateIndex);
 
             // Add samplers to buffer - must handle insertion in middle properly
@@ -207,10 +212,6 @@ namespace DMotion
             {
                 var sampler = newSamplers[i];
                 sampler.Id = (byte)(samplerId + i);
-                sampler.PreviousTime = 0;
-                sampler.Time = 0;
-                sampler.Weight = 0;
-
                 samplers[insertIndex + i] = sampler;
             }
 

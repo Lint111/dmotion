@@ -15,6 +15,14 @@ namespace DMotion.Authoring
         public float EndTime;
         [Min(0), FormerlySerializedAs("NormalizedTransitionDuration")]
         public float TransitionDuration;
+        
+        /// <summary>
+        /// Normalized offset for the target state (0-1).
+        /// The target state will start playback at this normalized time.
+        /// </summary>
+        [Range(0, 1)]
+        public float Offset;
+
         public List<TransitionCondition> Conditions;
         
         /// <summary>
@@ -42,11 +50,13 @@ namespace DMotion.Authoring
             float transitionDuration = 0.15f,
             List<BoolTransitionCondition> boolTransitions = null,
             List<IntegerTransitionCondition> intTransitions = null,
-            bool canTransitionToSelf = false)
+            bool canTransitionToSelf = false,
+            float offset = 0f)
         {
             ToState = to;
             TransitionDuration = transitionDuration;
             CanTransitionToSelf = canTransitionToSelf;
+            Offset = offset;
             Conditions = new List<TransitionCondition>();
             if (boolTransitions != null)
             {

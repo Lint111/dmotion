@@ -13,6 +13,7 @@ namespace DMotion
     /// SubStateMachine states from the editor are inlined into the root state machine.
     /// </summary>
     [BurstCompile]
+    [WithNone(typeof(TimelineControlled))]
     internal partial struct UpdateStateMachineJob : IJobEntity
     {
         /// <summary>
@@ -123,6 +124,7 @@ namespace DMotion
                 // - 1000+: Exit transition (encoded as 1000 + exitTransitionIndex)
                 short toStateIndex;
                 float transitionDuration;
+                float transitionOffset;
                 short curveSourceStateIndex;
                 short curveSourceTransitionIndex;
                 TransitionSource curveSource;
@@ -134,6 +136,7 @@ namespace DMotion
                     ref var anyTransition = ref stateMachineBlob.AnyStateTransitions[anyTransitionIndex];
                     toStateIndex = anyTransition.ToStateIndex;
                     transitionDuration = anyTransition.TransitionDuration;
+                    transitionOffset = anyTransition.Offset;
                     
                     // Curve lookup: Any State transitions use AnyStateTransitions array
                     curveSourceStateIndex = -1;  // Not applicable for Any State
@@ -149,6 +152,7 @@ namespace DMotion
                     ref var exitTransition = ref exitGroup.ExitTransitions[exitTransitionIndex];
                     toStateIndex = exitTransition.ToStateIndex;
                     transitionDuration = exitTransition.TransitionDuration;
+                    transitionOffset = exitTransition.Offset;
                     
                     // Exit transitions have no curve - parent state machine handles the blend
                     curveSourceStateIndex = -1;
@@ -161,6 +165,7 @@ namespace DMotion
                     ref var transition = ref stateMachine.CurrentStateBlob.Transitions[transitionIndex];
                     toStateIndex = transition.ToStateIndex;
                     transitionDuration = transition.TransitionDuration;
+                    transitionOffset = transition.Offset;
                     
                     // Curve lookup: State transitions use States[fromState].Transitions array
                     curveSourceStateIndex = (short)stateMachine.CurrentState.StateIndex;
@@ -176,7 +181,9 @@ namespace DMotion
                     toStateIndex,
                     stateMachine,
                     ref buffers,
-                    floatParameters);
+                    floatParameters,
+                    intParameters,
+                    transitionOffset);
 
                 animationStateTransitionRequest = AnimationStateTransitionRequest.New(
                     (byte)stateMachine.CurrentState.AnimationStateId,
@@ -213,7 +220,9 @@ namespace DMotion
             short stateIndex,
             in AnimationStateMachine stateMachine,
             ref AnimationBufferContext buffers,
-            in DynamicBuffer<FloatParameter> floatParameters)
+            in DynamicBuffer<FloatParameter> floatParameters,
+            in DynamicBuffer<IntParameter> intParameters = default,
+            float normalizedOffset = 0f)
         {
             ref var state = ref stateMachine.StateMachineBlob.Value.States[stateIndex];
             var stateRef = new StateMachineStateRef
@@ -236,7 +245,8 @@ namespace DMotion
                         ref buffers.SingleClipStates,
                         ref buffers.AnimationStates,
                         ref buffers.ClipSamplers,
-                        finalSpeed);
+                        finalSpeed,
+                        normalizedOffset);
                     animationStateId = singleClipState.AnimationStateId;
                     break;
                 case StateType.LinearBlend:
@@ -248,7 +258,10 @@ namespace DMotion
                         ref buffers.LinearBlendStates,
                         ref buffers.AnimationStates,
                         ref buffers.ClipSamplers,
-                        finalSpeed);
+                        finalSpeed,
+                        floatParameters,
+                        intParameters,
+                        normalizedOffset);
                     animationStateId = linearClipState.AnimationStateId;
                     break;
                 case StateType.Directional2DBlend:
@@ -260,7 +273,9 @@ namespace DMotion
                         ref buffers.Directional2DBlendStates,
                         ref buffers.AnimationStates,
                         ref buffers.ClipSamplers,
-                        finalSpeed);
+                        finalSpeed,
+                        floatParameters,
+                        normalizedOffset);
                     animationStateId = directional2DState.AnimationStateId;
                     break;
                 default:

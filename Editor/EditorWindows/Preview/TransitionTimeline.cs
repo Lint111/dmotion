@@ -298,8 +298,9 @@ namespace DMotion.Editor
                 // Case 1: Duration shrunk - requestedExitTime exceeds fromStateDuration
                 if (requestedExitTime > fromStateDuration)
                 {
-                    float cyclesNeeded = requestedExitTime / fromStateDuration;
-                    return Mathf.Clamp(Mathf.CeilToInt(cyclesNeeded), 1, MaxVisualCycles);
+                    // Use shared runtime utility for cycle count calculation
+                    int cycles = AnimationTimeUtils.CalculateCycleCount(requestedExitTime, fromStateDuration);
+                    return Mathf.Clamp(cycles, 1, MaxVisualCycles);
                 }
                 
                 // Case 2: Context ghost - exitTime is at zero (full overlap)
@@ -328,8 +329,9 @@ namespace DMotion.Editor
                 // Case 1: Duration shrunk - transitionDuration exceeds toStateDuration
                 if (requestedTransitionDuration > toStateDuration)
                 {
-                    float cyclesNeeded = requestedTransitionDuration / toStateDuration;
-                    return Mathf.Clamp(Mathf.CeilToInt(cyclesNeeded), 1, MaxVisualCycles);
+                    // Use shared runtime utility for cycle count calculation
+                    int cycles = AnimationTimeUtils.CalculateCycleCount(requestedTransitionDuration, toStateDuration);
+                    return Mathf.Clamp(cycles, 1, MaxVisualCycles);
                 }
                 
                 // Case 2: Context ghost - bars end together
@@ -431,9 +433,8 @@ namespace DMotion.Editor
                 float totalFromTime = FromVisualCycles * fromStateDuration;
                 float timeInFromCycles = Mathf.Min(currentSeconds, totalFromTime);
                 
-                // Wrap within single cycle for normalized time (handles ghost bar looping)
-                float normalizedTime = (timeInFromCycles % fromStateDuration) / fromStateDuration;
-                return Mathf.Clamp01(normalizedTime);
+                // Use shared utility for consistent wrapping
+                return AnimationTimeUtils.CalculateNormalizedTime(timeInFromCycles, fromStateDuration);
             }
         }
         
@@ -475,7 +476,8 @@ namespace DMotion.Editor
                 {
                     float totalToTime = ToVisualCycles * toStateDuration;
                     toClipTime = Mathf.Min(toClipTime, totalToTime);
-                    return Mathf.Clamp01((toClipTime % toStateDuration) / toStateDuration);
+                    // Use shared utility for consistent wrapping
+                    return AnimationTimeUtils.CalculateNormalizedTime(toClipTime, toStateDuration);
                 }
                 
                 return Mathf.Clamp01(toClipTime / toStateDuration);

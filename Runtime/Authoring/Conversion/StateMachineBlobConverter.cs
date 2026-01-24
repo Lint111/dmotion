@@ -59,6 +59,7 @@ namespace DMotion.Authoring
         internal short ToStateIndex;
         internal float TransitionDuration;
         internal float TransitionEndTime;
+        internal float Offset;
         internal UnsafeList<BoolTransition> BoolTransitions;
         internal UnsafeList<IntTransition> IntTransitions;
         internal bool CanTransitionToSelf;
@@ -151,7 +152,8 @@ namespace DMotion.Authoring
                         {
                             ToStateIndex = transitionConversionData.ToStateIndex,
                             TransitionEndTime = transitionConversionData.TransitionEndTime,
-                            TransitionDuration = transitionConversionData.TransitionDuration
+                            TransitionDuration = transitionConversionData.TransitionDuration,
+                            Offset = transitionConversionData.Offset
                         };
 
                         if (transitionConversionData.BoolTransitions.IsCreated && transitionConversionData.BoolTransitions.Length > 0)
@@ -254,6 +256,7 @@ namespace DMotion.Authoring
                         ToStateIndex = anyTransitionConversionData.ToStateIndex,
                         TransitionEndTime = anyTransitionConversionData.TransitionEndTime,
                         TransitionDuration = anyTransitionConversionData.TransitionDuration,
+                        Offset = anyTransitionConversionData.Offset,
                         CanTransitionToSelf = anyTransitionConversionData.CanTransitionToSelf
                     };
 
@@ -309,7 +312,8 @@ namespace DMotion.Authoring
                         {
                             ToStateIndex = transitionData.ToStateIndex,
                             TransitionEndTime = transitionData.TransitionEndTime,
-                            TransitionDuration = transitionData.TransitionDuration
+                            TransitionDuration = transitionData.TransitionDuration,
+                            Offset = transitionData.Offset
                         };
 
                         if (transitionData.BoolTransitions.IsCreated && transitionData.BoolTransitions.Length > 0)

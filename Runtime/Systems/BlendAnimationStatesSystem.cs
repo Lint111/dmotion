@@ -13,6 +13,7 @@ namespace DMotion
     public partial struct BlendAnimationStatesSystem : ISystem
     {
         [BurstCompile]
+        [WithNone(typeof(TimelineControlled))]
         internal partial struct BlendAnimationStatesJob : IJobEntity
         {
             internal float DeltaTime;
@@ -41,6 +42,7 @@ namespace DMotion
         /// </summary>
         [BurstCompile]
         [WithNone(typeof(AnimationStateMachine))]
+        [WithNone(typeof(TimelineControlled))]
         internal partial struct BlendAnimationStatesWithoutStateMachineJob : IJobEntity
         {
             internal float DeltaTime;
@@ -85,6 +87,7 @@ namespace DMotion
                     {
                         AnimationStateId = transitionRequest.AnimationStateId,
                         TransitionDuration = transitionDuration,
+                        TimeElapsed = 0,
                         // Copy curve source info for curve lookup during blend
                         CurveSourceStateIndex = transitionRequest.CurveSourceStateIndex,
                         CurveSourceTransitionIndex = transitionRequest.CurveSourceTransitionIndex,
@@ -93,7 +96,11 @@ namespace DMotion
 
                     //reset toState time
                     var toState = animationStates[newToStateIndex];
-                    toState.Time = 0;
+                    // IMPORTANT: We do NOT reset toState.Time to 0 here.
+                    // The UpdateStateMachineJob is responsible for initializing the state,
+                    // potentially with an offset if using Sync or Exit Time logic.
+                    // By the time we get here, the state is already created and potentially offset.
+                    // toState.Time = 0; // REMOVED
                     animationStates[newToStateIndex] = toState;
                 }
 
@@ -108,6 +115,12 @@ namespace DMotion
                     animationState.Time += deltaTime * animationState.Speed;
                     animationStates[i] = animationState;
                 }
+            }
+
+            //Update transition timer
+            if (animationStateTransition.IsValid)
+            {
+                animationStateTransition.TimeElapsed += deltaTime;
             }
 
             var toAnimationStateIndex = animationStates.IdToIndex((byte)animationStateTransition.AnimationStateId);
@@ -132,7 +145,7 @@ namespace DMotion
                 else
                 {
                     // Calculate normalized time
-                    var normalizedTime = math.clamp(toAnimationState.Time /
+                    var normalizedTime = math.clamp(animationStateTransition.TimeElapsed /
                                                     animationStateTransition.TransitionDuration, 0, 1);
                     
                     // Apply blend curve if available
@@ -172,6 +185,7 @@ namespace DMotion
                     {
                         AnimationStateId = transitionRequest.AnimationStateId,
                         TransitionDuration = transitionDuration,
+                        TimeElapsed = 0,
                         CurveSourceStateIndex = transitionRequest.CurveSourceStateIndex,
                         CurveSourceTransitionIndex = transitionRequest.CurveSourceTransitionIndex,
                         CurveSource = transitionRequest.CurveSource
@@ -179,7 +193,7 @@ namespace DMotion
 
                     //reset toState time
                     var toState = animationStates[newToStateIndex];
-                    toState.Time = 0;
+                    // toState.Time = 0; // REMOVED - see note above
                     animationStates[newToStateIndex] = toState;
                 }
 
@@ -194,6 +208,12 @@ namespace DMotion
                     animationState.Time += deltaTime * animationState.Speed;
                     animationStates[i] = animationState;
                 }
+            }
+
+            //Update transition timer
+            if (animationStateTransition.IsValid)
+            {
+                animationStateTransition.TimeElapsed += deltaTime;
             }
 
             var toAnimationStateIndex = animationStates.IdToIndex((byte)animationStateTransition.AnimationStateId);
@@ -218,7 +238,7 @@ namespace DMotion
                 else
                 {
                     // Linear blend (no curve)
-                    toAnimationState.Weight = math.clamp(toAnimationState.Time /
+                    toAnimationState.Weight = math.clamp(animationStateTransition.TimeElapsed /
                                                          animationStateTransition.TransitionDuration, 0, 1);
                 }
 
@@ -350,6 +370,7 @@ namespace DMotion
         }
 
         [BurstCompile]
+        [WithNone(typeof(TimelineControlled))]
         internal partial struct CleanAnimationStatesJob : IJobEntity
         {
             internal void Execute(

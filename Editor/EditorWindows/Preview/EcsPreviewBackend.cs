@@ -13,65 +13,53 @@ namespace DMotion.Editor
 {
     /// <summary>
     /// Preview backend using actual DMotion ECS systems (Runtime mode).
-    /// Provides runtime-accurate preview behavior by running animation systems
-    /// in an isolated ECS world.
     /// 
-    /// Phase 6A: State machine logic validation (no actual animation sampling)
-    /// - Creates StateMachineBlob from StateMachineAsset
-    /// - Creates stub SkeletonClipSetBlob with correct clip count
-    /// - Runs state machine systems to validate transitions/parameters
-    /// - Displays state machine state info (no 3D rendering yet)
+    /// Uses the AnimationTimelineControllerSystem to provide native timeline control:
+    /// - Play/Pause/Scrub through the ECS system
+    /// - State preview with blend position control
+    /// - Transition preview with ghost bars
+    /// 
+    /// The timeline controller outputs render requests that downstream systems
+    /// (ApplyStateRenderRequestSystem, ApplyTransitionRenderRequestSystem) apply
+    /// to the animation state buffers.
     /// </summary>
     internal class EcsPreviewBackend : IPreviewBackend
     {
         #region State
         
-        private EcsPreviewWorldService worldService;
+        // Core state
         private AnimationStateAsset currentState;
         private AnimationStateAsset transitionFromState;
         private AnimationStateAsset transitionToState;
-        private float transitionDuration;
-        
-        // Cached references
         private StateMachineAsset stateMachineAsset;
-        private BlobAssetReference<StateMachineBlob> stateMachineBlob;
-        private BlobAssetReference<SkeletonClipSetBlob> clipsBlob;
-        private BlobAssetReference<ClipEventsBlob> clipEventsBlob;
-        
-        // Preview state
-        private float normalizedTime;
-        private float2 blendPosition;           // For single state, or "from" state in transition
-        private float2 targetBlendPosition;     // Interpolation target for blendPosition
-        private float2 toBlendPosition;         // For "to" state in transition
-        private float2 targetToBlendPosition;   // Interpolation target for toBlendPosition
-        private float transitionProgress;
         private string errorMessage;
         private bool isInitialized;
-        private bool entityCreated;
         
-        // Blend smoothing
-        private const float BlendSmoothSpeed = 8f; // Higher = faster interpolation
+        // Blend positions (with smoothing)
+        private float2 blendPosition;
+        private float2 targetBlendPosition;
+        private float2 toBlendPosition;
+        private float2 targetToBlendPosition;
+        private const float BlendSmoothSpeed = 8f;
         
-        // Playback control for entity browser mode
-        private bool isPreviewPlaying = true;
-        private bool isPreviewTimeControlled = false;
-        private float previewControlledTime = 0f; // Time in seconds when preview controls playback
+        // Timeline control
+        private TimelineControlHelper timelineHelper;
         
-        // Hybrid renderer for 3D preview (legacy - for isolated preview)
-        private EcsHybridRenderer hybridRenderer;
-        private bool rendererInitialized;
-        
-        // Entity browser for live entity inspection
+        // Entity browser for live entity selection
         private EcsEntityBrowser entityBrowser;
-        private bool useEntityBrowserMode = true; // Default to entity browser mode
         
         // Scene manager for automatic SubScene setup
         private EcsPreviewSceneManager sceneManager;
         
-        // Camera state
-        private PlayableGraphPreview.CameraState cameraState;
+        // Hybrid renderer for 3D preview
+        private EcsHybridRenderer hybridRenderer;
+        private bool rendererInitialized;
         
-        // Preview model
+        // Legacy world service (for isolated preview mode)
+        private EcsPreviewWorldService worldService;
+        
+        // Camera and model
+        private PlayableGraphPreview.CameraState cameraState;
         private GameObject previewModel;
         
         #endregion
@@ -80,9 +68,10 @@ namespace DMotion.Editor
         
         public EcsPreviewBackend()
         {
-            worldService = new EcsPreviewWorldService();
             entityBrowser = new EcsEntityBrowser();
             sceneManager = EcsPreviewSceneManager.Instance;
+            worldService = new EcsPreviewWorldService();
+            timelineHelper = new TimelineControlHelper();
         }
         
         #endregion
@@ -91,7 +80,7 @@ namespace DMotion.Editor
         
         public PreviewMode Mode => PreviewMode.EcsRuntime;
         
-        public bool IsInitialized => isInitialized && (useEntityBrowserMode || worldService.IsInitialized);
+        public bool IsInitialized => isInitialized;
         
         public string ErrorMessage => errorMessage;
         
@@ -123,7 +112,6 @@ namespace DMotion.Editor
             transitionToState = null;
             errorMessage = null;
             isInitialized = false;
-            entityCreated = false;
             
             if (state == null)
             {
@@ -132,139 +120,79 @@ namespace DMotion.Editor
             }
             
             // Find the owning StateMachineAsset
-            var newStateMachineAsset = FindOwningStateMachine(state);
-            if (newStateMachineAsset == null)
+            stateMachineAsset = FindOwningStateMachine(state);
+            if (stateMachineAsset == null)
             {
                 errorMessage = $"Could not find StateMachineAsset\nfor state: {state.name}";
                 return;
             }
             
-            // Store the state machine for scene setup
-            stateMachineAsset = newStateMachineAsset;
-            
-            // In entity browser mode, we set up the preview scene automatically
-            if (useEntityBrowserMode)
-            {
-                // Auto-setup preview scene if not already set up
-                if (!sceneManager.IsSetup)
-                {
-                    SetupPreviewScene();
-                }
-                
-                // Initialize entity browser and auto-select an entity
-                InitializeEntityBrowser(stateMachineAsset);
-                
-                isInitialized = true;
-                return;
-            }
-            
-            // Legacy isolated preview mode (below)
-            // Create world if not already created
-            if (!worldService.IsInitialized)
-            {
-                worldService.CreateWorld();
-            }
-            
-            // Rebuild blobs if state machine changed
-            DisposeBlobs();
-            
-            if (!TryCreateBlobs())
+            // Ensure we have an entity to work with
+            if (!EnsureEntitySelected())
             {
                 return;
             }
             
-            // Create preview entity
-            if (!TryCreatePreviewEntity())
+            // Initialize timeline control
+            if (!InitializeTimelineHelper())
             {
                 return;
             }
+            
+            // Setup timeline for state preview
+            timelineHelper.SetupStatePreview(state, blendPosition);
             
             isInitialized = true;
         }
         
         public void CreateTransitionPreview(AnimationStateAsset fromState, AnimationStateAsset toState, float duration)
         {
-            Debug.Log($"[EcsPreviewBackend] CreateTransitionPreview: {fromState?.name ?? "Any"} -> {toState?.name ?? "null"}, duration={duration}");
-            
             currentState = null;
             transitionFromState = fromState;
             transitionToState = toState;
-            transitionDuration = duration;
             errorMessage = null;
             isInitialized = false;
-            entityCreated = false;
             
             if (toState == null)
             {
-                Debug.LogWarning("[EcsPreviewBackend] CreateTransitionPreview: toState is null");
                 errorMessage = "No target state for transition";
                 return;
             }
             
             // Find the owning StateMachineAsset
-            var newStateMachineAsset = FindOwningStateMachine(toState);
-            if (newStateMachineAsset == null)
+            stateMachineAsset = FindOwningStateMachine(toState);
+            if (stateMachineAsset == null)
             {
-                Debug.LogWarning($"[EcsPreviewBackend] CreateTransitionPreview: Could not find StateMachineAsset for {toState.name}");
                 errorMessage = $"Could not find StateMachineAsset\nfor state: {toState.name}";
                 return;
             }
             
-            Debug.Log($"[EcsPreviewBackend] Found StateMachineAsset: {newStateMachineAsset.name}");
-            
-            // Store the state machine for scene setup
-            stateMachineAsset = newStateMachineAsset;
-            
-            // In entity browser mode, handle transition preview on live entities
-            if (useEntityBrowserMode)
-            {
-                Debug.Log($"[EcsPreviewBackend] Entity browser mode. SceneManager.IsSetup={sceneManager.IsSetup}");
-                
-                // Auto-setup preview scene if not already set up
-                if (!sceneManager.IsSetup)
-                {
-                    SetupPreviewScene();
-                }
-                
-                // Initialize entity browser and auto-select an entity
-                InitializeEntityBrowser(stateMachineAsset);
-                
-                Debug.Log($"[EcsPreviewBackend] After InitializeEntityBrowser: HasSelection={entityBrowser.HasSelection}, EntityCount={entityBrowser.EntityCount}");
-                
-                // If we have a selected entity, trigger a transition on it
-                if (entityBrowser.HasSelection)
-                {
-                    TriggerTransitionOnBrowserEntity();
-                }
-                else
-                {
-                    Debug.LogWarning("[EcsPreviewBackend] No entity selected - cannot trigger transition");
-                }
-                
-                isInitialized = true;
-                return;
-            }
-            
-            // Legacy isolated preview mode (below)
-            // Create world if not already created
-            if (!worldService.IsInitialized)
-            {
-                worldService.CreateWorld();
-            }
-            
-            // Rebuild blobs if state machine changed
-            DisposeBlobs();
-            
-            if (!TryCreateBlobs())
+            // Ensure we have an entity to work with
+            if (!EnsureEntitySelected())
             {
                 return;
             }
             
-            // Create preview entity
-            if (!TryCreatePreviewEntity())
+            // Initialize timeline control
+            if (!InitializeTimelineHelper())
             {
                 return;
             }
+            
+            // Find transition definition for curve lookup and timing
+            var (transitionIndex, curveSource) = FindTransitionIndices(fromState, toState);
+            var (transition, _, _, _) = GetTransitionInfo();
+            
+            // Setup timeline for transition preview - pass the transition directly
+            // so TimelineControlHelper can extract all timing info
+            timelineHelper.SetupTransitionPreview(
+                fromState,
+                toState,
+                transition,
+                transitionIndex,
+                curveSource,
+                blendPosition,
+                toBlendPosition);
             
             isInitialized = true;
         }
@@ -272,12 +200,7 @@ namespace DMotion.Editor
         public void SetPreviewModel(GameObject model)
         {
             previewModel = model;
-            
-            // Initialize or reinitialize the hybrid renderer with the new model
-            if (entityCreated)
-            {
-                TryInitializeRenderer();
-            }
+            TryInitializeRenderer();
         }
         
         public void Clear()
@@ -287,29 +210,287 @@ namespace DMotion.Editor
             transitionToState = null;
             errorMessage = null;
             isInitialized = false;
-            entityCreated = false;
             
-            // Dispose renderer
+            timelineHelper?.Deactivate();
+            
             hybridRenderer?.Dispose();
             hybridRenderer = null;
             rendererInitialized = false;
-            
-            worldService.DestroyPreviewEntity();
         }
         
         public void SetMessage(string message)
         {
-            currentState = null;
-            transitionFromState = null;
-            transitionToState = null;
+            Clear();
             errorMessage = message;
-            isInitialized = false;
-            entityCreated = false;
         }
         
         #endregion
         
-        #region Blob Creation
+        #region IPreviewBackend Time Control
+        
+        public void SetNormalizedTime(float time)
+        {
+            timelineHelper?.ScrubToTime(time);
+        }
+        
+        public void SetTransitionStateNormalizedTimes(float fromNormalized, float toNormalized)
+        {
+            // The timeline controller handles this internally based on transition progress
+            // For now, we map this to transition progress
+            // TODO: Add more granular control if needed
+        }
+        
+        public void SetTransitionProgress(float progress)
+        {
+            timelineHelper?.ScrubTransition(progress);
+        }
+        
+        public void SetPlaying(bool playing)
+        {
+            if (playing)
+            {
+                timelineHelper?.Play();
+            }
+            else
+            {
+                timelineHelper?.Pause();
+            }
+        }
+        
+        public void StepFrames(int frameCount, float fps = 30f)
+        {
+            timelineHelper?.StepFrames(frameCount, fps);
+        }
+        
+        #endregion
+        
+        #region IPreviewBackend Blend Control
+        
+        public void SetBlendPosition1D(float value)
+        {
+            targetBlendPosition = new float2(value, 0);
+        }
+        
+        public void SetBlendPosition2D(float2 position)
+        {
+            targetBlendPosition = position;
+        }
+        
+        public void SetBlendPosition1DImmediate(float value)
+        {
+            blendPosition = new float2(value, 0);
+            targetBlendPosition = blendPosition;
+            ApplyBlendPositionToTimeline();
+        }
+        
+        public void SetBlendPosition2DImmediate(float2 position)
+        {
+            blendPosition = position;
+            targetBlendPosition = position;
+            ApplyBlendPositionToTimeline();
+        }
+        
+        public void SetTransitionFromBlendPosition(float2 position)
+        {
+            blendPosition = position;
+            targetBlendPosition = position;
+            ApplyBlendPositionToTimeline();
+        }
+        
+        public void SetTransitionToBlendPosition(float2 position)
+        {
+            toBlendPosition = position;
+            targetToBlendPosition = position;
+            ApplyBlendPositionToTimeline();
+        }
+        
+        public void SetSoloClip(int clipIndex)
+        {
+            // TODO: Implement solo clip mode
+        }
+        
+        private void ApplyBlendPositionToTimeline()
+        {
+            if (!isInitialized || timelineHelper == null) return;
+            
+            if (IsTransitionPreview)
+            {
+                var (transitionIndex, curveSource) = FindTransitionIndices(transitionFromState, transitionToState);
+                timelineHelper.UpdateTransitionBlendPositions(
+                    transitionFromState,
+                    transitionToState,
+                    GetTransitionDuration(),
+                    transitionIndex,
+                    curveSource,
+                    blendPosition,
+                    toBlendPosition);
+            }
+            else if (currentState != null)
+            {
+                timelineHelper.UpdateBlendPosition(currentState, blendPosition);
+            }
+        }
+        
+        #endregion
+        
+        #region IPreviewBackend Update & Render
+        
+        public bool Tick(float deltaTime)
+        {
+            bool needsRepaint = false;
+            
+            // Smooth blend position interpolation
+            if (math.any(blendPosition != targetBlendPosition))
+            {
+                var diff = targetBlendPosition - blendPosition;
+                var maxStep = BlendSmoothSpeed * deltaTime;
+                
+                if (math.length(diff) <= maxStep)
+                {
+                    blendPosition = targetBlendPosition;
+                }
+                else
+                {
+                    blendPosition += math.normalize(diff) * maxStep;
+                }
+                ApplyBlendPositionToTimeline();
+                needsRepaint = true;
+            }
+            
+            // Smooth to-state blend position interpolation
+            if (math.any(toBlendPosition != targetToBlendPosition))
+            {
+                var diff = targetToBlendPosition - toBlendPosition;
+                var maxStep = BlendSmoothSpeed * deltaTime;
+                
+                if (math.length(diff) <= maxStep)
+                {
+                    toBlendPosition = targetToBlendPosition;
+                }
+                else
+                {
+                    toBlendPosition += math.normalize(diff) * maxStep;
+                }
+                ApplyBlendPositionToTimeline();
+                needsRepaint = true;
+            }
+            
+            return needsRepaint;
+        }
+        
+        public void Draw(Rect rect)
+        {
+            // Draw entity browser
+            entityBrowser.DrawBrowser(rect);
+            
+            // Draw selection info overlay
+            if (entityBrowser.HasSelection)
+            {
+                DrawSelectionOverlay(rect);
+            }
+            
+            // Draw 3D preview if available
+            if (rendererInitialized && hybridRenderer != null)
+            {
+                var samplers = worldService.GetActiveSamplers();
+                hybridRenderer.Render(samplers, rect);
+            }
+        }
+        
+        public bool HandleInput(Rect rect)
+        {
+            if (rendererInitialized && hybridRenderer != null)
+            {
+                hybridRenderer.HandleCamera();
+                return GUI.changed;
+            }
+            return false;
+        }
+        
+        public void ResetCameraView()
+        {
+            hybridRenderer?.ResetCameraView();
+        }
+        
+        public PreviewSnapshot GetSnapshot()
+        {
+            var position = timelineHelper?.GetPosition() ?? default;
+            var activeRequest = timelineHelper?.GetActiveRequest() ?? ActiveRenderRequest.None;
+            
+            return new PreviewSnapshot
+            {
+                IsInitialized = isInitialized,
+                ErrorMessage = errorMessage,
+                NormalizedTime = position.NormalizedTime,
+                BlendPosition = blendPosition,
+                TransitionProgress = activeRequest.Type == RenderRequestType.Transition 
+                    ? position.SectionProgress 
+                    : -1f
+            };
+        }
+        
+        #endregion
+        
+        #region Private Helpers
+        
+        /// <summary>
+        /// Ensures an entity is selected for preview.
+        /// </summary>
+        private bool EnsureEntitySelected()
+        {
+            // Auto-setup preview scene if needed
+            if (!sceneManager.IsSetup && previewModel != null)
+            {
+                sceneManager.Setup(stateMachineAsset, previewModel);
+            }
+            
+            // Refresh and select entity
+            entityBrowser.RefreshEntityList();
+            
+            if (!entityBrowser.HasSelection)
+            {
+                if (stateMachineAsset != null)
+                {
+                    entityBrowser.SelectByStateMachine(stateMachineAsset);
+                }
+                
+                if (!entityBrowser.HasSelection)
+                {
+                    entityBrowser.AutoSelectFirst();
+                }
+            }
+            
+            if (!entityBrowser.HasSelection)
+            {
+                errorMessage = "No animation entity found.\nEnter Play mode with an animated character.";
+                return false;
+            }
+            
+            return true;
+        }
+        
+        /// <summary>
+        /// Initializes the timeline helper for the selected entity.
+        /// </summary>
+        private bool InitializeTimelineHelper()
+        {
+            if (!entityBrowser.HasSelection)
+            {
+                errorMessage = "No entity selected";
+                return false;
+            }
+            
+            var entity = entityBrowser.SelectedEntity;
+            var world = entityBrowser.SelectedWorld;
+            
+            if (!timelineHelper.Initialize(entity, world, stateMachineAsset))
+            {
+                errorMessage = "Failed to initialize timeline control";
+                return false;
+            }
+            
+            return true;
+        }
         
         /// <summary>
         /// Finds the StateMachineAsset that owns the given state.
@@ -318,22 +499,21 @@ namespace DMotion.Editor
         {
             if (state == null) return null;
             
-            // Get the asset path and load all StateMachineAssets in the same file
-            var path = UnityEditor.AssetDatabase.GetAssetPath(state);
+            var path = AssetDatabase.GetAssetPath(state);
             if (string.IsNullOrEmpty(path)) return null;
             
-            var mainAsset = UnityEditor.AssetDatabase.LoadMainAssetAtPath(path);
+            var mainAsset = AssetDatabase.LoadMainAssetAtPath(path);
             if (mainAsset is StateMachineAsset sm)
             {
                 return sm;
             }
             
-            // Search all loaded StateMachineAssets
-            var guids = UnityEditor.AssetDatabase.FindAssets("t:StateMachineAsset");
+            // Search all StateMachineAssets
+            var guids = AssetDatabase.FindAssets("t:StateMachineAsset");
             foreach (var guid in guids)
             {
-                var assetPath = UnityEditor.AssetDatabase.GUIDToAssetPath(guid);
-                var asset = UnityEditor.AssetDatabase.LoadAssetAtPath<StateMachineAsset>(assetPath);
+                var assetPath = AssetDatabase.GUIDToAssetPath(guid);
+                var asset = AssetDatabase.LoadAssetAtPath<StateMachineAsset>(assetPath);
                 if (asset != null && asset.States.Contains(state))
                 {
                     return asset;
@@ -344,147 +524,105 @@ namespace DMotion.Editor
         }
         
         /// <summary>
-        /// Creates the StateMachineBlob and stub SkeletonClipSetBlob.
+        /// Finds transition index and curve source for a transition.
         /// </summary>
-        private bool TryCreateBlobs()
+        private (short transitionIndex, TransitionSource curveSource) FindTransitionIndices(
+            AnimationStateAsset fromState, 
+            AnimationStateAsset toState)
         {
-            if (stateMachineAsset == null)
+            if (toState == null || stateMachineAsset == null)
             {
-                errorMessage = "No StateMachineAsset";
-                return false;
+                return (-1, TransitionSource.State);
             }
             
-            try
+            // Check from state's out transitions
+            if (fromState?.OutTransitions != null)
             {
-                // Create StateMachineBlob from asset
-                stateMachineBlob = AnimationStateMachineConversionUtils.CreateStateMachineBlob(stateMachineAsset);
-                
-                // Create stub SkeletonClipSetBlob with correct clip count
-                // Note: This blob has no actual animation data - it's just for state machine logic validation
-                var clipCount = stateMachineAsset.ClipCount;
-                clipsBlob = CreateStubClipsBlob(clipCount);
-                
-                // Create empty clip events blob
-                clipEventsBlob = CreateEmptyClipEventsBlob();
-                
-                return true;
-            }
-            catch (Exception e)
-            {
-                errorMessage = $"Failed to create blobs:\n{e.Message}";
-                Debug.LogError($"[EcsPreviewBackend] {errorMessage}\n{e.StackTrace}");
-                DisposeBlobs();
-                return false;
-            }
-        }
-        
-        /// <summary>
-        /// Creates a stub SkeletonClipSetBlob with the correct clip count but no animation data.
-        /// This allows state machine systems to run without actual animation sampling.
-        /// </summary>
-        private BlobAssetReference<SkeletonClipSetBlob> CreateStubClipsBlob(int clipCount)
-        {
-            var builder = new BlobBuilder(Allocator.Temp);
-            ref var root = ref builder.ConstructRoot<SkeletonClipSetBlob>();
-            root.boneCount = 1; // Minimal bone count
-            
-            var clips = builder.Allocate(ref root.clips, clipCount);
-            // Leave clips as default (zeroed) - no actual animation data
-            
-            return builder.CreateBlobAssetReference<SkeletonClipSetBlob>(Allocator.Persistent);
-        }
-        
-        /// <summary>
-        /// Creates an empty ClipEventsBlob.
-        /// </summary>
-        private BlobAssetReference<ClipEventsBlob> CreateEmptyClipEventsBlob()
-        {
-            var builder = new BlobBuilder(Allocator.Temp);
-            ref var root = ref builder.ConstructRoot<ClipEventsBlob>();
-            builder.Allocate(ref root.ClipEvents, 0);
-            
-            return builder.CreateBlobAssetReference<ClipEventsBlob>(Allocator.Persistent);
-        }
-        
-        /// <summary>
-        /// Disposes all blob references.
-        /// </summary>
-        private void DisposeBlobs()
-        {
-            if (stateMachineBlob.IsCreated)
-            {
-                stateMachineBlob.Dispose();
-                stateMachineBlob = default;
-            }
-            if (clipsBlob.IsCreated)
-            {
-                clipsBlob.Dispose();
-                clipsBlob = default;
-            }
-            if (clipEventsBlob.IsCreated)
-            {
-                clipEventsBlob.Dispose();
-                clipEventsBlob = default;
-            }
-            stateMachineAsset = null;
-        }
-        
-        /// <summary>
-        /// Creates the preview entity with state machine components.
-        /// </summary>
-        private bool TryCreatePreviewEntity()
-        {
-            if (!worldService.IsInitialized)
-            {
-                errorMessage = "ECS world not initialized";
-                return false;
-            }
-            
-            if (!stateMachineBlob.IsCreated || !clipsBlob.IsCreated)
-            {
-                errorMessage = "Blobs not created";
-                return false;
-            }
-            
-            try
-            {
-                var entity = worldService.CreatePreviewEntity(stateMachineBlob, clipsBlob, clipEventsBlob);
-                if (entity == Entity.Null)
+                for (int i = 0; i < fromState.OutTransitions.Count; i++)
                 {
-                    errorMessage = "Failed to create preview entity";
-                    return false;
+                    if (fromState.OutTransitions[i].ToState == toState)
+                    {
+                        return ((short)i, TransitionSource.State);
+                    }
                 }
-                
-                entityCreated = true;
-                
-                // Try to initialize the hybrid renderer if we have a model
-                TryInitializeRenderer();
-                
-                return true;
             }
-            catch (Exception e)
+            
+            // Check any state transitions
+            if (stateMachineAsset.AnyStateTransitions != null)
             {
-                errorMessage = $"Entity creation failed:\n{e.Message}";
-                Debug.LogError($"[EcsPreviewBackend] {errorMessage}\n{e.StackTrace}");
-                return false;
+                for (int i = 0; i < stateMachineAsset.AnyStateTransitions.Count; i++)
+                {
+                    if (stateMachineAsset.AnyStateTransitions[i].ToState == toState)
+                    {
+                        return ((short)i, TransitionSource.AnyState);
+                    }
+                }
             }
+            
+            return (-1, TransitionSource.State);
+        }
+        
+        /// <summary>
+        /// Gets the transition duration from the transition definition.
+        /// </summary>
+        private float GetTransitionDuration()
+        {
+            var transition = FindTransition();
+            return transition?.TransitionDuration ?? 0.25f;
+        }
+        
+        /// <summary>
+        /// Finds the StateOutTransition for the current from/to state pair.
+        /// Returns null if not found.
+        /// </summary>
+        private StateOutTransition FindTransition()
+        {
+            if (transitionToState == null) 
+                return null;
+            
+            // Check from state's transitions
+            if (transitionFromState?.OutTransitions != null)
+            {
+                foreach (var t in transitionFromState.OutTransitions)
+                {
+                    if (t.ToState == transitionToState)
+                        return t;
+                }
+            }
+            
+            // Check any state transitions
+            if (stateMachineAsset?.AnyStateTransitions != null)
+            {
+                foreach (var t in stateMachineAsset.AnyStateTransitions)
+                {
+                    if (t.ToState == transitionToState)
+                        return t;
+                }
+            }
+            
+            return null;
+        }
+        
+        /// <summary>
+        /// Gets full transition info for compatibility.
+        /// </summary>
+        private (StateOutTransition transition, float duration, float exitTime, bool hasExitTime) GetTransitionInfo()
+        {
+            var t = FindTransition();
+            if (t != null)
+                return (t, t.TransitionDuration, t.EndTime, t.HasEndTime);
+            return (null, 0.25f, 0f, false);
         }
         
         /// <summary>
         /// Tries to initialize the hybrid renderer for 3D preview.
-        /// Requires both a StateMachineAsset and a preview model.
         /// </summary>
         private void TryInitializeRenderer()
         {
-            // Dispose existing renderer
-            if (hybridRenderer != null)
-            {
-                hybridRenderer.Dispose();
-                hybridRenderer = null;
-                rendererInitialized = false;
-            }
+            hybridRenderer?.Dispose();
+            hybridRenderer = null;
+            rendererInitialized = false;
             
-            // Need both state machine and model
             if (stateMachineAsset == null || previewModel == null)
             {
                 return;
@@ -509,1479 +647,52 @@ namespace DMotion.Editor
             }
         }
         
-        #endregion
-        
-        #region IPreviewBackend Time Control
-        
-        public void SetNormalizedTime(float time)
-        {
-            normalizedTime = time;
-            
-            // Enable preview time control and set sampler times
-            if (useEntityBrowserMode && entityBrowser.HasSelection)
-            {
-                isPreviewTimeControlled = true;
-                SetSamplerTimesOnBrowserEntity(time);
-            }
-        }
-        
-        public void SetTransitionStateNormalizedTimes(float fromNormalized, float toNormalized)
-        {
-            if (!useEntityBrowserMode || !entityBrowser.HasSelection) return;
-            if (!IsTransitionPreview) return;
-            
-            isPreviewTimeControlled = true;
-            SetTransitionSamplerTimesOnBrowserEntity(fromNormalized, toNormalized);
-        }
-        
-        public void SetTransitionProgress(float progress)
-        {
-            transitionProgress = progress;
-            
-            if (!useEntityBrowserMode || !entityBrowser.HasSelection) return;
-            if (!IsTransitionPreview) return;
-            
-            isPreviewTimeControlled = true;
-            SetTransitionProgressOnBrowserEntity(progress);
-        }
-        
         /// <summary>
-        /// Triggers a state transition on the selected browser entity by setting
-        /// the parameters to satisfy the transition conditions.
+        /// Draws the selection info overlay.
         /// </summary>
-        private void TriggerTransitionOnBrowserEntity()
+        private void DrawSelectionOverlay(Rect rect)
         {
-            Debug.Log($"[EcsPreviewBackend] TriggerTransitionOnBrowserEntity called. HasSelection={entityBrowser.HasSelection}");
-            
-            if (!entityBrowser.HasSelection)
-            {
-                Debug.LogWarning("[EcsPreviewBackend] No entity selected in browser");
-                return;
-            }
-            if (transitionToState == null || stateMachineAsset == null)
-            {
-                Debug.LogWarning($"[EcsPreviewBackend] Missing data: toState={transitionToState?.name}, stateMachine={stateMachineAsset?.name}");
-                return;
-            }
-            
             var entity = entityBrowser.SelectedEntity;
             var world = entityBrowser.SelectedWorld;
             
-            if (world == null || !world.IsCreated)
+            if (world == null || !world.IsCreated || !world.EntityManager.Exists(entity))
             {
-                Debug.LogWarning("[EcsPreviewBackend] World not valid");
                 return;
             }
             
-            var em = world.EntityManager;
-            if (!em.Exists(entity))
+            var inspectorRect = new Rect(rect.x + rect.width - 260, rect.y + 10, 250, 180);
+            EditorGUI.DrawRect(inspectorRect, new Color(0, 0, 0, 0.7f));
+            
+            using (new GUILayout.AreaScope(inspectorRect))
             {
-                Debug.LogWarning("[EcsPreviewBackend] Entity doesn't exist");
-                return;
-            }
-            
-            // Find the transition definition
-            StateOutTransition transition = FindTransitionDefinition();
-            if (transition == null)
-            {
-                Debug.LogWarning($"[EcsPreviewBackend] Could not find transition from {transitionFromState?.name ?? "Any"} to {transitionToState.name}");
-                return;
-            }
-            
-            Debug.Log($"[EcsPreviewBackend] Found transition with {transition.Conditions?.Count ?? 0} conditions");
-            
-            // Set parameters to satisfy transition conditions
-            SetTransitionConditionsOnEntity(em, entity, transition);
-            
-            // Force-create the transition directly for preview scrubbing
-            ForceStartTransitionOnBrowserEntity(em, entity, transition);
-            
-            Debug.Log($"[EcsPreviewBackend] Set conditions and started transition to {transitionToState.name}");
-        }
-        
-        /// <summary>
-        /// Force-creates a transition on the entity for preview purposes.
-        /// This bypasses the normal state machine evaluation and directly sets up the transition.
-        /// </summary>
-        private void ForceStartTransitionOnBrowserEntity(EntityManager em, Entity entity, StateOutTransition transitionDef)
-        {
-            if (transitionToState == null || stateMachineAsset == null) return;
-            
-            // Find the target state index in the flattened state list
-            int toStateIndex = -1;
-            for (int i = 0; i < stateMachineAsset.States.Count; i++)
-            {
-                if (stateMachineAsset.States[i] == transitionToState)
-                {
-                    toStateIndex = i;
-                    break;
-                }
-            }
-            
-            if (toStateIndex < 0)
-            {
-                Debug.LogWarning($"[EcsPreviewBackend] Could not find state index for {transitionToState.name}");
-                return;
-            }
-            
-            // Find from state index for curve lookup
-            int fromStateIndex = -1;
-            int transitionIndex = -1;
-            var curveSource = TransitionSource.State;
-            
-            if (transitionFromState != null)
-            {
-                for (int i = 0; i < stateMachineAsset.States.Count; i++)
-                {
-                    if (stateMachineAsset.States[i] == transitionFromState)
-                    {
-                        fromStateIndex = i;
-                        break;
-                    }
-                }
+                GUILayout.Space(10);
+                GUILayout.Label("Timeline Control", EditorStyles.boldLabel);
+                GUILayout.Space(5);
                 
-                // Find transition index within the from state's transitions
-                if (transitionFromState.OutTransitions != null)
-                {
-                    for (int i = 0; i < transitionFromState.OutTransitions.Count; i++)
-                    {
-                        if (transitionFromState.OutTransitions[i] == transitionDef)
-                        {
-                            transitionIndex = i;
-                            break;
-                        }
-                    }
-                }
-            }
-            else
-            {
-                // Any State transition
-                curveSource = TransitionSource.AnyState;
-                if (stateMachineAsset.AnyStateTransitions != null)
-                {
-                    for (int i = 0; i < stateMachineAsset.AnyStateTransitions.Count; i++)
-                    {
-                        if (stateMachineAsset.AnyStateTransitions[i] == transitionDef)
-                        {
-                            transitionIndex = i;
-                            break;
-                        }
-                    }
-                }
-            }
-            
-            // Create or update the AnimationStateTransition component
-            var transition = new AnimationStateTransition
-            {
-                AnimationStateId = (sbyte)toStateIndex,
-                TransitionDuration = transitionDef.TransitionDuration,
-                CurveSourceStateIndex = (short)fromStateIndex,
-                CurveSourceTransitionIndex = (short)transitionIndex,
-                CurveSource = curveSource
-            };
-            
-            em.SetComponentData(entity, transition);
-            
-            // Ensure an AnimationState exists for the to-state
-            // The ECS systems should handle this, but we need to initialize it for preview
-            EnsureAnimationStateExists(em, entity, toStateIndex);
-            
-            Debug.Log($"[EcsPreviewBackend] Force-started transition to state {toStateIndex} ({transitionToState.name})");
-        }
-        
-        /// <summary>
-        /// Ensures an AnimationState exists for the given state index.
-        /// Creates one if necessary using the state machine blob data.
-        /// </summary>
-        private void EnsureAnimationStateExists(EntityManager em, Entity entity, int stateIndex)
-        {
-            if (!em.HasBuffer<AnimationState>(entity)) return;
-            if (!em.HasBuffer<ClipSampler>(entity)) return;
-            if (!em.HasComponent<AnimationStateMachine>(entity)) return;
-            
-            var animationStates = em.GetBuffer<AnimationState>(entity);
-            
-            // Check if an animation state with this ID already exists
-            int existingIndex = animationStates.IdToIndex((byte)stateIndex);
-            if (existingIndex >= 0)
-            {
-                // State exists, ensure it's properly initialized
-                var state = animationStates[existingIndex];
-                state.Time = 0f;
-                state.Weight = 0f; // Will be controlled by transition progress
-                animationStates[existingIndex] = state;
-                Debug.Log($"[EcsPreviewBackend] AnimationState {stateIndex} already exists, reset time/weight");
-                return;
-            }
-            
-            // State doesn't exist - create it using blob data
-            var sm = em.GetComponentData<AnimationStateMachine>(entity);
-            ref var smBlob = ref sm.StateMachineBlob.Value;
-            
-            if (stateIndex < 0 || stateIndex >= smBlob.States.Length)
-            {
-                Debug.LogWarning($"[EcsPreviewBackend] State index {stateIndex} out of range (max: {smBlob.States.Length})");
-                return;
-            }
-            
-            ref var stateBlob = ref smBlob.States[stateIndex];
-            var samplers = em.GetBuffer<ClipSampler>(entity);
-            
-            // Determine clip count based on state type
-            int clipCount = GetClipCountForState(ref smBlob, ref stateBlob);
-            
-            // Find the next available sampler ID
-            byte nextSamplerId = 0;
-            for (int i = 0; i < samplers.Length; i++)
-            {
-                if (samplers[i].Id >= nextSamplerId)
-                    nextSamplerId = (byte)(samplers[i].Id + 1);
-            }
-            
-            // Create the AnimationState
-            var newState = new AnimationState
-            {
-                Id = (byte)stateIndex,
-                Time = 0f,
-                Weight = 0f,
-                Speed = stateBlob.Speed,
-                Loop = stateBlob.Loop,
-                StartSamplerId = nextSamplerId,
-                ClipCount = (byte)clipCount
-            };
-            animationStates.Add(newState);
-            
-            // Create ClipSamplers for this state
-            CreateClipSamplersForState(ref smBlob, ref stateBlob, sm.ClipsBlob, sm.ClipEventsBlob, samplers, ref nextSamplerId);
-            
-            Debug.Log($"[EcsPreviewBackend] Created AnimationState {stateIndex} with {clipCount} clips");
-        }
-        
-        private int GetClipCountForState(ref StateMachineBlob smBlob, ref AnimationStateBlob stateBlob)
-        {
-            switch (stateBlob.Type)
-            {
-                case StateType.Single:
-                    return 1;
-                case StateType.LinearBlend:
-                    return smBlob.LinearBlendStates[stateBlob.StateIndex].SortedClipIndexes.Length;
-                case StateType.Directional2DBlend:
-                    return smBlob.Directional2DBlendStates[stateBlob.StateIndex].ClipIndexes.Length;
-                default:
-                    return 1;
-            }
-        }
-        
-        private void CreateClipSamplersForState(
-            ref StateMachineBlob smBlob,
-            ref AnimationStateBlob stateBlob,
-            BlobAssetReference<SkeletonClipSetBlob> clipsBlob,
-            BlobAssetReference<ClipEventsBlob> clipEventsBlob,
-            DynamicBuffer<ClipSampler> samplers,
-            ref byte nextSamplerId)
-        {
-            switch (stateBlob.Type)
-            {
-                case StateType.Single:
-                {
-                    ref var singleState = ref smBlob.SingleClipStates[stateBlob.StateIndex];
-                    samplers.Add(new ClipSampler
-                    {
-                        Id = nextSamplerId++,
-                        Clips = clipsBlob,
-                        ClipEventsBlob = clipEventsBlob,
-                        ClipIndex = singleState.ClipIndex,
-                        Time = 0f,
-                        PreviousTime = 0f,
-                        Weight = 0f
-                    });
-                    break;
-                }
+                var position = timelineHelper?.GetPosition() ?? default;
+                var activeRequest = timelineHelper?.GetActiveRequest() ?? ActiveRenderRequest.None;
                 
-                case StateType.LinearBlend:
-                {
-                    ref var linearState = ref smBlob.LinearBlendStates[stateBlob.StateIndex];
-                    for (int i = 0; i < linearState.SortedClipIndexes.Length; i++)
-                    {
-                        samplers.Add(new ClipSampler
-                        {
-                            Id = nextSamplerId++,
-                            Clips = clipsBlob,
-                            ClipEventsBlob = clipEventsBlob,
-                            ClipIndex = (ushort)linearState.SortedClipIndexes[i],
-                            Time = 0f,
-                            PreviousTime = 0f,
-                            Weight = 0f
-                        });
-                    }
-                    break;
-                }
+                GUILayout.Label($"Time: {position.CurrentTime:F2}s / {position.TotalDuration:F2}s");
+                GUILayout.Label($"Section: {position.CurrentSectionIndex}");
+                GUILayout.Label($"Progress: {position.SectionProgress:P0}");
+                GUILayout.Label($"Request Type: {activeRequest.Type}");
                 
-                case StateType.Directional2DBlend:
-                {
-                    ref var dir2DState = ref smBlob.Directional2DBlendStates[stateBlob.StateIndex];
-                    for (int i = 0; i < dir2DState.ClipIndexes.Length; i++)
-                    {
-                        samplers.Add(new ClipSampler
-                        {
-                            Id = nextSamplerId++,
-                            Clips = clipsBlob,
-                            ClipEventsBlob = clipEventsBlob,
-                            ClipIndex = (ushort)dir2DState.ClipIndexes[i],
-                            Time = 0f,
-                            PreviousTime = 0f,
-                            Weight = 0f
-                        });
-                    }
-                    break;
-                }
-            }
-        }
-        
-        /// <summary>
-        /// Finds the StateOutTransition definition for the current transition preview.
-        /// </summary>
-        private StateOutTransition FindTransitionDefinition()
-        {
-            if (transitionToState == null) return null;
-            
-            // Check from state's out transitions
-            if (transitionFromState != null && transitionFromState.OutTransitions != null)
-            {
-                foreach (var t in transitionFromState.OutTransitions)
-                {
-                    if (t.ToState == transitionToState)
-                        return t;
-                }
-            }
-            
-            // Check any state transitions
-            if (stateMachineAsset != null && stateMachineAsset.AnyStateTransitions != null)
-            {
-                foreach (var t in stateMachineAsset.AnyStateTransitions)
-                {
-                    if (t.ToState == transitionToState)
-                        return t;
-                }
-            }
-            
-            return null;
-        }
-        
-        /// <summary>
-        /// Sets parameters on the entity to satisfy transition conditions.
-        /// </summary>
-        private void SetTransitionConditionsOnEntity(EntityManager em, Entity entity, StateOutTransition transition)
-        {
-            if (transition.Conditions == null || transition.Conditions.Count == 0)
-            {
-                // No conditions - transition might be exit-time only
-                return;
-            }
-            
-            foreach (var condition in transition.Conditions)
-            {
-                if (condition.Parameter == null) continue;
+                GUILayout.Space(10);
                 
-                int paramHash = condition.Parameter.Hash;
-                
-                if (condition.Parameter is BoolParameterAsset)
+                if (activeRequest.Type == RenderRequestType.State)
                 {
-                    // Bool condition - set to the expected value
-                    bool targetValue = (BoolConditionComparison)condition.ComparisonMode == BoolConditionComparison.True;
-                    SetBoolParameterOnEntity(em, entity, paramHash, targetValue);
+                    var stateReq = timelineHelper?.GetStateRequest() ?? AnimationStateRenderRequest.None;
+                    GUILayout.Label($"State: {stateReq.StateIndex}");
+                    GUILayout.Label($"Normalized Time: {stateReq.NormalizedTime:F2}");
+                    GUILayout.Label($"Section Type: {stateReq.SectionType}");
                 }
-                else if (condition.Parameter is IntParameterAsset)
+                else if (activeRequest.Type == RenderRequestType.Transition)
                 {
-                    // Int condition - set to a value that satisfies the comparison
-                    // ComparisonValue is stored as float in TransitionCondition, cast to int
-                    int targetValue = GetSatisfyingIntValue((IntConditionComparison)condition.ComparisonMode, (int)condition.ComparisonValue);
-                    SetIntParameterOnEntity(em, entity, paramHash, targetValue);
+                    var transReq = timelineHelper?.GetTransitionRequest() ?? AnimationTransitionRenderRequest.None;
+                    GUILayout.Label($"From: {transReq.FromStateIndex} -> To: {transReq.ToStateIndex}");
+                    GUILayout.Label($"Blend: {transReq.BlendWeight:P0}");
                 }
             }
-        }
-        
-        /// <summary>
-        /// Gets an int value that satisfies the given comparison.
-        /// </summary>
-        private static int GetSatisfyingIntValue(IntConditionComparison comparison, int comparisonValue)
-        {
-            return comparison switch
-            {
-                IntConditionComparison.Equal => comparisonValue,
-                IntConditionComparison.NotEqual => comparisonValue + 1,
-                IntConditionComparison.Greater => comparisonValue + 1,
-                IntConditionComparison.GreaterOrEqual => comparisonValue,
-                IntConditionComparison.Less => comparisonValue - 1,
-                IntConditionComparison.LessOrEqual => comparisonValue,
-                _ => comparisonValue
-            };
-        }
-        
-        /// <summary>
-        /// Sets a bool parameter on the entity by hash.
-        /// </summary>
-        private static void SetBoolParameterOnEntity(EntityManager em, Entity entity, int hash, bool value)
-        {
-            if (!em.HasBuffer<BoolParameter>(entity)) return;
-            
-            var buffer = em.GetBuffer<BoolParameter>(entity);
-            for (int i = 0; i < buffer.Length; i++)
-            {
-                if (buffer[i].Hash == hash)
-                {
-                    var param = buffer[i];
-                    param.Value = value;
-                    buffer[i] = param;
-                    return;
-                }
-            }
-        }
-        
-        /// <summary>
-        /// Sets an int parameter on the entity by hash.
-        /// </summary>
-        private static void SetIntParameterOnEntity(EntityManager em, Entity entity, int hash, int value)
-        {
-            if (!em.HasBuffer<IntParameter>(entity)) return;
-            
-            var buffer = em.GetBuffer<IntParameter>(entity);
-            for (int i = 0; i < buffer.Length; i++)
-            {
-                if (buffer[i].Hash == hash)
-                {
-                    var param = buffer[i];
-                    param.Value = value;
-                    buffer[i] = param;
-                    return;
-                }
-            }
-        }
-        
-        /// <summary>
-        /// Sets the transition progress on the browser entity by controlling animation state time.
-        /// Progress is determined by toState.Time / transitionDuration.
-        /// </summary>
-        private void SetTransitionProgressOnBrowserEntity(float progress)
-        {
-            if (!entityBrowser.HasSelection) return;
-
-
-            var entity = entityBrowser.SelectedEntity;
-            var world = entityBrowser.SelectedWorld;
-
-
-            if (world == null || !world.IsCreated) return;
-
-
-            var em = world.EntityManager;
-            if (!em.Exists(entity)) return;
-
-            // Get the current transition
-
-            if (!em.HasComponent<AnimationStateTransition>(entity)) return;
-            var transition = em.GetComponentData<AnimationStateTransition>(entity);
-
-
-            if (!transition.IsValid) return;
-
-            // Get animation states buffer
-
-            if (!em.HasBuffer<AnimationState>(entity)) return;
-            var animationStates = em.GetBuffer<AnimationState>(entity);
-
-            // Find the "to" animation state
-
-            int toStateIndex = animationStates.IdToIndex((byte)transition.AnimationStateId);
-            if (toStateIndex < 0) return;
-
-            // Set the time to control progress: time = progress * duration
-
-            var toState = animationStates[toStateIndex];
-            toState.Time = progress * transition.TransitionDuration;
-            animationStates[toStateIndex] = toState;
-
-            // Also update the sampler times for the to state
-
-            if (!em.HasBuffer<ClipSampler>(entity)) return;
-
-
-            var samplers = em.GetBuffer<ClipSampler>(entity);
-            int startSamplerIndex = samplers.IdToIndex(toState.StartSamplerId);
-
-            if (startSamplerIndex < 0) return; 
-
-            // Set sampler times based on normalized time within the state
-            // For now, use a simple approach - set all samplers to same normalized time
-            for (int i = 0; i < toState.ClipCount && (startSamplerIndex + i) < samplers.Length; i++)
-            {
-                var sampler = samplers[startSamplerIndex + i];
-                // Keep current normalized position within the clip
-                sampler.PreviousTime = sampler.Time;
-                samplers[startSamplerIndex + i] = sampler;
-
-            }
-        }
-
-
-        /// <summary>
-        /// Sets the sampler times for both from and to states during transition.
-        /// </summary>
-        private void SetTransitionSamplerTimesOnBrowserEntity(float fromNormalized, float toNormalized)
-        {
-            if (!entityBrowser.HasSelection) return;
-            
-            var entity = entityBrowser.SelectedEntity;
-            var world = entityBrowser.SelectedWorld;
-            
-            if (world == null || !world.IsCreated) return;
-            
-            var em = world.EntityManager;
-            if (!em.Exists(entity)) return;
-            
-            if (!em.HasBuffer<AnimationState>(entity)) return;
-            if (!em.HasBuffer<ClipSampler>(entity)) return;
-            
-            var animationStates = em.GetBuffer<AnimationState>(entity);
-            var samplers = em.GetBuffer<ClipSampler>(entity);
-            
-            // Get current state (from state)
-            if (em.HasComponent<AnimationCurrentState>(entity))
-            {
-                var currentState = em.GetComponentData<AnimationCurrentState>(entity);
-                if (currentState.IsValid)
-                {
-                    int fromStateIndex = animationStates.IdToIndex((byte)currentState.AnimationStateId);
-                    if (fromStateIndex >= 0)
-                    {
-                        SetAnimationStateSamplerTimes(ref animationStates, ref samplers, fromStateIndex, fromNormalized);
-                    }
-                }
-            }
-            
-            // Get transition state (to state)
-            if (em.HasComponent<AnimationStateTransition>(entity))
-            {
-                var transition = em.GetComponentData<AnimationStateTransition>(entity);
-                if (transition.IsValid)
-                {
-                    int toStateIndex = animationStates.IdToIndex((byte)transition.AnimationStateId);
-                    if (toStateIndex >= 0)
-                    {
-                        SetAnimationStateSamplerTimes(ref animationStates, ref samplers, toStateIndex, toNormalized);
-                    }
-                }
-            }
-        }
-        
-        /// <summary>
-        /// Sets sampler times for all clips in an animation state.
-        /// </summary>
-        private static void SetAnimationStateSamplerTimes(
-            ref DynamicBuffer<AnimationState> animationStates,
-            ref DynamicBuffer<ClipSampler> samplers,
-            int animationStateIndex,
-            float normalizedTime)
-        {
-            var animState = animationStates[animationStateIndex];
-            int startIndex = samplers.IdToIndex(animState.StartSamplerId);
-            
-            if (startIndex < 0) return;
-            
-            for (int i = 0; i < animState.ClipCount && (startIndex + i) < samplers.Length; i++)
-            {
-                var sampler = samplers[startIndex + i];
-                float clipDuration = sampler.Duration;
-
-
-                if (clipDuration <= 0) continue; 
-
-                sampler.PreviousTime = sampler.Time;
-                sampler.Time = normalizedTime * clipDuration;
-                samplers[startIndex + i] = sampler;
-            }
-        }
-        
-        /// <summary>
-        /// Sets the playback state.
-        /// When paused, sampler times are controlled by the preview timeline.
-        /// </summary>
-        public void SetPlaying(bool playing)
-        {
-            isPreviewPlaying = playing;
-
-
-            if (playing)
-            {
-                // When playing, release time control
-                isPreviewTimeControlled = false;
-            }
-            else
-            {
-                // When pausing, take control of time
-                isPreviewTimeControlled = true;
-
-                // Sync current entity time to preview
-                if (!useEntityBrowserMode || !entityBrowser.HasSelection) return;
-
-
-                float clipDuration = GetSelectedEntityClipDuration();
-
-
-                if (clipDuration <= 0) return;
-
-                var entity = entityBrowser.SelectedEntity;
-                var world = entityBrowser.SelectedWorld;
-
-
-                if (world == null || !world.IsCreated) return;
-
-                var em = world.EntityManager;
-
-                if (!em.Exists(entity) || !em.HasBuffer<ClipSampler>(entity)) return;
-
-                var samplers = em.GetBuffer<ClipSampler>(entity);
-
-                if (samplers.Length <= 0) return;
-
-                previewControlledTime = samplers[0].Time;
-                normalizedTime = previewControlledTime / clipDuration;
-            }
-        }
-
-
-        /// <summary>
-        /// Toggles play/pause for the preview.
-        /// </summary>
-        public void TogglePlayPause() => SetPlaying(!isPreviewPlaying);
-
-
-        /// <summary>
-        /// Steps the animation forward by the given number of frames.
-        /// </summary>
-        public void StepFrames(int frameCount, float fps = 30f)
-        {
-            if (!useEntityBrowserMode || !entityBrowser.HasSelection) return;
-
-
-            isPreviewTimeControlled = true;
-            isPreviewPlaying = false;
-
-
-            float frameDuration = 1f / fps;
-            float stepTime = frameCount * frameDuration;
-
-            // Get current time and advance
-            previewControlledTime += stepTime;
-
-            // Get clip duration and normalize
-            float clipDuration = GetSelectedEntityClipDuration();
-            
-            if (clipDuration <= 0) return;
-
-            normalizedTime = (previewControlledTime % clipDuration) / clipDuration;
-            SetSamplerTimesOnBrowserEntity(normalizedTime);
-        }
-
-
-        /// <summary>
-        /// Releases preview time control, letting ECS systems drive animation.
-        /// </summary>
-        public void ReleaseTimeControl()
-        {
-            isPreviewTimeControlled = false;
-            isPreviewPlaying = true;
-        }
-        
-        /// <summary>
-        /// Sets sampler times on the selected browser entity.
-        /// </summary>
-        private void SetSamplerTimesOnBrowserEntity(float normalizedTime)
-        {
-            if (!entityBrowser.HasSelection) return;
-
-
-            var entity = entityBrowser.SelectedEntity;
-            var world = entityBrowser.SelectedWorld;
-
-
-            if (world == null || !world.IsCreated) return;
-
-
-            var em = world.EntityManager;
-            if (!em.Exists(entity)) return;
-            if (!em.HasBuffer<ClipSampler>(entity)) return;
-
-
-            var samplers = em.GetBuffer<ClipSampler>(entity);
-
-            for (int i = 0; i < samplers.Length; i++)
-            {
-                var sampler = samplers[i];
-                float clipDuration = sampler.Duration;
-
-                if (clipDuration <= 0) continue;
-
-                float newTime = normalizedTime * clipDuration;
-                sampler.PreviousTime = sampler.Time;
-                sampler.Time = newTime;
-                samplers[i] = sampler;
-            }
-
-            // Store for step calculations
-
-            if (samplers.Length <= 0) return;
-
-            previewControlledTime = normalizedTime * samplers[0].Duration;
-        }
-
-
-        /// <summary>
-        /// Gets the clip duration of the first sampler on the selected entity.
-        /// </summary>
-        private float GetSelectedEntityClipDuration()
-        {
-            if (!entityBrowser.HasSelection) return 0f;
-            
-            var entity = entityBrowser.SelectedEntity;
-            var world = entityBrowser.SelectedWorld;
-            
-            if (world == null || !world.IsCreated) return 0f;
-            
-            var em = world.EntityManager;
-            if (!em.Exists(entity)) return 0f;
-            if (!em.HasBuffer<ClipSampler>(entity)) return 0f;
-            
-            var samplers = em.GetBuffer<ClipSampler>(entity);
-            if (samplers.Length == 0) return 0f;
-            
-            return samplers[0].Duration;
-        }
-
-        #endregion
-
-        #region IPreviewBackend Blend Control
-
-        public void SetBlendPosition1D(float value) => targetBlendPosition = new float2(value, 0);
-
-        public void SetBlendPosition2D(float2 position) => targetBlendPosition = position;
-        
-        public void SetBlendPosition1DImmediate(float value)
-        {
-            // Immediate - skip interpolation
-            blendPosition = new float2(value, 0);
-            targetBlendPosition = blendPosition;
-            SetBlendParameters();
-        }
-        
-        public void SetBlendPosition2DImmediate(float2 position)
-        {
-            // Immediate - skip interpolation
-            blendPosition = position;
-            targetBlendPosition = position;
-            SetBlendParameters();
-        }
-        
-        public void SetTransitionFromBlendPosition(float2 position)
-        {
-            // Immediate - set both current and target, then apply
-            blendPosition = position;
-            targetBlendPosition = position;
-            SetBlendParameters();
-        }
-        
-        public void SetTransitionToBlendPosition(float2 position)
-        {
-            // Immediate - set both current and target, then apply
-            toBlendPosition = position;
-            targetToBlendPosition = position;
-            SetBlendParameters();
-        }
-        
-        public void SetSoloClip(int clipIndex)
-        {
-            // TODO: Phase 6 - Solo clip mode
-        }
-        
-        private void SetBlendParameters()
-        {
-            // In entity browser mode, modify the selected entity directly
-            if (useEntityBrowserMode)
-            {
-                SetBlendParametersOnBrowserEntity();
-                return;
-            }
-            
-            // Legacy isolated preview mode
-            if (!worldService.IsInitialized) return;
-            
-            // TODO: Implement for isolated preview mode if needed
-        }
-        
-        /// <summary>
-        /// Sets blend parameters on the entity selected in the entity browser.
-        /// Works for both single state preview and transition preview.
-        /// </summary>
-        private void SetBlendParametersOnBrowserEntity()
-        {
-            if (!entityBrowser.HasSelection)
-            {
-                return;
-            }
-            
-            var entity = entityBrowser.SelectedEntity;
-            var world = entityBrowser.SelectedWorld;
-            
-            if (world == null || !world.IsCreated)
-            {
-                return;
-            }
-            
-            var em = world.EntityManager;
-            if (!em.Exists(entity))
-            {
-                return;
-            }
-            
-            // Determine which state(s) to set blend parameters for
-            // For single state preview: set parameters for currentState using blendPosition
-            // For transition preview: set parameters for both from/to states
-            
-            if (IsTransitionPreview)
-            {
-                // Transition preview - set blend parameters for both from and to states
-                // blendPosition = from-state blend, toBlendPosition = to-state blend
-                SetBlendParametersForState(em, entity, transitionFromState, blendPosition);
-                SetBlendParametersForState(em, entity, transitionToState, toBlendPosition);
-            }
-            else if (currentState != null)
-            {
-                // Single state preview
-                SetBlendParametersForState(em, entity, currentState, blendPosition);
-            }
-        }
-        
-        /// <summary>
-        /// Sets blend parameters on an entity for a specific state.
-        /// </summary>
-        private void SetBlendParametersForState(EntityManager em, Entity entity, AnimationStateAsset state, float2 position)
-        {
-            if (state == null) return;
-            
-            if (state is LinearBlendStateAsset linearBlend)
-            {
-                if (linearBlend.BlendParameter == null) return;
-                
-                int paramHash = linearBlend.BlendParameter.Hash;
-                bool isIntParam = linearBlend.UsesIntParameter;
-                
-                if (isIntParam)
-                {
-                    if (!em.HasBuffer<IntParameter>(entity)) return;
-                    var buffer = em.GetBuffer<IntParameter>(entity);
-                    int intValue = (int)math.lerp(linearBlend.IntRangeMin, linearBlend.IntRangeMax, position.x);
-                    SetIntParameterByHash(buffer, paramHash, intValue);
-                }
-                else
-                {
-                    if (!em.HasBuffer<FloatParameter>(entity)) return;
-                    var buffer = em.GetBuffer<FloatParameter>(entity);
-                    SetFloatParameterByHash(buffer, paramHash, position.x);
-                }
-            }
-            else if (state is Directional2DBlendStateAsset directional2D)
-            {
-                // For 2D blend, set both X and Y parameters
-                if (directional2D.BlendParameterX != null && em.HasBuffer<FloatParameter>(entity))
-                {
-                    var buffer = em.GetBuffer<FloatParameter>(entity);
-                    SetFloatParameterByHash(buffer, directional2D.BlendParameterX.Hash, position.x);
-                }
-                if (directional2D.BlendParameterY != null && em.HasBuffer<FloatParameter>(entity))
-                {
-                    var buffer = em.GetBuffer<FloatParameter>(entity);
-                    SetFloatParameterByHash(buffer, directional2D.BlendParameterY.Hash, position.y);
-                }
-            }
-        }
-        
-        private static bool SetFloatParameterByHash(DynamicBuffer<FloatParameter> buffer, int hash, float value)
-        {
-            for (int i = 0; i < buffer.Length; i++)
-            {
-                if (buffer[i].Hash != hash) continue; 
-                
-                var param = buffer[i];
-                param.Value = value;
-                buffer[i] = param;
-                return true;
-            }
-            return false;
-        }
-        
-        private static bool SetIntParameterByHash(DynamicBuffer<IntParameter> buffer, int hash, int value)
-        {
-            for (int i = 0; i < buffer.Length; i++)
-            {
-                if (buffer[i].Hash != hash) continue;
-                
-                var param = buffer[i];
-                param.Value = value;
-                buffer[i] = param;
-                return true;
-            }
-            return false;
-        }
-        
-        #endregion
-        
-        #region IPreviewBackend Update & Render
-        
-        public bool Tick(float deltaTime)
-        {
-            bool needsRepaint = false;
-            bool blendChanged = false;
-
-            // Smooth blend position interpolation (from-state or single state)
-            if (math.any(blendPosition != targetBlendPosition))
-            {
-                var diff = targetBlendPosition - blendPosition;
-                var maxStep = BlendSmoothSpeed * deltaTime;
-
-                if (math.length(diff) <= maxStep)
-                {
-                    blendPosition = targetBlendPosition;
-                }
-                else
-                {
-                    blendPosition += math.normalize(diff) * maxStep;
-                }
-                blendChanged = true;
-            }
-            
-            // Smooth to-state blend position interpolation (transitions only)
-            if (math.any(toBlendPosition != targetToBlendPosition))
-            {
-                var diff = targetToBlendPosition - toBlendPosition;
-                var maxStep = BlendSmoothSpeed * deltaTime;
-
-                if (math.length(diff) <= maxStep)
-                {
-                    toBlendPosition = targetToBlendPosition;
-                }
-                else
-                {
-                    toBlendPosition += math.normalize(diff) * maxStep;
-                }
-                blendChanged = true;
-            }
-            
-            // Update entity parameters if any blend position changed
-            if (blendChanged)
-            {
-                SetBlendParameters();
-                needsRepaint = true;
-            }
-
-            // Entity browser mode
-
-            if (!useEntityBrowserMode)
-            {
-                // Legacy isolated preview mode
-                if (!worldService.IsInitialized) return needsRepaint;
-
-                worldService.Update(deltaTime);
-                return needsRepaint;
-            }
-
-            // When preview controls time (paused or scrubbed), maintain the sampler times
-            // This prevents ECS systems from advancing time
-            if (isPreviewTimeControlled && !isPreviewPlaying && entityBrowser.HasSelection)
-            {
-                if (IsTransitionPreview)
-                {
-                    SetTransitionProgressOnBrowserEntity(transitionProgress);
-                }
-                else
-                {
-                    SetSamplerTimesOnBrowserEntity(normalizedTime);
-                }
-                needsRepaint = true;
-            }
-            else if (isPreviewPlaying && entityBrowser.HasSelection)
-            {
-                // When playing, sync state from entity for UI display
-                SyncStateFromEntity();
-                needsRepaint = true;
-            }
-
-            return needsRepaint;
-        }
-        
-        /// <summary>
-        /// Syncs normalizedTime, transitionProgress, and blendPosition from the entity.
-        /// </summary>
-        private void SyncStateFromEntity()
-        {
-            if (!entityBrowser.HasSelection) return;
-            
-            var entity = entityBrowser.SelectedEntity;
-            var world = entityBrowser.SelectedWorld;
-            
-            if (world == null || !world.IsCreated) return;
-            
-            var em = world.EntityManager;
-            if (!em.Exists(entity)) return;
-            
-            // Sync normalized time from samplers
-            if (em.HasBuffer<ClipSampler>(entity))
-            {
-                var samplers = em.GetBuffer<ClipSampler>(entity);
-                if (samplers.Length > 0)
-                {
-                    float clipDuration = samplers[0].Duration;
-                    if (clipDuration > 0)
-                    {
-                        normalizedTime = samplers[0].Time / clipDuration;
-                        normalizedTime = normalizedTime - math.floor(normalizedTime); // Wrap to 0-1
-                    }
-                }
-            }
-            
-            // Sync transition progress if in transition
-            if (IsTransitionPreview && em.HasComponent<AnimationStateTransition>(entity))
-            {
-                var transition = em.GetComponentData<AnimationStateTransition>(entity);
-                if (transition.IsValid && em.HasBuffer<AnimationState>(entity))
-                {
-                    var animationStates = em.GetBuffer<AnimationState>(entity);
-                    int toStateIndex = animationStates.IdToIndex((byte)transition.AnimationStateId);
-                    
-                    if (toStateIndex >= 0 && transition.TransitionDuration > 0)
-                    {
-                        var toState = animationStates[toStateIndex];
-                        transitionProgress = math.clamp(toState.Time / transition.TransitionDuration, 0, 1);
-                    }
-                }
-            }
-            
-            // Sync blend position from float parameters
-            SyncBlendPositionFromEntity(em, entity);
-        }
-        
-        /// <summary>
-        /// Reads blend parameter values from the entity and updates local blendPosition.
-        /// Also updates PreviewSettings so the UI reflects the current entity state.
-        /// </summary>
-        private void SyncBlendPositionFromEntity(EntityManager em, Entity entity)
-        {
-            if (!em.HasBuffer<FloatParameter>(entity)) return;
-            
-            var floatParams = em.GetBuffer<FloatParameter>(entity);
-            
-            // Get blend parameter hash from current state
-            if (currentState is LinearBlendStateAsset linearBlend && linearBlend.BlendParameter != null)
-            {
-                if (!linearBlend.UsesIntParameter)
-                {
-                    int hash = linearBlend.BlendParameter.Hash;
-                    for (int i = 0; i < floatParams.Length; i++)
-                    {
-                        if (floatParams[i].Hash == hash)
-                        {
-                            blendPosition.x = floatParams[i].Value;
-                            targetBlendPosition.x = blendPosition.x;
-                            break;
-                        }
-                    }
-                }
-                else if (em.HasBuffer<IntParameter>(entity))
-                {
-                    // Int parameter - read and convert to normalized 0-1
-                    var intParams = em.GetBuffer<IntParameter>(entity);
-                    int hash = linearBlend.BlendParameter.Hash;
-                    for (int i = 0; i < intParams.Length; i++)
-                    {
-                        if (intParams[i].Hash == hash)
-                        {
-                            int range = linearBlend.IntRangeMax - linearBlend.IntRangeMin;
-                            if (range > 0)
-                            {
-                                blendPosition.x = (float)(intParams[i].Value - linearBlend.IntRangeMin) / range;
-                                targetBlendPosition.x = blendPosition.x;
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-            else if (currentState is Directional2DBlendStateAsset blend2D)
-            {
-                // 2D blend - read X and Y parameters
-                if (blend2D.BlendParameterX != null)
-                {
-                    int hashX = blend2D.BlendParameterX.Hash;
-                    for (int i = 0; i < floatParams.Length; i++)
-                    {
-                        if (floatParams[i].Hash == hashX)
-                        {
-                            blendPosition.x = floatParams[i].Value;
-                            targetBlendPosition.x = blendPosition.x;
-                            break;
-                        }
-                    }
-                }
-                if (blend2D.BlendParameterY != null)
-                {
-                    int hashY = blend2D.BlendParameterY.Hash;
-                    for (int i = 0; i < floatParams.Length; i++)
-                    {
-                        if (floatParams[i].Hash == hashY)
-                        {
-                            blendPosition.y = floatParams[i].Value;
-                            targetBlendPosition.y = blendPosition.y;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-
-        public void Draw(Rect rect)
-        {
-            // Draw background
-            EditorGUI.DrawRect(rect, new Color(0.15f, 0.15f, 0.15f));
-            
-            // Always show entity browser mode for live entity inspection
-            if (useEntityBrowserMode)
-            {
-                DrawEntityBrowserMode(rect);
-                return;
-            }
-            
-            // Legacy isolated preview mode (below)
-            // Show error/info message
-            if (!string.IsNullOrEmpty(errorMessage))
-            {
-                var style = new GUIStyle(EditorStyles.centeredGreyMiniLabel)
-                {
-                    wordWrap = true,
-                    alignment = TextAnchor.MiddleCenter,
-                    normal = { textColor = new Color(0.7f, 0.7f, 0.7f) }
-                };
-                GUI.Label(rect, errorMessage, style);
-            }
-            else if (isInitialized && entityCreated && rendererInitialized)
-            {
-                // Phase 6B: 3D rendering via hybrid renderer
-                var samplers = worldService.GetActiveSamplers();
-                hybridRenderer.Render(samplers, rect);
-            }
-            else if (isInitialized && entityCreated)
-            {
-                // Phase 6A: Show state machine info (no model available for 3D rendering)
-                DrawStateInfo(rect);
-            }
-            else if (isInitialized)
-            {
-                var style = new GUIStyle(EditorStyles.centeredGreyMiniLabel)
-                {
-                    wordWrap = true,
-                    alignment = TextAnchor.MiddleCenter
-                };
-                GUI.Label(rect, "ECS Preview\nInitializing...", style);
-            }
-        }
-        
-        /// <summary>
-        /// Draws the entity browser mode UI.
-        /// Shows list of animation entities and allows inspection/modification.
-        /// </summary>
-        private void DrawEntityBrowserMode(Rect rect)
-        {
-            // Toolbar at top
-            var toolbarHeight = 22f;
-            var toolbarRect = new Rect(rect.x, rect.y, rect.width, toolbarHeight);
-            
-            EditorGUI.DrawRect(toolbarRect, new Color(0.2f, 0.2f, 0.2f));
-            
-            GUILayout.BeginArea(toolbarRect);
-            EditorGUILayout.BeginHorizontal();
-            
-            GUILayout.Label("ECS Entity Browser", EditorStyles.boldLabel);
-            GUILayout.FlexibleSpace();
-            
-            // Setup preview scene button
-            if (stateMachineAsset != null)
-            {
-                if (sceneManager.IsSetup)
-                {
-                    if (GUILayout.Button("Rebake", EditorStyles.miniButton, GUILayout.Width(60)))
-                    {
-                        sceneManager.ForceBake();
-                    }
-                    if (GUILayout.Button("Close Scene", EditorStyles.miniButton, GUILayout.Width(80)))
-                    {
-                        sceneManager.Close();
-                    }
-                }
-                else
-                {
-                    if (GUILayout.Button("Open Preview Scene", EditorStyles.miniButton, GUILayout.Width(120)))
-                    {
-                        SetupPreviewScene();
-                    }
-                }
-            }
-            
-            EditorGUILayout.EndHorizontal();
-            GUILayout.EndArea();
-            
-            // Split remaining area between browser and inspector
-            var contentRect = new Rect(rect.x, rect.y + toolbarHeight, rect.width, rect.height - toolbarHeight);
-            var splitRatio = 0.5f;
-            
-            var browserRect = new Rect(
-                contentRect.x, 
-                contentRect.y, 
-                contentRect.width * splitRatio, 
-                contentRect.height);
-            
-            var inspectorRect = new Rect(
-                contentRect.x + contentRect.width * splitRatio, 
-                contentRect.y, 
-                contentRect.width * (1 - splitRatio), 
-                contentRect.height);
-            
-            // Draw separator
-            EditorGUI.DrawRect(new Rect(inspectorRect.x - 1, inspectorRect.y, 2, inspectorRect.height), 
-                new Color(0.1f, 0.1f, 0.1f));
-            
-            // Draw browser and inspector
-            entityBrowser.DrawBrowser(browserRect);
-            entityBrowser.DrawInspector(inspectorRect);
-        }
-        
-        /// <summary>
-        /// Sets up the preview scene with the current state machine and model.
-        /// </summary>
-        private void SetupPreviewScene()
-        {
-            if (stateMachineAsset == null)
-            {
-                errorMessage = "No state machine selected";
-                return;
-            }
-            
-            // Use the preview model if set, otherwise let scene manager find one
-            if (sceneManager.Setup(stateMachineAsset, previewModel))
-            {
-                // Refresh entity browser after scene setup
-                entityBrowser.RefreshEntityList();
-            }
-            else
-            {
-                errorMessage = "Failed to set up preview scene.\nEnsure a preview model is assigned.";
-            }
-        }
-        
-        /// <summary>
-        /// Initializes the entity browser and auto-selects an entity.
-        /// This is called when creating a preview to ensure an entity is available.
-        /// </summary>
-        private void InitializeEntityBrowser(StateMachineAsset targetStateMachine)
-        {
-            // Refresh the entity list
-            entityBrowser.RefreshEntityList();
-            
-            // Try to select an entity that matches the target state machine
-            if (!entityBrowser.HasSelection)
-            {
-                if (targetStateMachine != null)
-                {
-                    // Try to find an entity with this state machine
-                    bool found = entityBrowser.SelectByStateMachine(targetStateMachine);
-                    Debug.Log($"[EcsPreviewBackend] InitializeEntityBrowser: SelectByStateMachine({targetStateMachine.name}) = {found}, EntityCount={entityBrowser.EntityCount}");
-                }
-                else
-                {
-                    // No specific state machine, just select the first entity
-                    bool found = entityBrowser.AutoSelectFirst();
-                    Debug.Log($"[EcsPreviewBackend] InitializeEntityBrowser: AutoSelectFirst = {found}, EntityCount={entityBrowser.EntityCount}");
-                }
-            }
-            else
-            {
-                Debug.Log($"[EcsPreviewBackend] InitializeEntityBrowser: Already has selection, EntityCount={entityBrowser.EntityCount}");
-            }
-        }
-        
-        /// <summary>
-        /// Draws state machine info panel (Phase 6A - logic validation mode).
-        /// </summary>
-        private void DrawStateInfo(Rect rect)
-        {
-            var snapshot = worldService.GetSnapshot();
-            
-            // Header style
-            var headerStyle = new GUIStyle(EditorStyles.boldLabel)
-            {
-                alignment = TextAnchor.UpperCenter,
-                normal = { textColor = new Color(0.9f, 0.9f, 0.9f) }
-            };
-            
-            // Info style
-            var infoStyle = new GUIStyle(EditorStyles.label)
-            {
-                alignment = TextAnchor.UpperLeft,
-                wordWrap = true,
-                normal = { textColor = new Color(0.75f, 0.75f, 0.75f) }
-            };
-            
-            // Note style
-            var noteStyle = new GUIStyle(EditorStyles.miniLabel)
-            {
-                alignment = TextAnchor.LowerCenter,
-                wordWrap = true,
-                normal = { textColor = new Color(0.5f, 0.5f, 0.5f) }
-            };
-            
-            // Layout - use manual positioning instead of GUILayout
-            var padding = 10f;
-            var lineHeight = 18f;
-            var y = rect.y + padding;
-            
-            // Header
-            GUI.Label(new Rect(rect.x, y, rect.width, lineHeight), "ECS Runtime Preview", headerStyle);
-            y += lineHeight + 10f;
-            
-            // State info
-            if (currentState != null)
-            {
-                GUI.Label(new Rect(rect.x + padding, y, rect.width - padding * 2, lineHeight), 
-                    $"State: {currentState.name}", infoStyle);
-                y += lineHeight;
-                GUI.Label(new Rect(rect.x + padding, y, rect.width - padding * 2, lineHeight), 
-                    $"Type: {currentState.Type}", infoStyle);
-                y += lineHeight;
-            }
-            else if (transitionToState != null)
-            {
-                GUI.Label(new Rect(rect.x + padding, y, rect.width - padding * 2, lineHeight), 
-                    "Transition Preview", infoStyle);
-                y += lineHeight;
-                GUI.Label(new Rect(rect.x + padding, y, rect.width - padding * 2, lineHeight), 
-                    $"From: {transitionFromState?.name ?? "Any State"}", infoStyle);
-                y += lineHeight;
-                GUI.Label(new Rect(rect.x + padding, y, rect.width - padding * 2, lineHeight), 
-                    $"To: {transitionToState.name}", infoStyle);
-                y += lineHeight;
-                GUI.Label(new Rect(rect.x + padding, y, rect.width - padding * 2, lineHeight), 
-                    $"Duration: {transitionDuration:F2}s", infoStyle);
-                y += lineHeight;
-            }
-            
-            y += 10f;
-            
-            // Snapshot info
-            if (snapshot.IsInitialized)
-            {
-                GUI.Label(new Rect(rect.x + padding, y, rect.width - padding * 2, lineHeight), 
-                    $"Time: {snapshot.NormalizedTime:F3}", infoStyle);
-                y += lineHeight;
-                
-                if (snapshot.BlendWeights != null && snapshot.BlendWeights.Length > 0)
-                {
-                    var weightsStr = string.Join(", ", snapshot.BlendWeights.Select(w => w.ToString("F2")));
-                    GUI.Label(new Rect(rect.x + padding, y, rect.width - padding * 2, lineHeight), 
-                        $"Weights: [{weightsStr}]", infoStyle);
-                    y += lineHeight;
-                }
-                
-                if (snapshot.TransitionProgress >= 0)
-                {
-                    GUI.Label(new Rect(rect.x + padding, y, rect.width - padding * 2, lineHeight), 
-                        $"Transition: {snapshot.TransitionProgress:P0}", infoStyle);
-                    y += lineHeight;
-                }
-            }
-            
-            // Note - positioned at ~70% down
-            var noteHeight = 36f;
-            var noteY = rect.y + rect.height * 0.7f;
-            var noteRect = new Rect(rect.x, noteY, rect.width, noteHeight);
-            GUI.Label(noteRect, "Drag a model prefab to the\nPreview Model field for 3D preview.", noteStyle);
-        }
-        
-        public bool HandleInput(Rect rect)
-        {
-            if (!rendererInitialized) return false;
-            
-            // Forward camera controls to hybrid renderer
-            if (rect.Contains(Event.current.mousePosition))
-            {
-                hybridRenderer.HandleCamera();
-                
-                if (Event.current.type == EventType.MouseDrag || Event.current.type == EventType.ScrollWheel)
-                {
-                    return true;
-                }
-            }
-            
-            return false;
-        }
-        
-        public void ResetCameraView()
-        {
-            cameraState = PlayableGraphPreview.CameraState.Invalid;
-
-            if (!rendererInitialized) return;
-            
-            hybridRenderer.ResetCameraView();
-        }
-
-
-        public PreviewSnapshot GetSnapshot()
-        {
-            // Entity browser mode - return tracked state
-            if (useEntityBrowserMode)
-            {
-                return new PreviewSnapshot
-                {
-                    IsInitialized = isInitialized,
-                    NormalizedTime = normalizedTime,
-                    BlendPosition = blendPosition,
-                    TransitionProgress = IsTransitionPreview ? transitionProgress : -1f,
-                    IsPlaying = isPreviewPlaying,
-                    ErrorMessage = errorMessage
-                };
-            }
-            
-            // Legacy isolated preview mode
-            if (!worldService.IsInitialized)
-            {
-                return new PreviewSnapshot
-                {
-                    IsInitialized = false,
-                    ErrorMessage = errorMessage ?? "ECS world not initialized"
-                };
-            }
-            
-            // Get snapshot from the world service
-            var snapshot = worldService.GetSnapshot();
-            
-            // Override with our tracked values if service isn't fully set up
-            if (!snapshot.IsInitialized)
-            {
-                snapshot.NormalizedTime = normalizedTime;
-                snapshot.BlendPosition = blendPosition;
-                snapshot.TransitionProgress = IsTransitionPreview ? transitionProgress : -1f;
-                snapshot.ErrorMessage = errorMessage;
-                snapshot.IsInitialized = isInitialized;
-            }
-            
-            return snapshot;
         }
         
         #endregion
@@ -1990,20 +701,11 @@ namespace DMotion.Editor
         
         public void Dispose()
         {
-            sceneManager?.Dispose();
-            sceneManager = null;
-            
+            Clear();
+            timelineHelper?.Dispose();
             entityBrowser?.Dispose();
-            entityBrowser = null;
-            
-            hybridRenderer?.Dispose();
-            hybridRenderer = null;
-            rendererInitialized = false;
-            
             worldService?.Dispose();
-            worldService = null;
-            
-            DisposeBlobs();
+            sceneManager?.Dispose();
         }
         
         #endregion

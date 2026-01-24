@@ -4,6 +4,7 @@ using Unity.Entities;
 namespace DMotion
 {
     [BurstCompile]
+    [WithNone(typeof(TimelineControlled))]
     internal partial struct UpdateLinearBlendStateMachineStatesJob : IJobEntity
     {
         internal float DeltaTime;
@@ -37,6 +38,7 @@ namespace DMotion
     }
 
     [BurstCompile]
+    [WithNone(typeof(TimelineControlled))]
     internal partial struct CleanLinearBlendStatesJob : IJobEntity
     {
         internal void Execute(

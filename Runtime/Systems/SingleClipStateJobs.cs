@@ -1,10 +1,11 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using Unity.Burst;
 using Unity.Entities;
 
 namespace DMotion
 {
     [BurstCompile]
+    [WithNone(typeof(TimelineControlled))]
     internal partial struct UpdateSingleClipStatesJob : IJobEntity
     {
         internal float DeltaTime;
@@ -27,6 +28,7 @@ namespace DMotion
     }
     
     [BurstCompile]
+    [WithNone(typeof(TimelineControlled))]
     internal partial struct CleanSingleClipStatesJob : IJobEntity
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
