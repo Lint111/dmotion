@@ -106,8 +106,16 @@ namespace DMotion
             }
             
             // Apply TO state (index 1)
-            if (request.ToStateIndex < smBlob.States.Length)
+            if (request.ToStateIndex < smBlob.States.Length && animationStates.Length > 1)
             {
+                #if UNITY_EDITOR
+                // Diagnostic: Check if TO state samplers are valid
+                var toAnimState = animationStates[1];
+                int toSamplerStart = samplers.IdToIndex(toAnimState.StartSamplerId);
+                ref var toStateBlob = ref smBlob.States[request.ToStateIndex];
+                UnityEngine.Debug.Log($"[ApplyTransitionRenderRequest] TO State: StateIndex={request.ToStateIndex}, Type={toStateBlob.Type}, SamplerStart={toSamplerStart}, ToWeight={toWeight:F2}");
+                #endif
+                
                 ApplyStateAtIndex(
                     ref smBlob,
                     ref animationStates,

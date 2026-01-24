@@ -80,8 +80,14 @@ namespace DMotion
             
             ref var stateBlob = ref smBlob.States[request.StateIndex];
             
-            // Use first animation state slot
+            // Determine which animation state buffer slot to use based on section type:
+            // - GhostFrom/State sections use index 0 (FROM state's samplers)
+            // - GhostTo sections use index 1 (TO state's samplers) if available
             int stateBufferIndex = 0;
+            if (request.SectionType == TimelineSectionType.GhostTo && animationStates.Length > 1)
+            {
+                stateBufferIndex = 1;
+            }
             var animState = animationStates[stateBufferIndex];
             
             int samplerStart = samplers.IdToIndex(animState.StartSamplerId);
