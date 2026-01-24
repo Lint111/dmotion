@@ -81,10 +81,12 @@ namespace DMotion
             ref var stateBlob = ref smBlob.States[request.StateIndex];
             
             // Determine which animation state buffer slot to use based on section type:
-            // - GhostFrom/State sections use index 0 (FROM state's samplers)
-            // - GhostTo sections use index 1 (TO state's samplers) if available
+            // - State/GhostFrom/FromBar → buffer index 0 (FROM state's samplers)
+            // - GhostTo/ToBar → buffer index 1 (TO state's samplers)
             int stateBufferIndex = 0;
-            if (request.SectionType == TimelineSectionType.GhostTo && animationStates.Length > 1)
+            bool usesToBuffer = request.SectionType == TimelineSectionType.GhostTo || 
+                               request.SectionType == TimelineSectionType.ToBar;
+            if (usesToBuffer && animationStates.Length > 1)
             {
                 stateBufferIndex = 1;
             }
@@ -102,15 +104,34 @@ namespace DMotion
             animState.Time = request.NormalizedTime * stateDuration;
             animationStates[stateBufferIndex] = animState;
             
-            // Zero out all other states
-            for (int i = 1; i < animationStates.Length; i++)
+            // Zero out all other states EXCEPT the one we're rendering
+            // IMPORTANT: Must also zero the ClipSampler weights, not just AnimationState.Weight
+            for (int i = 0; i < animationStates.Length; i++)
             {
+                if (i == stateBufferIndex)
+                    continue;
+
+
                 var otherState = animationStates[i];
                 otherState.Weight = 0f;
                 animationStates[i] = otherState;
+
+                // Zero out the ClipSampler weights for this state
+
+                int otherSamplerStart = samplers.IdToIndex(otherState.StartSamplerId);
+                if (otherSamplerStart < 0) continue; 
+                for (int j = 0; j < otherState.ClipCount; j++)
+                {
+                    int samplerIdx = otherSamplerStart + j;
+                    if (samplerIdx >= samplers.Length) continue;
+                    var sampler = samplers[samplerIdx];
+                    sampler.Weight = 0f;
+                    samplers[samplerIdx] = sampler;
+                }
             }
-            
+
             // Apply based on state type
+
             switch (stateBlob.Type)
             {
                 case StateType.Single:

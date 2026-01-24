@@ -35,6 +35,11 @@ namespace DMotion.Editor
         private string errorMessage;
         private bool isInitialized;
         
+        // Pending setup state - for automatic entity waiting
+        private bool isPendingEntitySelection;
+        private float pendingRetryTimer;
+        private const float EntityRetryInterval = 0.5f; // Retry every 0.5 seconds
+        
         // Blend positions (with smoothing)
         private float2 blendPosition;
         private float2 targetBlendPosition;
@@ -112,6 +117,7 @@ namespace DMotion.Editor
             transitionToState = null;
             errorMessage = null;
             isInitialized = false;
+            isPendingEntitySelection = false;
             
             if (state == null)
             {
@@ -127,11 +133,26 @@ namespace DMotion.Editor
                 return;
             }
             
+            // Try to complete setup - may set pending state if entity not ready
+            TryCompleteStatePreviewSetup();
+        }
+        
+        /// <summary>
+        /// Attempts to complete state preview setup. If entity is not ready, sets pending state.
+        /// </summary>
+        private void TryCompleteStatePreviewSetup()
+        {
             // Ensure we have an entity to work with
             if (!EnsureEntitySelected())
             {
+                // Entity not ready - set pending state and show waiting message
+                isPendingEntitySelection = true;
+                pendingRetryTimer = 0f;
+                errorMessage = "Waiting for animation entity...\n(Enter Play mode with an animated character)";
                 return;
             }
+            
+            isPendingEntitySelection = false;
             
             // Initialize timeline control
             if (!InitializeTimelineHelper())
@@ -140,9 +161,10 @@ namespace DMotion.Editor
             }
             
             // Setup timeline for state preview
-            timelineHelper.SetupStatePreview(state, blendPosition);
+            timelineHelper.SetupStatePreview(currentState, blendPosition);
             
             isInitialized = true;
+            errorMessage = null;
         }
         
         public void CreateTransitionPreview(AnimationStateAsset fromState, AnimationStateAsset toState, float duration)
@@ -235,14 +257,17 @@ namespace DMotion.Editor
         
         public void SetTransitionStateNormalizedTimes(float fromNormalized, float toNormalized)
         {
-            // The timeline controller handles this internally based on transition progress
-            // For now, we map this to transition progress
-            // TODO: Add more granular control if needed
+            // For ECS backend, per-state normalized times are handled internally by the timeline controller.
+            // The overall timeline position is set via SetNormalizedTime() which is called separately.
+            // This method is primarily used by the PlayableGraph backend for direct clip time control.
         }
         
         public void SetTransitionProgress(float progress)
         {
-            timelineHelper?.ScrubTransition(progress);
+            // For ECS backend, transition progress is handled by SetNormalizedTime which
+            // correctly positions within the appropriate section based on overall timeline time.
+            // ScrubTransition would conflict with ScrubState commands.
+            // This method is primarily for PlayableGraph backend which doesn't use sections.
         }
         
         public void SetPlaying(bool playing)
@@ -337,6 +362,7 @@ namespace DMotion.Editor
         
         public bool Tick(float deltaTime)
         {
+            
             bool needsRepaint = false;
             
             // Smooth blend position interpolation
@@ -375,7 +401,57 @@ namespace DMotion.Editor
                 needsRepaint = true;
             }
             
+            // Tick ECS world ONLY in Edit mode - in Play mode, Unity handles updates automatically
+            // Ticking in Play mode causes double-update which leads to stuttering/flickering
+            if (!UnityEngine.Application.isPlaying)
+            {
+                TickEcsWorld(deltaTime);
+            }
+            needsRepaint = true; // Always repaint when ECS systems may have changed state
+            
             return needsRepaint;
+        }
+        
+        /// <summary>
+        /// Ticks the ECS world to run animation systems.
+        /// This is required for the AnimationTimelineControllerSystem to process commands
+        /// and for the Apply*RenderRequestSystem to update animation state.
+        /// </summary>
+        private void TickEcsWorld(float deltaTime)
+        {
+            if (timelineHelper?.TargetWorld == null || !timelineHelper.TargetWorld.IsCreated)
+            {
+                return;
+            }
+            
+            var world = timelineHelper.TargetWorld;
+            
+            try
+            {
+                // Set delta time for the world
+                var timeData = new Unity.Core.TimeData(
+                    (float)EditorApplication.timeSinceStartup,
+                    deltaTime);
+                world.SetTime(timeData);
+                
+                // Update the simulation system group - this runs:
+                // - AnimationTimelineControllerSystem (processes commands, generates render requests)
+                // - ApplyStateRenderRequestSystem (applies state weights to samplers)
+                // - ApplyTransitionRenderRequestSystem (applies transition weights to samplers)
+                // - ClipSamplingSystem (samples clips based on sampler weights)
+                var simGroup = world.GetExistingSystemManaged<SimulationSystemGroup>();
+                if (simGroup != null)
+                {
+                    simGroup.Update();
+                }
+                
+                // Complete jobs before accessing results
+                world.EntityManager.CompleteAllTrackedJobs();
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[EcsPreviewBackend] Error ticking ECS world: {e.Message}\n{e.StackTrace}");
+            }
         }
         
         public void Draw(Rect rect)

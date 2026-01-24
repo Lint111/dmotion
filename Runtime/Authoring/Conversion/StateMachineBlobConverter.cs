@@ -117,7 +117,18 @@ namespace DMotion.Authoring
             ref var root = ref builder.ConstructRoot<StateMachineBlob>();
             root.DefaultStateIndex = DefaultStateIndex;
 
-            // Only call ConstructFromNativeArray if we have items
+            BuildSingleClipStates(ref builder, ref root);
+            BuildAnimationStates(ref builder, ref root);
+            BuildLinearBlendStates(ref builder, ref root);
+            BuildDirectional2DBlendStates(ref builder, ref root);
+            BuildAnyStateTransitions(ref builder, ref root);
+            BuildExitTransitionGroups(ref builder, ref root);
+
+            return builder.CreateBlobAssetReference<StateMachineBlob>(Allocator.Persistent);
+        }
+
+        private readonly unsafe void BuildSingleClipStates(ref BlobBuilder builder, ref StateMachineBlob root)
+        {
             if (SingleClipStates.IsCreated && SingleClipStates.Length > 0)
             {
                 builder.ConstructFromNativeArray(ref root.SingleClipStates, SingleClipStates.Ptr, SingleClipStates.Length);
@@ -126,216 +137,230 @@ namespace DMotion.Authoring
             {
                 builder.Allocate(ref root.SingleClipStates, 0);
             }
+        }
 
-            //States
+        private readonly unsafe void BuildAnimationStates(ref BlobBuilder builder, ref StateMachineBlob root)
+        {
+            var states = builder.Allocate(ref root.States, States.Length);
+            for (ushort stateIndex = 0; stateIndex < states.Length; stateIndex++)
             {
-                var states = builder.Allocate(ref root.States, States.Length);
-                for (ushort stateIndex = 0; stateIndex < states.Length; stateIndex++)
+                var stateConversionData = States[stateIndex];
+                states[stateIndex] = new AnimationStateBlob
                 {
-                    var stateConversionData = States[stateIndex];
-                    states[stateIndex] = new AnimationStateBlob()
-                    {
-                        Type = stateConversionData.Type,
-                        StateIndex = stateConversionData.StateIndex,
-                        Loop = stateConversionData.Loop,
-                        Speed = stateConversionData.Speed,
-                        SpeedParameterIndex = stateConversionData.SpeedParameterIndex,
-                        ExitTransitionGroupIndex = stateConversionData.ExitTransitionGroupIndex,
-                    };
+                    Type = stateConversionData.Type,
+                    StateIndex = stateConversionData.StateIndex,
+                    Loop = stateConversionData.Loop,
+                    Speed = stateConversionData.Speed,
+                    SpeedParameterIndex = stateConversionData.SpeedParameterIndex,
+                    ExitTransitionGroupIndex = stateConversionData.ExitTransitionGroupIndex,
+                };
 
-                    //transitions
-                    var transitions = builder.Allocate(ref states[stateIndex].Transitions, stateConversionData.Transitions.Length);
-                    for (ushort transitionIndex = 0; transitionIndex < transitions.Length; transitionIndex++)
-                    {
-                        var transitionConversionData = stateConversionData.Transitions[transitionIndex];
-                        transitions[transitionIndex] = new StateOutTransitionGroup()
-                        {
-                            ToStateIndex = transitionConversionData.ToStateIndex,
-                            TransitionEndTime = transitionConversionData.TransitionEndTime,
-                            TransitionDuration = transitionConversionData.TransitionDuration,
-                            Offset = transitionConversionData.Offset
-                        };
+                BuildStateTransitions(ref builder, ref states[stateIndex], stateConversionData);
+            }
+        }
 
-                        if (transitionConversionData.BoolTransitions.IsCreated && transitionConversionData.BoolTransitions.Length > 0)
-                            builder.ConstructFromNativeArray(
-                                ref transitions[transitionIndex].BoolTransitions,
-                                transitionConversionData.BoolTransitions.Ptr,
-                                transitionConversionData.BoolTransitions.Length);
-                        else
-                            builder.Allocate(ref transitions[transitionIndex].BoolTransitions, 0);
+        private static unsafe void BuildStateTransitions(
+            ref BlobBuilder builder,
+            ref AnimationStateBlob stateBlob,
+            in AnimationStateConversionData stateData)
+        {
+            var transitions = builder.Allocate(ref stateBlob.Transitions, stateData.Transitions.Length);
+            for (ushort i = 0; i < transitions.Length; i++)
+            {
+                var transitionData = stateData.Transitions[i];
+                transitions[i] = new StateOutTransitionGroup
+                {
+                    ToStateIndex = transitionData.ToStateIndex,
+                    TransitionEndTime = transitionData.TransitionEndTime,
+                    TransitionDuration = transitionData.TransitionDuration,
+                    Offset = transitionData.Offset
+                };
 
-                        if (transitionConversionData.IntTransitions.IsCreated && transitionConversionData.IntTransitions.Length > 0)
-                            builder.ConstructFromNativeArray(
-                                ref transitions[transitionIndex].IntTransitions,
-                                transitionConversionData.IntTransitions.Ptr,
-                                transitionConversionData.IntTransitions.Length);
-                        else
-                            builder.Allocate(ref transitions[transitionIndex].IntTransitions, 0);
-                        
-                        // Curve keyframes (empty = linear fast-path)
-                        if (transitionConversionData.CurveKeyframes.IsCreated && transitionConversionData.CurveKeyframes.Length > 0)
-                            builder.ConstructFromNativeArray(
-                                ref transitions[transitionIndex].CurveKeyframes,
-                                transitionConversionData.CurveKeyframes.Ptr,
-                                transitionConversionData.CurveKeyframes.Length);
-                        else
-                            builder.Allocate(ref transitions[transitionIndex].CurveKeyframes, 0);
-                    }
+                BuildTransitionConditions(ref builder, ref transitions[i], transitionData);
+            }
+        }
+
+        private static unsafe void BuildTransitionConditions(
+            ref BlobBuilder builder,
+            ref StateOutTransitionGroup transition,
+            in StateOutTransitionConversionData transitionData)
+        {
+            // Bool conditions
+            if (transitionData.BoolTransitions.IsCreated && transitionData.BoolTransitions.Length > 0)
+                builder.ConstructFromNativeArray(ref transition.BoolTransitions, transitionData.BoolTransitions.Ptr, transitionData.BoolTransitions.Length);
+            else
+                builder.Allocate(ref transition.BoolTransitions, 0);
+
+            // Int conditions
+            if (transitionData.IntTransitions.IsCreated && transitionData.IntTransitions.Length > 0)
+                builder.ConstructFromNativeArray(ref transition.IntTransitions, transitionData.IntTransitions.Ptr, transitionData.IntTransitions.Length);
+            else
+                builder.Allocate(ref transition.IntTransitions, 0);
+
+            // Curve keyframes (empty = linear fast-path)
+            if (transitionData.CurveKeyframes.IsCreated && transitionData.CurveKeyframes.Length > 0)
+                builder.ConstructFromNativeArray(ref transition.CurveKeyframes, transitionData.CurveKeyframes.Ptr, transitionData.CurveKeyframes.Length);
+            else
+                builder.Allocate(ref transition.CurveKeyframes, 0);
+        }
+
+        private readonly void BuildLinearBlendStates(ref BlobBuilder builder, ref StateMachineBlob root)
+        {
+            var linearBlendStates = builder.Allocate(ref root.LinearBlendStates, LinearBlendStates.Length);
+            for (ushort i = 0; i < linearBlendStates.Length; i++)
+            {
+                var data = LinearBlendStates[i];
+                linearBlendStates[i] = new LinearBlendStateBlob
+                {
+                    BlendParameterIndex = data.BlendParameterIndex,
+                    UsesIntParameter = data.UsesIntParameter,
+                    IntRangeMin = data.IntRangeMin,
+                    IntRangeMax = data.IntRangeMax
+                };
+
+                // Sort clips by threshold
+                var clipsArray = CollectionUtils.AsArray(data.ClipsWithThresholds);
+                clipsArray.Sort(this);
+
+                var sortedIndexes = builder.Allocate(ref linearBlendStates[i].SortedClipIndexes, clipsArray.Length);
+                var sortedThresholds = builder.Allocate(ref linearBlendStates[i].SortedClipThresholds, clipsArray.Length);
+                var sortedSpeeds = builder.Allocate(ref linearBlendStates[i].SortedClipSpeeds, clipsArray.Length);
+
+                for (var clipIndex = 0; clipIndex < clipsArray.Length; clipIndex++)
+                {
+                    var clip = clipsArray[clipIndex];
+                    sortedIndexes[clipIndex] = clip.ClipIndex;
+                    sortedThresholds[clipIndex] = clip.Threshold;
+                    sortedSpeeds[clipIndex] = clip.Speed;
                 }
             }
-            
-            //Linear Blend state
+        }
+
+        private readonly void BuildDirectional2DBlendStates(ref BlobBuilder builder, ref StateMachineBlob root)
+        {
+            var directional2DStates = builder.Allocate(ref root.Directional2DBlendStates, Directional2DBlendStates.Length);
+            for (ushort i = 0; i < directional2DStates.Length; i++)
             {
-                var linearBlendStates = builder.Allocate(ref root.LinearBlendStates, LinearBlendStates.Length);
-                for (ushort i = 0; i < linearBlendStates.Length; i++)
+                var data = Directional2DBlendStates[i];
+                directional2DStates[i] = new Directional2DBlendStateBlob
                 {
-                    var linearBlendStateConversionData = LinearBlendStates[i];
-                    linearBlendStates[i] = new LinearBlendStateBlob
-                    { 
-                        BlendParameterIndex = linearBlendStateConversionData.BlendParameterIndex,
-                        UsesIntParameter = linearBlendStateConversionData.UsesIntParameter,
-                        IntRangeMin = linearBlendStateConversionData.IntRangeMin,
-                        IntRangeMax = linearBlendStateConversionData.IntRangeMax
-                    };
+                    BlendParameterIndexX = data.BlendParameterIndexX,
+                    BlendParameterIndexY = data.BlendParameterIndexY,
+                    Algorithm = data.Algorithm
+                };
 
-                    //TODO: Actually sort things first
-                    //Make sure clips are sorted by threshold
-                    var clipsArray = CollectionUtils.AsArray(linearBlendStateConversionData.ClipsWithThresholds);
-                    clipsArray.Sort(this);
+                var count = data.ClipData.Length;
+                var clipIndexes = builder.Allocate(ref directional2DStates[i].ClipIndexes, count);
+                var clipPositions = builder.Allocate(ref directional2DStates[i].ClipPositions, count);
+                var clipSpeeds = builder.Allocate(ref directional2DStates[i].ClipSpeeds, count);
 
-                    var sortedIndexes = builder.Allocate(ref linearBlendStates[i].SortedClipIndexes, clipsArray.Length);
-                    var sortedThresholds = builder.Allocate(ref linearBlendStates[i].SortedClipThresholds, clipsArray.Length);
-                    var sortedSpeeds = builder.Allocate(ref linearBlendStates[i].SortedClipSpeeds, clipsArray.Length);
-
-                    for (var clipIndex = 0; clipIndex < clipsArray.Length; clipIndex++)
-                    {
-                        var clip = clipsArray[clipIndex];
-                        sortedIndexes[clipIndex] = clip.ClipIndex;
-                        sortedThresholds[clipIndex] = clip.Threshold;
-                        sortedSpeeds[clipIndex] = clip.Speed;
-                    }
+                for (int j = 0; j < count; j++)
+                {
+                    var clip = data.ClipData[j];
+                    clipIndexes[j] = clip.ClipIndex;
+                    clipPositions[j] = clip.Position;
+                    clipSpeeds[j] = clip.Speed;
                 }
             }
+        }
 
-            // Directional 2D Blend state
+        private readonly unsafe void BuildAnyStateTransitions(ref BlobBuilder builder, ref StateMachineBlob root)
+        {
+            var anyStateTransitions = builder.Allocate(ref root.AnyStateTransitions, AnyStateTransitions.Length);
+            for (ushort i = 0; i < anyStateTransitions.Length; i++)
             {
-                var directional2DStates = builder.Allocate(ref root.Directional2DBlendStates, Directional2DBlendStates.Length);
-                for (ushort i = 0; i < directional2DStates.Length; i++)
+                var data = AnyStateTransitions[i];
+                anyStateTransitions[i] = new AnyStateTransition
                 {
-                    var data = Directional2DBlendStates[i];
-                    directional2DStates[i] = new Directional2DBlendStateBlob
-                    {
-                        BlendParameterIndexX = data.BlendParameterIndexX,
-                        BlendParameterIndexY = data.BlendParameterIndexY,
-                        Algorithm = data.Algorithm
-                    };
-                    
-                    var count = data.ClipData.Length;
-                    var clipIndexes = builder.Allocate(ref directional2DStates[i].ClipIndexes, count);
-                    var clipPositions = builder.Allocate(ref directional2DStates[i].ClipPositions, count);
-                    var clipSpeeds = builder.Allocate(ref directional2DStates[i].ClipSpeeds, count);
-                    
-                    for (int j = 0; j < count; j++)
-                    {
-                        var clip = data.ClipData[j];
-                        clipIndexes[j] = clip.ClipIndex;
-                        clipPositions[j] = clip.Position;
-                        clipSpeeds[j] = clip.Speed;
-                    }
-                }
-            }
+                    ToStateIndex = data.ToStateIndex,
+                    TransitionEndTime = data.TransitionEndTime,
+                    TransitionDuration = data.TransitionDuration,
+                    Offset = data.Offset,
+                    CanTransitionToSelf = data.CanTransitionToSelf
+                };
 
-            // Any State transitions
+                BuildAnyStateTransitionConditions(ref builder, ref anyStateTransitions[i], data);
+            }
+        }
+
+        private static unsafe void BuildAnyStateTransitionConditions(
+            ref BlobBuilder builder,
+            ref AnyStateTransition transition,
+            in StateOutTransitionConversionData transitionData)
+        {
+            // Bool conditions
+            if (transitionData.BoolTransitions.IsCreated && transitionData.BoolTransitions.Length > 0)
+                builder.ConstructFromNativeArray(ref transition.BoolTransitions, transitionData.BoolTransitions.Ptr, transitionData.BoolTransitions.Length);
+            else
+                builder.Allocate(ref transition.BoolTransitions, 0);
+
+            // Int conditions
+            if (transitionData.IntTransitions.IsCreated && transitionData.IntTransitions.Length > 0)
+                builder.ConstructFromNativeArray(ref transition.IntTransitions, transitionData.IntTransitions.Ptr, transitionData.IntTransitions.Length);
+            else
+                builder.Allocate(ref transition.IntTransitions, 0);
+
+            // Curve keyframes (empty = linear fast-path)
+            if (transitionData.CurveKeyframes.IsCreated && transitionData.CurveKeyframes.Length > 0)
+                builder.ConstructFromNativeArray(ref transition.CurveKeyframes, transitionData.CurveKeyframes.Ptr, transitionData.CurveKeyframes.Length);
+            else
+                builder.Allocate(ref transition.CurveKeyframes, 0);
+        }
+
+        private readonly unsafe void BuildExitTransitionGroups(ref BlobBuilder builder, ref StateMachineBlob root)
+        {
+            var exitGroups = builder.Allocate(ref root.ExitTransitionGroups, ExitTransitionGroups.Length);
+            for (ushort groupIndex = 0; groupIndex < exitGroups.Length; groupIndex++)
             {
-                var anyStateTransitions = builder.Allocate(ref root.AnyStateTransitions, AnyStateTransitions.Length);
-                for (ushort i = 0; i < anyStateTransitions.Length; i++)
-                {
-                    var anyTransitionConversionData = AnyStateTransitions[i];
-                    anyStateTransitions[i] = new AnyStateTransition()
-                    {
-                        ToStateIndex = anyTransitionConversionData.ToStateIndex,
-                        TransitionEndTime = anyTransitionConversionData.TransitionEndTime,
-                        TransitionDuration = anyTransitionConversionData.TransitionDuration,
-                        Offset = anyTransitionConversionData.Offset,
-                        CanTransitionToSelf = anyTransitionConversionData.CanTransitionToSelf
-                    };
-
-                    if (anyTransitionConversionData.BoolTransitions.IsCreated && anyTransitionConversionData.BoolTransitions.Length > 0)
-                        builder.ConstructFromNativeArray(
-                            ref anyStateTransitions[i].BoolTransitions,
-                            anyTransitionConversionData.BoolTransitions.Ptr,
-                            anyTransitionConversionData.BoolTransitions.Length);
-                    else
-                        builder.Allocate(ref anyStateTransitions[i].BoolTransitions, 0);
-
-                    if (anyTransitionConversionData.IntTransitions.IsCreated && anyTransitionConversionData.IntTransitions.Length > 0)
-                        builder.ConstructFromNativeArray(
-                            ref anyStateTransitions[i].IntTransitions,
-                            anyTransitionConversionData.IntTransitions.Ptr,
-                            anyTransitionConversionData.IntTransitions.Length);
-                    else
-                        builder.Allocate(ref anyStateTransitions[i].IntTransitions, 0);
-                    
-                    // Curve keyframes (empty = linear fast-path)
-                    if (anyTransitionConversionData.CurveKeyframes.IsCreated && anyTransitionConversionData.CurveKeyframes.Length > 0)
-                        builder.ConstructFromNativeArray(
-                            ref anyStateTransitions[i].CurveKeyframes,
-                            anyTransitionConversionData.CurveKeyframes.Ptr,
-                            anyTransitionConversionData.CurveKeyframes.Length);
-                    else
-                        builder.Allocate(ref anyStateTransitions[i].CurveKeyframes, 0);
-                }
+                var groupData = ExitTransitionGroups[groupIndex];
+                BuildExitTransitionGroup(ref builder, ref exitGroups[groupIndex], groupData);
             }
+        }
 
-            // Exit transition groups
+        private static unsafe void BuildExitTransitionGroup(
+            ref BlobBuilder builder,
+            ref ExitTransitionGroup groupBlob,
+            in ExitTransitionGroupConversionData groupData)
+        {
+            // Build exit state indices
+            if (groupData.ExitStateIndices.IsCreated && groupData.ExitStateIndices.Length > 0)
+                builder.ConstructFromNativeArray(ref groupBlob.ExitStateIndices, groupData.ExitStateIndices.Ptr, groupData.ExitStateIndices.Length);
+            else
+                builder.Allocate(ref groupBlob.ExitStateIndices, 0);
+
+            // Build exit transitions
+            var exitTransitions = builder.Allocate(ref groupBlob.ExitTransitions, groupData.ExitTransitions.Length);
+            for (ushort i = 0; i < exitTransitions.Length; i++)
             {
-                var exitGroups = builder.Allocate(ref root.ExitTransitionGroups, ExitTransitionGroups.Length);
-                for (ushort groupIndex = 0; groupIndex < exitGroups.Length; groupIndex++)
+                var transitionData = groupData.ExitTransitions[i];
+                exitTransitions[i] = new StateOutTransitionGroup
                 {
-                    var groupData = ExitTransitionGroups[groupIndex];
+                    ToStateIndex = transitionData.ToStateIndex,
+                    TransitionEndTime = transitionData.TransitionEndTime,
+                    TransitionDuration = transitionData.TransitionDuration,
+                    Offset = transitionData.Offset
+                };
 
-                    // Build exit state indices
-                    if (groupData.ExitStateIndices.IsCreated && groupData.ExitStateIndices.Length > 0)
-                        builder.ConstructFromNativeArray(
-                            ref exitGroups[groupIndex].ExitStateIndices,
-                            groupData.ExitStateIndices.Ptr,
-                            groupData.ExitStateIndices.Length);
-                    else
-                        builder.Allocate(ref exitGroups[groupIndex].ExitStateIndices, 0);
-
-                    // Build exit transitions
-                    var exitTransitions = builder.Allocate(ref exitGroups[groupIndex].ExitTransitions, groupData.ExitTransitions.Length);
-                    for (ushort transitionIndex = 0; transitionIndex < exitTransitions.Length; transitionIndex++)
-                    {
-                        var transitionData = groupData.ExitTransitions[transitionIndex];
-                        exitTransitions[transitionIndex] = new StateOutTransitionGroup()
-                        {
-                            ToStateIndex = transitionData.ToStateIndex,
-                            TransitionEndTime = transitionData.TransitionEndTime,
-                            TransitionDuration = transitionData.TransitionDuration,
-                            Offset = transitionData.Offset
-                        };
-
-                        if (transitionData.BoolTransitions.IsCreated && transitionData.BoolTransitions.Length > 0)
-                            builder.ConstructFromNativeArray(
-                                ref exitTransitions[transitionIndex].BoolTransitions,
-                                transitionData.BoolTransitions.Ptr,
-                                transitionData.BoolTransitions.Length);
-                        else
-                            builder.Allocate(ref exitTransitions[transitionIndex].BoolTransitions, 0);
-
-                        if (transitionData.IntTransitions.IsCreated && transitionData.IntTransitions.Length > 0)
-                            builder.ConstructFromNativeArray(
-                                ref exitTransitions[transitionIndex].IntTransitions,
-                                transitionData.IntTransitions.Ptr,
-                                transitionData.IntTransitions.Length);
-                        else
-                            builder.Allocate(ref exitTransitions[transitionIndex].IntTransitions, 0);
-                    }
-                }
+                BuildExitTransitionConditions(ref builder, ref exitTransitions[i], transitionData);
             }
+        }
 
-            return builder.CreateBlobAssetReference<StateMachineBlob>(Allocator.Persistent);
+        private static unsafe void BuildExitTransitionConditions(
+            ref BlobBuilder builder,
+            ref StateOutTransitionGroup transition,
+            in StateOutTransitionConversionData transitionData)
+        {
+            // Bool conditions
+            if (transitionData.BoolTransitions.IsCreated && transitionData.BoolTransitions.Length > 0)
+                builder.ConstructFromNativeArray(ref transition.BoolTransitions, transitionData.BoolTransitions.Ptr, transitionData.BoolTransitions.Length);
+            else
+                builder.Allocate(ref transition.BoolTransitions, 0);
+
+            // Int conditions
+            if (transitionData.IntTransitions.IsCreated && transitionData.IntTransitions.Length > 0)
+                builder.ConstructFromNativeArray(ref transition.IntTransitions, transitionData.IntTransitions.Ptr, transitionData.IntTransitions.Length);
+            else
+                builder.Allocate(ref transition.IntTransitions, 0);
         }
 
         public int Compare(ClipIndexWithThreshold x, ClipIndexWithThreshold y)
@@ -345,99 +370,110 @@ namespace DMotion.Authoring
 
         public unsafe void Dispose()
         {
-            // Dispose nested lists in States (must use pointers to avoid struct copies)
-            if (States.IsCreated)
+            DisposeStates();
+            DisposeLinearBlendStates();
+            DisposeDirectional2DBlendStates();
+            DisposeAnyStateTransitions();
+            DisposeExitTransitionGroups();
+            DisposeSingleClipStates();
+        }
+
+        private void DisposeStates()
+        {
+            if (!States.IsCreated) return;
+
+            for (int i = 0; i < States.Length; i++)
             {
-                for (int i = 0; i < States.Length; i++)
-                {
-                    ref var state = ref States.ElementAt(i);
-                    if (state.Transitions.IsCreated)
-                    {
-                        // Dispose nested lists in each transition
-                        for (int j = 0; j < state.Transitions.Length; j++)
-                        {
-                            ref var transition = ref state.Transitions.ElementAt(j);
-                            if (transition.BoolTransitions.IsCreated)
-                                transition.BoolTransitions.Dispose();
-                            if (transition.IntTransitions.IsCreated)
-                                transition.IntTransitions.Dispose();
-                            if (transition.CurveKeyframes.IsCreated)
-                                transition.CurveKeyframes.Dispose();
-                        }
-                        state.Transitions.Dispose();
-                    }
-                }
-                States.Dispose();
+                DisposeStateTransitions(ref States.ElementAt(i));
             }
+            States.Dispose();
+        }
 
-            // Dispose nested lists in LinearBlendStates
-            if (LinearBlendStates.IsCreated)
+        private static void DisposeStateTransitions(ref AnimationStateConversionData state)
+        {
+            if (!state.Transitions.IsCreated) return;
+
+            for (int j = 0; j < state.Transitions.Length; j++)
             {
-                for (int i = 0; i < LinearBlendStates.Length; i++)
-                {
-                    ref var linearBlend = ref LinearBlendStates.ElementAt(i);
-                    if (linearBlend.ClipsWithThresholds.IsCreated)
-                        linearBlend.ClipsWithThresholds.Dispose();
-                }
-                LinearBlendStates.Dispose();
+                DisposeTransitionConditions(ref state.Transitions.ElementAt(j));
             }
+            state.Transitions.Dispose();
+        }
 
-            // Dispose nested lists in Directional2DBlendStates
-            if (Directional2DBlendStates.IsCreated)
+        private static void DisposeTransitionConditions(ref StateOutTransitionConversionData transition)
+        {
+            if (transition.BoolTransitions.IsCreated)
+                transition.BoolTransitions.Dispose();
+            if (transition.IntTransitions.IsCreated)
+                transition.IntTransitions.Dispose();
+            if (transition.CurveKeyframes.IsCreated)
+                transition.CurveKeyframes.Dispose();
+        }
+
+        private void DisposeLinearBlendStates()
+        {
+            if (!LinearBlendStates.IsCreated) return;
+
+            for (int i = 0; i < LinearBlendStates.Length; i++)
             {
-                for (int i = 0; i < Directional2DBlendStates.Length; i++)
-                {
-                    ref var dir2D = ref Directional2DBlendStates.ElementAt(i);
-                    if (dir2D.ClipData.IsCreated)
-                        dir2D.ClipData.Dispose();
-                }
-                Directional2DBlendStates.Dispose();
+                ref var linearBlend = ref LinearBlendStates.ElementAt(i);
+                if (linearBlend.ClipsWithThresholds.IsCreated)
+                    linearBlend.ClipsWithThresholds.Dispose();
             }
+            LinearBlendStates.Dispose();
+        }
 
-            // Dispose Any State transitions
-            if (AnyStateTransitions.IsCreated)
+        private void DisposeDirectional2DBlendStates()
+        {
+            if (!Directional2DBlendStates.IsCreated) return;
+
+            for (int i = 0; i < Directional2DBlendStates.Length; i++)
             {
-                for (int i = 0; i < AnyStateTransitions.Length; i++)
-                {
-                    ref var anyTransition = ref AnyStateTransitions.ElementAt(i);
-                    if (anyTransition.BoolTransitions.IsCreated)
-                        anyTransition.BoolTransitions.Dispose();
-                    if (anyTransition.IntTransitions.IsCreated)
-                        anyTransition.IntTransitions.Dispose();
-                    if (anyTransition.CurveKeyframes.IsCreated)
-                        anyTransition.CurveKeyframes.Dispose();
-                }
-                AnyStateTransitions.Dispose();
+                ref var dir2D = ref Directional2DBlendStates.ElementAt(i);
+                if (dir2D.ClipData.IsCreated)
+                    dir2D.ClipData.Dispose();
             }
+            Directional2DBlendStates.Dispose();
+        }
 
-            // Dispose Exit Transition Groups
-            if (ExitTransitionGroups.IsCreated)
+        private void DisposeAnyStateTransitions()
+        {
+            if (!AnyStateTransitions.IsCreated) return;
+
+            for (int i = 0; i < AnyStateTransitions.Length; i++)
             {
-                for (int i = 0; i < ExitTransitionGroups.Length; i++)
-                {
-                    ref var exitGroup = ref ExitTransitionGroups.ElementAt(i);
-                    if (exitGroup.ExitStateIndices.IsCreated)
-                        exitGroup.ExitStateIndices.Dispose();
-
-                    if (exitGroup.ExitTransitions.IsCreated)
-                    {
-                        for (int j = 0; j < exitGroup.ExitTransitions.Length; j++)
-                        {
-                            ref var exitTransition = ref exitGroup.ExitTransitions.ElementAt(j);
-                            if (exitTransition.BoolTransitions.IsCreated)
-                                exitTransition.BoolTransitions.Dispose();
-                            if (exitTransition.IntTransitions.IsCreated)
-                                exitTransition.IntTransitions.Dispose();
-                            if (exitTransition.CurveKeyframes.IsCreated)
-                                exitTransition.CurveKeyframes.Dispose();
-                        }
-                        exitGroup.ExitTransitions.Dispose();
-                    }
-                }
-                ExitTransitionGroups.Dispose();
+                DisposeTransitionConditions(ref AnyStateTransitions.ElementAt(i));
             }
+            AnyStateTransitions.Dispose();
+        }
 
-            // Dispose remaining top-level list
+        private void DisposeExitTransitionGroups()
+        {
+            if (!ExitTransitionGroups.IsCreated) return;
+
+            for (int i = 0; i < ExitTransitionGroups.Length; i++)
+            {
+                DisposeExitTransitionGroup(ref ExitTransitionGroups.ElementAt(i));
+            }
+            ExitTransitionGroups.Dispose();
+        }
+
+        private static void DisposeExitTransitionGroup(ref ExitTransitionGroupConversionData exitGroup)
+        {
+            if (exitGroup.ExitStateIndices.IsCreated)
+                exitGroup.ExitStateIndices.Dispose();
+
+            if (!exitGroup.ExitTransitions.IsCreated) return;
+
+            for (int j = 0; j < exitGroup.ExitTransitions.Length; j++)
+            {
+                DisposeTransitionConditions(ref exitGroup.ExitTransitions.ElementAt(j));
+            }
+            exitGroup.ExitTransitions.Dispose();
+        }
+
+        private void DisposeSingleClipStates()
+        {
             if (SingleClipStates.IsCreated)
                 SingleClipStates.Dispose();
         }

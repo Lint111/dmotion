@@ -109,20 +109,31 @@ namespace DMotion
     /// <summary>
     /// Identifies which section of the preview timeline we're in.
     /// Used for UI rendering and section-specific behavior.
+    /// 
+    /// Transition layout:
+    ///   [GhostFrom?] [FromBar] [Transition/Overlap] [ToBar] [GhostTo?]
+    ///        ↓           ↓              ↓              ↓         ↓
+    ///    Optional    FROM@100%     Blend zone     TO@100%    Optional
     /// </summary>
     internal enum TimelineSectionType : byte
     {
-        /// <summary>Regular state section.</summary>
+        /// <summary>Regular state section (single state preview).</summary>
         State = 0,
         
-        /// <summary>Transition blend section.</summary>
+        /// <summary>Transition blend/overlap section (crossfade between FROM and TO).</summary>
         Transition,
         
-        /// <summary>Ghost bar before transition (FROM state context).</summary>
+        /// <summary>Ghost bar before transition (FROM state context, optional).</summary>
         GhostFrom,
         
-        /// <summary>Ghost bar after transition (TO state context).</summary>
-        GhostTo
+        /// <summary>Ghost bar after transition (TO state context, optional).</summary>
+        GhostTo,
+        
+        /// <summary>FROM state bar at 100% weight (before transition overlap begins).</summary>
+        FromBar,
+        
+        /// <summary>TO state bar at 100% weight (after transition overlap ends).</summary>
+        ToBar
     }
     
     /// <summary>
@@ -222,6 +233,34 @@ namespace DMotion
                 CurveSource = curveSource,
                 BlendPosition = fromBlendPosition,
                 ToBlendPosition = toBlendPosition
+            };
+        }
+        
+        /// <summary>Creates a FROM bar section (FROM state at 100% before overlap).</summary>
+        public static TimelineSection FromBar(ushort stateIndex, float duration, float startTime, float2 blendPosition = default)
+        {
+            return new TimelineSection
+            {
+                Type = TimelineSectionType.FromBar,
+                StateIndex = stateIndex,
+                Duration = duration,
+                StartTime = startTime,
+                BlendPosition = blendPosition,
+                TransitionIndex = -1
+            };
+        }
+        
+        /// <summary>Creates a TO bar section (TO state at 100% after overlap).</summary>
+        public static TimelineSection ToBar(ushort stateIndex, float duration, float startTime, float2 blendPosition = default)
+        {
+            return new TimelineSection
+            {
+                Type = TimelineSectionType.ToBar,
+                StateIndex = stateIndex,
+                Duration = duration,
+                StartTime = startTime,
+                BlendPosition = blendPosition,
+                TransitionIndex = -1
             };
         }
     }

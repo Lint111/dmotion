@@ -116,6 +116,13 @@ namespace DMotion
                     
                 case TimelineCommandType.Play:
                     scrubber.IsPaused = false;
+                    // If at end of timeline, restart from beginning
+                    if (position.TotalDuration > 0 && position.CurrentTime >= position.TotalDuration - 0.001f)
+                    {
+                        position.CurrentTime = 0f;
+                        position.CurrentSectionIndex = 0;
+                        position.SectionProgress = 0f;
+                    }
                     break;
                     
                 case TimelineCommandType.Pause:
@@ -284,6 +291,28 @@ namespace DMotion
                     transitionRequest = AnimationTransitionRenderRequest.None;
                     break;
                     
+                case TimelineSectionType.FromBar:
+                    // FROM state at 100% weight (before transition overlap)
+                    activeRequest = ActiveRenderRequest.State;
+                    stateRequest = AnimationStateRenderRequest.Create(
+                        section.StateIndex,
+                        progress,
+                        section.BlendPosition,
+                        TimelineSectionType.FromBar);
+                    transitionRequest = AnimationTransitionRenderRequest.None;
+                    break;
+                    
+                case TimelineSectionType.ToBar:
+                    // TO state at 100% weight (after transition overlap)
+                    activeRequest = ActiveRenderRequest.State;
+                    stateRequest = AnimationStateRenderRequest.Create(
+                        section.StateIndex,
+                        progress,
+                        section.BlendPosition,
+                        TimelineSectionType.ToBar);
+                    transitionRequest = AnimationTransitionRenderRequest.None;
+                    break;
+                    
                 case TimelineSectionType.Transition:
                     activeRequest = ActiveRenderRequest.Transition;
                     stateRequest = AnimationStateRenderRequest.None;
@@ -448,8 +477,15 @@ namespace DMotion
         }
         
         /// <summary>
-        /// Configures timeline for transition preview with ghost bars.
-        /// Layout: [GhostFrom] [Transition] [GhostTo]
+        /// Configures timeline for transition preview with all sections.
+        /// 
+        /// Full layout: [GhostFrom?] [FromBar] [Transition/Overlap] [ToBar] [GhostTo?]
+        /// 
+        /// - GhostFrom: Optional context showing FROM state cycle before main action
+        /// - FromBar: FROM state at 100% weight (before blend starts)
+        /// - Transition: Crossfade zone where weights blend
+        /// - ToBar: TO state at 100% weight (after blend ends)
+        /// - GhostTo: Optional context showing TO state cycle after main action
         /// </summary>
         public static void SetupTransitionPreview(
             this EntityManager em,
@@ -462,21 +498,33 @@ namespace DMotion
             short transitionIndex,
             TransitionSource curveSource,
             float2 fromBlendPosition = default,
-            float2 toBlendPosition = default)
+            float2 toBlendPosition = default,
+            float fromBarDuration = 0f,
+            float toBarDuration = 0f)
         {
             var sections = em.GetBuffer<TimelineSection>(entity);
             sections.Clear();
             
             float time = 0f;
+            int transitionSectionIndex = 0;
             
-            // Ghost FROM bar (renders "from" state as context before transition)
+            // 1. Ghost FROM (optional context cycle before main action)
             if (ghostFromDuration > 0)
             {
                 sections.Add(TimelineSection.GhostFrom(fromStateIndex, ghostFromDuration, time, fromBlendPosition));
                 time += ghostFromDuration;
+                transitionSectionIndex++;
             }
             
-            // Transition section
+            // 2. FROM bar (FROM state at 100% before blend)
+            if (fromBarDuration > 0)
+            {
+                sections.Add(TimelineSection.FromBar(fromStateIndex, fromBarDuration, time, fromBlendPosition));
+                time += fromBarDuration;
+                transitionSectionIndex++;
+            }
+            
+            // 3. Transition/Overlap section (crossfade zone)
             sections.Add(TimelineSection.Transition(
                 fromStateIndex, toStateIndex,
                 transitionDuration, time,
@@ -484,20 +532,27 @@ namespace DMotion
                 fromBlendPosition, toBlendPosition));
             time += transitionDuration;
             
-            // Ghost TO bar (renders "to" state as context after transition)
+            // 4. TO bar (TO state at 100% after blend)
+            if (toBarDuration > 0)
+            {
+                sections.Add(TimelineSection.ToBar(toStateIndex, toBarDuration, time, toBlendPosition));
+                time += toBarDuration;
+            }
+            
+            // 5. Ghost TO (optional context cycle after main action)
             if (ghostToDuration > 0)
             {
                 sections.Add(TimelineSection.GhostTo(toStateIndex, ghostToDuration, time, toBlendPosition));
                 time += ghostToDuration;
             }
             
-            // Reset position to start of transition (skip ghost-from for intuitive scrubbing)
-            float transitionStart = ghostFromDuration;
+            // Start at the beginning of the timeline to show full flow:
+            // [GhostFrom] → [FromBar] → [Transition] → [ToBar] → [GhostTo]
             em.SetComponentData(entity, new AnimationTimelinePosition
             {
-                CurrentTime = transitionStart,
+                CurrentTime = 0f,
                 TotalDuration = time,
-                CurrentSectionIndex = ghostFromDuration > 0 ? 1 : 0,
+                CurrentSectionIndex = 0,
                 SectionProgress = 0f
             });
         }

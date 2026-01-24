@@ -80,17 +80,7 @@ namespace DMotion.Editor
             }
             
             em.SetupStatePreview(targetEntity, (ushort)stateIndex, duration, blendPosition);
-            em.ActivateTimelineControl(targetEntity, startPaused: false); // Start playing immediately
-            
-            // Debug: verify setup
-            var animStates = em.GetBuffer<AnimationState>(targetEntity);
-            var samplers = em.GetBuffer<ClipSampler>(targetEntity);
-            Debug.Log($"[TimelineControlHelper] Setup complete: StateIndex={stateIndex}, AnimStates={animStates.Length}, Samplers={samplers.Length}");
-            if (samplers.Length > 0)
-            {
-                var s = samplers[0];
-                Debug.Log($"[TimelineControlHelper] Sampler[0]: Id={s.Id}, Weight={s.Weight}, Time={s.Time}, ClipsValid={s.Clips.IsCreated}");
-            }
+            em.ActivateTimelineControl(targetEntity, startPaused: true); // Start paused - user must click play
         }
         
         /// <summary>
@@ -135,50 +125,47 @@ namespace DMotion.Editor
                 return;
             }
             
-            // Debug: verify transition setup
-            var animStates = em.GetBuffer<AnimationState>(targetEntity);
-            var samplers = em.GetBuffer<ClipSampler>(targetEntity);
-            Debug.Log($"[TimelineControlHelper] Transition setup: FROM={fromIdx}, TO={toIndex}, AnimStates={animStates.Length}, Samplers={samplers.Length}");
-            for (int i = 0; i < samplers.Length; i++)
-            {
-                var s = samplers[i];
-                Debug.Log($"[TimelineControlHelper] Sampler[{i}]: Id={s.Id}, ClipIndex={s.ClipIndex}, ClipsValid={s.Clips.IsCreated}");
-            }
-            
             // Extract timing from transition asset (matching TransitionTimeline logic)
             float transitionDuration = transition?.TransitionDuration ?? 0.25f;
             float exitTime = transition?.EndTime ?? 0f;
             bool hasExitTime = transition?.HasEndTime ?? false;
             
-            // Calculate effective durations (matching TransitionTimeline.Configure logic)
+            // Calculate state durations
             float fromStateDuration = fromState != null ? GetStateDuration(fromState, fromBlendPosition) : 0f;
             float toStateDuration = GetStateDuration(toState, toBlendPosition);
             
             // Clamp transition duration to to-state duration (can't blend longer than target state)
             float effectiveTransitionDuration = Mathf.Min(transitionDuration, toStateDuration);
             
-            // Calculate ghost-from duration (time shown before transition starts)
-            // Matches TransitionTimeline: if hasExitTime, show from start to exitTime
-            // Otherwise show a small context before immediate transition
-            float ghostFromDuration;
+            // Calculate section durations for the 5-section layout:
+            // [GhostFrom?] [FromBar] [Transition/Overlap] [ToBar] [GhostTo?]
+            
+            // FromBar: FROM state at 100% weight before transition starts
+            // This is the time from "start of preview" until exit time
+            float fromBarDuration;
             if (hasExitTime && fromState != null && exitTime > 0)
             {
-                // Exit time is when transition starts - show from-state up to that point
-                // Clamp to from-state duration (can wrap/loop if exitTime > duration)
-                ghostFromDuration = Mathf.Min(exitTime, fromStateDuration);
+                // Exit time is when transition starts - FROM plays at 100% until then
+                fromBarDuration = Mathf.Min(exitTime, fromStateDuration);
             }
             else if (fromState != null)
             {
-                // No exit time or exitTime=0 - show small context (25% of from state)
-                ghostFromDuration = fromStateDuration * 0.25f;
+                // No exit time - show small from-bar before immediate transition (25% of from state)
+                fromBarDuration = fromStateDuration * 0.25f;
             }
             else
             {
-                ghostFromDuration = 0f;
+                fromBarDuration = 0f;
             }
             
-            // Ghost-to shows continuation after transition completes (25% for context)
-            float ghostToDuration = toStateDuration * 0.25f;
+            // ToBar: TO state at 100% weight after transition ends
+            // This is the remaining TO state duration after the crossfade completes
+            float toBarDuration = Mathf.Max(0, toStateDuration - effectiveTransitionDuration);
+            
+            // Ghost sections mirror their corresponding bars (same state, same duration)
+            // They represent the same cycle of the same state, just shown as context
+            float ghostFromDuration = fromBarDuration;
+            float ghostToDuration = toBarDuration;
             
             em.SetupTransitionPreview(
                 targetEntity,
@@ -190,9 +177,11 @@ namespace DMotion.Editor
                 transitionIndex,
                 curveSource,
                 fromBlendPosition,
-                toBlendPosition);
+                toBlendPosition,
+                fromBarDuration,
+                toBarDuration);
             
-            em.ActivateTimelineControl(targetEntity, startPaused: false); // Start playing immediately
+            em.ActivateTimelineControl(targetEntity, startPaused: true); // Start paused - user must click play
         }
         
         /// <summary>
@@ -285,8 +274,6 @@ namespace DMotion.Editor
             
             var em = targetWorld.EntityManager;
             
-            Debug.Log($"[TimelineControlHelper] UpdateTransitionBlendPositions: fromBlendPos={fromBlendPosition}, toBlendPos={toBlendPosition}");
-            
             // Directly update blend positions in existing TimelineSection(s)
             if (em.HasBuffer<TimelineSection>(targetEntity))
             {
@@ -309,7 +296,6 @@ namespace DMotion.Editor
                         case TimelineSectionType.Transition:
                             section.BlendPosition = fromBlendPosition;
                             section.ToBlendPosition = toBlendPosition;
-                            Debug.Log($"[TimelineControlHelper] Updated Transition section[{i}]: BlendPos={section.BlendPosition}, ToBlendPos={section.ToBlendPosition}");
                             break;
                     }
                     

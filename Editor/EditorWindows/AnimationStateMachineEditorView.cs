@@ -107,51 +107,40 @@ namespace DMotion.Editor
             var elementsToDelete = new List<GraphElement>();
             foreach (var item in selection)
             {
-                if (item is GraphElement element && 
-                    !(element is AnyStateNodeView) && 
-                    !(element is ExitNodeView))
+                if (item is not GraphElement element) continue;
+                if (element is AnyStateNodeView or ExitNodeView) continue;
+
+                elementsToDelete.Add(element);
+
+                // Also collect edges connected to deleted nodes
+                if (element is Node node)
                 {
-                    elementsToDelete.Add(element);
-                    
-                    // Also collect edges connected to deleted nodes
-                    if (element is Node node)
-                    {
-                        CollectConnectedEdges(node, elementsToDelete);
-                    }
+                    CollectConnectedEdges(node, elementsToDelete);
                 }
             }
-            
+
             if (elementsToDelete.Count > 0)
             {
                 DeleteElements(elementsToDelete);
             }
         }
-        
+
         private void CollectConnectedEdges(Node node, List<GraphElement> elementsToDelete)
         {
-            // Collect edges from input ports
-            foreach (var port in node.inputContainer.Children())
+            CollectEdgesFromPorts(node.inputContainer, elementsToDelete);
+            CollectEdgesFromPorts(node.outputContainer, elementsToDelete);
+        }
+
+        private static void CollectEdgesFromPorts(VisualElement container, List<GraphElement> elementsToDelete)
+        {
+            foreach (var child in container.Children())
             {
-                if (port is Port inputPort)
+                if (child is not Port port) continue;
+
+                foreach (var edge in port.connections)
                 {
-                    foreach (var edge in inputPort.connections)
-                    {
-                        if (!elementsToDelete.Contains(edge))
-                            elementsToDelete.Add(edge);
-                    }
-                }
-            }
-            
-            // Collect edges from output ports
-            foreach (var port in node.outputContainer.Children())
-            {
-                if (port is Port outputPort)
-                {
-                    foreach (var edge in outputPort.connections)
-                    {
-                        if (!elementsToDelete.Contains(edge))
-                            elementsToDelete.Add(edge);
-                    }
+                    if (!elementsToDelete.Contains(edge))
+                        elementsToDelete.Add(edge);
                 }
             }
         }
@@ -235,80 +224,104 @@ namespace DMotion.Editor
         private GraphViewChange OnGraphViewChanged(GraphViewChange graphviewchange)
         {
             if (Application.isPlaying)
-            {
                 return graphviewchange;
-            }
 
-            if (graphviewchange.elementsToRemove != null)
-            {
-                foreach (var el in graphviewchange.elementsToRemove)
-                {
-                    if (el is StateNodeView stateView)
-                    {
-                        DeleteState(stateView.State);
-                    }
-                    else if (el is TransitionEdge transition)
-                    {
-                        // Regular state → state transition
-                        if (transition.output.node is StateNodeView from &&
-                            transition.input.node is StateNodeView to)
-                        {
-                            DeleteAllOutTransitions(from.State, to.State);
-                        }
-                        // Any State → state transition
-                        else if (transition.output.node is AnyStateNodeView &&
-                                 transition.input.node is StateNodeView toState)
-                        {
-                            DeleteAnyStateTransition(toState.State);
-                        }
-                        // State → Exit node transition
-                        else if (transition.output.node is StateNodeView exitFromState &&
-                                 transition.input.node is ExitNodeView)
-                        {
-                            RemoveExitState(exitFromState.State);
-                        }
-                        // Any State → Exit node transition
-                        else if (transition.output.node is AnyStateNodeView &&
-                                 transition.input.node is ExitNodeView)
-                        {
-                            RemoveAnyStateExitTransition();
-                            anyStateExitEdge = null;
-                        }
-                    }
-                }
-            }
-
-            if (graphviewchange.edgesToCreate != null)
-            {
-                foreach (var edge in graphviewchange.edgesToCreate)
-                {
-                    if (edge is TransitionEdge)
-                    {
-                        // Regular state → state transition
-                        if (edge.output.node is StateNodeView fromStateView &&
-                            edge.input.node is StateNodeView toStateView)
-                        {
-                            CreateOutTransition(fromStateView.State, toStateView.State);
-                        }
-                        // Any State → state transition
-                        else if (edge.output.node is AnyStateNodeView &&
-                                 edge.input.node is StateNodeView anyStateTarget)
-                        {
-                            CreateAnyStateTransition(anyStateTarget.State);
-                        }
-                        // State → Exit node (marks state as exit state)
-                        else if (edge.output.node is StateNodeView exitFromState &&
-                                 edge.input.node is ExitNodeView)
-                        {
-                            AddExitState(exitFromState.State);
-                        }
-                    }
-                }
-
-                graphviewchange.edgesToCreate.Clear();
-            }
+            ProcessElementsToRemove(graphviewchange.elementsToRemove);
+            ProcessEdgesToCreate(graphviewchange.edgesToCreate);
 
             return graphviewchange;
+        }
+
+        private void ProcessElementsToRemove(List<GraphElement> elementsToRemove)
+        {
+            if (elementsToRemove == null) return;
+
+            foreach (var el in elementsToRemove)
+            {
+                if (el is StateNodeView stateView)
+                {
+                    DeleteState(stateView.State);
+                    continue;
+                }
+
+                if (el is not TransitionEdge transition) continue;
+
+                ProcessTransitionRemoval(transition);
+            }
+        }
+
+        private void ProcessTransitionRemoval(TransitionEdge transition)
+        {
+            var outputNode = transition.output.node;
+            var inputNode = transition.input.node;
+
+            // State → State
+            if (outputNode is StateNodeView from && inputNode is StateNodeView to)
+            {
+                DeleteAllOutTransitions(from.State, to.State);
+                return;
+            }
+
+            // Any State → State
+            if (outputNode is AnyStateNodeView && inputNode is StateNodeView toState)
+            {
+                DeleteAnyStateTransition(toState.State);
+                return;
+            }
+
+            // State → Exit
+            if (outputNode is StateNodeView exitFromState && inputNode is ExitNodeView)
+            {
+                RemoveExitState(exitFromState.State);
+                return;
+            }
+
+            // Any State → Exit
+            if (outputNode is AnyStateNodeView && inputNode is ExitNodeView)
+            {
+                RemoveAnyStateExitTransition();
+                anyStateExitEdge = null;
+            }
+        }
+
+        private void ProcessEdgesToCreate(List<Edge> edgesToCreate)
+        {
+            if (edgesToCreate == null) return;
+
+            foreach (var edge in edgesToCreate)
+            {
+                if (edge is not TransitionEdge) continue;
+
+                ProcessEdgeCreation(edge);
+            }
+
+            edgesToCreate.Clear();
+        }
+
+        private void ProcessEdgeCreation(Edge edge)
+        {
+            var outputNode = edge.output.node;
+            var inputNode = edge.input.node;
+
+            // State → State
+            if (outputNode is StateNodeView fromStateView && inputNode is StateNodeView toStateView)
+            {
+                CreateOutTransition(fromStateView.State, toStateView.State);
+                return;
+            }
+
+            // Any State → State
+            if (outputNode is AnyStateNodeView && inputNode is StateNodeView anyStateTarget)
+            {
+                CreateAnyStateTransition(anyStateTarget.State);
+                return;
+            }
+
+            // State → Exit
+            if (outputNode is StateNodeView exitFromState && inputNode is ExitNodeView)
+            {
+                AddExitState(exitFromState.State);
+            }
         }
 
         private void DeleteState(AnimationStateAsset state)

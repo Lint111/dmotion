@@ -1052,8 +1052,17 @@ namespace DMotion.Editor
             
             if (!matchesFrom || !matchesTo) return;
             
-            // Get per-state normalized times from the timeline for proper playback
             var timeline = transitionInspectorBuilder?.Timeline;
+            
+            // Set the overall normalized time (used by ECS backend for timeline scrubbing)
+            // Only send when not playing (paused or dragging) - when playing, ECS advances time automatically
+            // Sending during playback causes pause because ScrubState implies pause
+            if (timeline == null || !timeline.IsPlaying || timeline.IsDragging)
+            {
+                previewSession?.SetNormalizedTime(normalizedTime);
+            }
+            
+            // Get per-state normalized times for proper clip sampling (used by PlayableGraph backend)
             if (timeline != null)
             {
                 previewSession?.SetTransitionStateNormalizedTimes(
@@ -1074,29 +1083,41 @@ namespace DMotion.Editor
             var rect = previewContainer.contentRect;
             
             // Sync time from state timeline scrubber
+            // Only send time when paused/scrubbing - when playing, ECS advances time automatically
             var stateTimeline = stateInspectorBuilder?.TimelineScrubber;
             if (stateTimeline != null && currentSelectionType == SelectionType.State)
             {
-                previewSession.SetNormalizedTime(stateTimeline.NormalizedTime);
+                // Only sync when not playing (paused or scrubbing) to avoid ECS pause-on-scrub behavior
+                if (!stateTimeline.IsPlaying || stateTimeline.IsDragging)
+                {
+                    previewSession.SetNormalizedTime(stateTimeline.NormalizedTime);
+                }
             }
             
             // Sync time and progress from transition timeline
             var transitionTimeline = transitionInspectorBuilder?.Timeline;
             if (transitionTimeline != null && previewSession.IsTransitionPreview)
             {
-                // Set per-state normalized times for proper clip sampling
+                // Only sync when not playing (paused or scrubbing) to avoid ECS pause-on-scrub behavior
+                // Both SetNormalizedTime and SetTransitionProgress send scrub commands that pause playback
+                if (!transitionTimeline.IsPlaying || transitionTimeline.IsDragging)
+                {
+                    previewSession.SetNormalizedTime(transitionTimeline.NormalizedTime);
+                    
+                    // Apply blend curve to get actual blend weight
+                    // Uses CurveUtils for runtime-identical evaluation
+                    float rawProgress = transitionTimeline.TransitionProgress;
+                    var keyframes = transitionInspectorBuilder?.BlendCurveKeyframes;
+                    float blendWeight = CurveUtils.EvaluateCurveManaged(keyframes, rawProgress);
+                    
+                    // Set transition progress for blend weights (from→to crossfade)
+                    previewSession.SetTransitionProgress(blendWeight);
+                }
+                
+                // Set per-state normalized times for proper clip sampling (PlayableGraph backend only)
                 previewSession.SetTransitionStateNormalizedTimes(
                     transitionTimeline.FromStateNormalizedTime,
                     transitionTimeline.ToStateNormalizedTime);
-                
-                // Apply blend curve to get actual blend weight
-                // Uses CurveUtils for runtime-identical evaluation
-                float rawProgress = transitionTimeline.TransitionProgress;
-                var keyframes = transitionInspectorBuilder?.BlendCurveKeyframes;
-                float blendWeight = CurveUtils.EvaluateCurveManaged(keyframes, rawProgress);
-                
-                // Set transition progress for blend weights (from→to crossfade)
-                previewSession.SetTransitionProgress(blendWeight);
             }
             
             // Draw the preview

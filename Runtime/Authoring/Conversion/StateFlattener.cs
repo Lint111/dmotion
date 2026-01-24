@@ -215,127 +215,179 @@ namespace DMotion.Authoring
         {
             foreach (var state in machine.States)
             {
-                var statePath = string.IsNullOrEmpty(pathPrefix)
-                    ? state.name
-                    : $"{pathPrefix}/{state.name}";
-
-                switch (state)
-                {
-                    case SubStateMachineStateAsset subMachine:
-                        // Validate the sub-machine
-                        if (!subMachine.IsValid())
-                        {
-                            Debug.LogWarning($"[StateFlattener] Skipping invalid SubStateMachine: {statePath}");
-                            continue;
-                        }
-
-                        // Record the entry state mapping for transition resolution
-                        var entryState = ResolveEntryState(subMachine);
-                        if (entryState != null)
-                        {
-                            subMachineToEntry[subMachine] = entryState;
-                        }
-
-                        // Recurse into nested machine - clips before this point determine offset
-                        var nestedClipOffset = clipIndexOffset + CountClipsBeforeState(machine, state);
-                        CollectStatesRecursive(
-                            subMachine.NestedStateMachine,
-                            statePath,
-                            nestedClipOffset,
-                            flattenedStates,
-                            assetToIndex,
-                            subMachineToEntry,
-                            exitTransitionInfos,
-                            parentSubMachine: subMachine);
-                        break;
-
-                    case SingleClipStateAsset:
-                    case LinearBlendStateAsset:
-                        // Leaf state - add to flattened list
-                        var globalIndex = flattenedStates.Count;
-                        var stateClipOffset = clipIndexOffset + CountClipsBeforeState(machine, state);
-
-                        flattenedStates.Add(new FlattenedState
-                        {
-                            Asset = state,
-                            GlobalIndex = globalIndex,
-                            ClipIndexOffset = stateClipOffset,
-                            Path = statePath,
-                            ExitGroupIndex = -1, // Will be assigned in second pass
-                            SourceSubMachine = parentSubMachine // Track source for parameter linking
-                        });
-
-                        assetToIndex[state] = globalIndex;
-                        break;
-
-                    default:
-                        Debug.LogError($"[StateFlattener] Unknown state type: {state.GetType().Name}");
-                        break;
-                }
+                var statePath = BuildStatePath(pathPrefix, state.name);
+                ProcessState(state, statePath, machine, clipIndexOffset, flattenedStates, assetToIndex,
+                    subMachineToEntry, exitTransitionInfos, parentSubMachine);
             }
 
-            // After processing all states in this machine, collect exit transition info
-            // if we have a parent sub-machine whose nested machine has exit states
-            // NEW ARCHITECTURE:
-            // - ExitStates are defined on the nested StateMachineAsset (machine.ExitStates)
-            // - Exit transitions are the OutTransitions on the SubStateMachineStateAsset (parentSubMachine.OutTransitions)
-            if (parentSubMachine != null &&
-                machine.ExitStates != null &&
-                machine.ExitStates.Count > 0 &&
-                parentSubMachine.OutTransitions != null &&
-                parentSubMachine.OutTransitions.Count > 0)
+            // After processing all states, collect exit transition info for this machine
+            CollectExitTransitionInfo(machine, parentSubMachine, assetToIndex, exitTransitionInfos);
+        }
+
+        private static string BuildStatePath(string pathPrefix, string stateName)
+        {
+            return string.IsNullOrEmpty(pathPrefix) ? stateName : $"{pathPrefix}/{stateName}";
+        }
+
+        private static void ProcessState(
+            AnimationStateAsset state,
+            string statePath,
+            StateMachineAsset machine,
+            int clipIndexOffset,
+            List<FlattenedState> flattenedStates,
+            Dictionary<AnimationStateAsset, int> assetToIndex,
+            Dictionary<SubStateMachineStateAsset, AnimationStateAsset> subMachineToEntry,
+            List<ExitTransitionInfo> exitTransitionInfos,
+            SubStateMachineStateAsset parentSubMachine)
+        {
+            if (state is SubStateMachineStateAsset subMachine)
             {
-                // Only create an exit transition group if we have valid exit states with resolved indices
-                var exitStateIndices = new List<int>();
-                foreach (var exitState in machine.ExitStates)
-                {
-                    if (exitState == null)
-                        continue;
-
-                    // The exit state might be a leaf state or a nested sub-machine's entry state
-                    var resolvedExitState = exitState is SubStateMachineStateAsset nestedSub
-                        ? ResolveEntryState(nestedSub)
-                        : exitState;
-
-                    if (resolvedExitState != null && assetToIndex.TryGetValue(resolvedExitState, out var exitIndex))
-                    {
-                        exitStateIndices.Add(exitIndex);
-                    }
-                    else
-                    {
-                        Debug.LogWarning($"[StateFlattener] Could not resolve exit state '{exitState?.name}' for SubStateMachine '{parentSubMachine.name}'");
-                    }
-                }
-
-                if (exitStateIndices.Count > 0)
-                {
-                    exitTransitionInfos.Add(new ExitTransitionInfo
-                    {
-                        SubMachine = parentSubMachine,
-                        ExitStateIndices = exitStateIndices,
-                        ExitTransitions = parentSubMachine.OutTransitions
-                    });
-                }
+                ProcessSubStateMachine(subMachine, statePath, machine, clipIndexOffset, flattenedStates,
+                    assetToIndex, subMachineToEntry, exitTransitionInfos);
+                return;
             }
+
+            if (state is SingleClipStateAsset or LinearBlendStateAsset or Directional2DBlendStateAsset)
+            {
+                ProcessLeafState(state, statePath, machine, clipIndexOffset, flattenedStates, assetToIndex, parentSubMachine);
+                return;
+            }
+
+            Debug.LogError($"[StateFlattener] Unknown state type: {state.GetType().Name}");
+        }
+
+        private static void ProcessSubStateMachine(
+            SubStateMachineStateAsset subMachine,
+            string statePath,
+            StateMachineAsset machine,
+            int clipIndexOffset,
+            List<FlattenedState> flattenedStates,
+            Dictionary<AnimationStateAsset, int> assetToIndex,
+            Dictionary<SubStateMachineStateAsset, AnimationStateAsset> subMachineToEntry,
+            List<ExitTransitionInfo> exitTransitionInfos)
+        {
+            if (!subMachine.IsValid())
+            {
+                Debug.LogWarning($"[StateFlattener] Skipping invalid SubStateMachine: {statePath}");
+                return;
+            }
+
+            // Record the entry state mapping for transition resolution
+            var entryState = ResolveEntryState(subMachine);
+            if (entryState != null)
+            {
+                subMachineToEntry[subMachine] = entryState;
+            }
+
+            // Recurse into nested machine - clips before this point determine offset
+            var nestedClipOffset = clipIndexOffset + CountClipsBeforeState(machine, subMachine);
+            CollectStatesRecursive(
+                subMachine.NestedStateMachine,
+                statePath,
+                nestedClipOffset,
+                flattenedStates,
+                assetToIndex,
+                subMachineToEntry,
+                exitTransitionInfos,
+                parentSubMachine: subMachine);
+        }
+
+        private static void ProcessLeafState(
+            AnimationStateAsset state,
+            string statePath,
+            StateMachineAsset machine,
+            int clipIndexOffset,
+            List<FlattenedState> flattenedStates,
+            Dictionary<AnimationStateAsset, int> assetToIndex,
+            SubStateMachineStateAsset parentSubMachine)
+        {
+            var globalIndex = flattenedStates.Count;
+            var stateClipOffset = clipIndexOffset + CountClipsBeforeState(machine, state);
+
+            flattenedStates.Add(new FlattenedState
+            {
+                Asset = state,
+                GlobalIndex = globalIndex,
+                ClipIndexOffset = stateClipOffset,
+                Path = statePath,
+                ExitGroupIndex = -1, // Will be assigned in second pass
+                SourceSubMachine = parentSubMachine // Track source for parameter linking
+            });
+
+            assetToIndex[state] = globalIndex;
+        }
+
+        /// <summary>
+        /// Collects exit transition info if this machine has exit states and the parent has out-transitions.
+        /// </summary>
+        private static void CollectExitTransitionInfo(
+            StateMachineAsset machine,
+            SubStateMachineStateAsset parentSubMachine,
+            Dictionary<AnimationStateAsset, int> assetToIndex,
+            List<ExitTransitionInfo> exitTransitionInfos)
+        {
+            // Early returns for invalid conditions
+            if (parentSubMachine == null) return;
+            if (machine.ExitStates == null || machine.ExitStates.Count == 0) return;
+            if (parentSubMachine.OutTransitions == null || parentSubMachine.OutTransitions.Count == 0) return;
+
+            var exitStateIndices = ResolveExitStateIndices(machine.ExitStates, assetToIndex, parentSubMachine.name);
+            if (exitStateIndices.Count == 0) return;
+
+            exitTransitionInfos.Add(new ExitTransitionInfo
+            {
+                SubMachine = parentSubMachine,
+                ExitStateIndices = exitStateIndices,
+                ExitTransitions = parentSubMachine.OutTransitions
+            });
+        }
+
+        /// <summary>
+        /// Resolves exit states to their flattened indices.
+        /// </summary>
+        private static List<int> ResolveExitStateIndices(
+            List<AnimationStateAsset> exitStates,
+            Dictionary<AnimationStateAsset, int> assetToIndex,
+            string parentName)
+        {
+            var exitStateIndices = new List<int>();
+
+            foreach (var exitState in exitStates)
+            {
+                if (exitState == null) continue;
+
+                // The exit state might be a leaf state or a nested sub-machine's entry state
+                var resolvedExitState = exitState is SubStateMachineStateAsset nestedSub
+                    ? ResolveEntryState(nestedSub)
+                    : exitState;
+
+                if (resolvedExitState == null || !assetToIndex.TryGetValue(resolvedExitState, out var exitIndex))
+                {
+                    Debug.LogWarning($"[StateFlattener] Could not resolve exit state '{exitState.name}' for SubStateMachine '{parentName}'");
+                    continue;
+                }
+
+                exitStateIndices.Add(exitIndex);
+            }
+
+            return exitStateIndices;
         }
 
         private static void CollectClipsRecursive(StateMachineAsset machine, List<AnimationClipAsset> clips)
         {
             foreach (var state in machine.States)
             {
-                switch (state)
+                if (state is SubStateMachineStateAsset subMachine)
                 {
-                    case SubStateMachineStateAsset subMachine:
-                        if (subMachine.IsValid())
-                        {
-                            CollectClipsRecursive(subMachine.NestedStateMachine, clips);
-                        }
-                        break;
+                    if (subMachine.IsValid())
+                        CollectClipsRecursive(subMachine.NestedStateMachine, clips);
+                    continue;
+                }
 
-                    case SingleClipStateAsset:
-                    case LinearBlendStateAsset:
-                        clips.AddRange(state.Clips);
-                        break;
+                // All leaf state types (Single, LinearBlend, Directional2D)
+                if (state is SingleClipStateAsset or LinearBlendStateAsset or Directional2DBlendStateAsset)
+                {
+                    clips.AddRange(state.Clips);
                 }
             }
         }
@@ -362,22 +414,18 @@ namespace DMotion.Authoring
         /// </summary>
         private static int CountClipsInState(AnimationStateAsset state)
         {
-            switch (state)
+            if (state is SubStateMachineStateAsset subMachine)
             {
-                case SubStateMachineStateAsset subMachine:
-                    if (subMachine.IsValid())
-                    {
-                        return subMachine.NestedStateMachine.ClipCount;
-                    }
-                    return 0;
-
-                case SingleClipStateAsset:
-                case LinearBlendStateAsset:
-                    return state.ClipCount;
-
-                default:
-                    return 0;
+                return subMachine.IsValid() ? subMachine.NestedStateMachine.ClipCount : 0;
             }
+
+            // All leaf state types return their clip count
+            if (state is SingleClipStateAsset or LinearBlendStateAsset or Directional2DBlendStateAsset)
+            {
+                return state.ClipCount;
+            }
+
+            return 0;
         }
     }
 }

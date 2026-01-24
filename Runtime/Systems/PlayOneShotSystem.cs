@@ -25,63 +25,93 @@ namespace DMotion
                 in AnimationCurrentState animationCurrentState
             )
             {
-                //Evaluate requested one shot
+                // Start new one-shot if requested
+                if (playOneShot.IsValid)
                 {
-                    if (playOneShot.IsValid)
-                    {
-                        var singleClipAnimationState = SingleClipStateUtils.New(
-                            (ushort)playOneShot.ClipIndex,
-                            playOneShot.Speed,
-                            false,
-                            playOneShot.Clips,
-                            playOneShot.ClipEvents,
-                            ref singleClipStates,
-                            ref animationStates,
-                            ref clipSamplers);
-
-                        animationStateTransitionRequest = AnimationStateTransitionRequest.New(
-                            singleClipAnimationState.AnimationStateId,
-                            playOneShot.TransitionDuration);
-
-                        var animationState = animationStates.GetWithId(singleClipAnimationState.AnimationStateId);
-                        var playOneShotClip = clipSamplers.GetWithId(animationState.StartSamplerId);
-
-                        var endTime = playOneShot.EndTime * playOneShotClip.Clip.duration;
-                        var blendOutDuration = playOneShot.TransitionDuration;
-
-                        oneShotState = OneShotState.New(singleClipAnimationState.AnimationStateId, endTime,
-                            blendOutDuration);
-                        playOneShot = PlayOneShotRequest.Null;
-
-                        if (!animationPreserveState.IsValid)
-                        {
-                            animationPreserveState.AnimationStateId = animationCurrentState.AnimationStateId;
-                        }
-                    }
+                    StartOneShot(
+                        ref animationStateTransitionRequest,
+                        ref animationPreserveState,
+                        ref playOneShot,
+                        ref oneShotState,
+                        ref singleClipStates,
+                        ref animationStates,
+                        ref clipSamplers,
+                        animationCurrentState);
                 }
 
-                //Evaluate one shot end
+                // Check if current one-shot should end
+                EvaluateOneShotEnd(
+                    ref animationStateTransitionRequest,
+                    ref animationPreserveState,
+                    ref oneShotState,
+                    ref animationStates,
+                    animationCurrentState);
+            }
+
+            private static void StartOneShot(
+                ref AnimationStateTransitionRequest animationStateTransitionRequest,
+                ref AnimationPreserveState animationPreserveState,
+                ref PlayOneShotRequest playOneShot,
+                ref OneShotState oneShotState,
+                ref DynamicBuffer<SingleClipState> singleClipStates,
+                ref DynamicBuffer<AnimationState> animationStates,
+                ref DynamicBuffer<ClipSampler> clipSamplers,
+                in AnimationCurrentState animationCurrentState)
+            {
+                var singleClipAnimationState = SingleClipStateUtils.New(
+                    (ushort)playOneShot.ClipIndex,
+                    playOneShot.Speed,
+                    false,
+                    playOneShot.Clips,
+                    playOneShot.ClipEvents,
+                    ref singleClipStates,
+                    ref animationStates,
+                    ref clipSamplers);
+
+                animationStateTransitionRequest = AnimationStateTransitionRequest.New(
+                    singleClipAnimationState.AnimationStateId,
+                    playOneShot.TransitionDuration);
+
+                var animationState = animationStates.GetWithId(singleClipAnimationState.AnimationStateId);
+                var playOneShotClip = clipSamplers.GetWithId(animationState.StartSamplerId);
+
+                var endTime = playOneShot.EndTime * playOneShotClip.Clip.duration;
+                var blendOutDuration = playOneShot.TransitionDuration;
+
+                oneShotState = OneShotState.New(singleClipAnimationState.AnimationStateId, endTime, blendOutDuration);
+                playOneShot = PlayOneShotRequest.Null;
+
+                if (!animationPreserveState.IsValid)
                 {
-                    if (oneShotState.IsValid && oneShotState.AnimationStateId == animationCurrentState.AnimationStateId)
-                    {
-                        var oneShotAnimationState = animationStates.GetWithId((byte)oneShotState.AnimationStateId);
-
-                        //request transition back to state machine if we're done
-                        if (oneShotAnimationState.Time >= oneShotState.EndTime)
-                        {
-                            Assert.IsTrue(animationPreserveState.IsValid,
-                                "PlayOneShot: Preserve state is invalid while trying to return to previous animation state");
-                            if (animationPreserveState.IsValid)
-                            {
-                                animationStateTransitionRequest = AnimationStateTransitionRequest.New(
-                                    (byte)animationPreserveState.AnimationStateId, oneShotState.BlendOutDuration);
-                                animationPreserveState = AnimationPreserveState.Null;
-                            }
-
-                            oneShotState = OneShotState.Null;
-                        }
-                    }
+                    animationPreserveState.AnimationStateId = animationCurrentState.AnimationStateId;
                 }
+            }
+
+            private static void EvaluateOneShotEnd(
+                ref AnimationStateTransitionRequest animationStateTransitionRequest,
+                ref AnimationPreserveState animationPreserveState,
+                ref OneShotState oneShotState,
+                ref DynamicBuffer<AnimationState> animationStates,
+                in AnimationCurrentState animationCurrentState)
+            {
+                if (!oneShotState.IsValid) return;
+                if (oneShotState.AnimationStateId != animationCurrentState.AnimationStateId) return;
+
+                var oneShotAnimationState = animationStates.GetWithId((byte)oneShotState.AnimationStateId);
+                if (oneShotAnimationState.Time < oneShotState.EndTime) return;
+
+                // Request transition back to state machine
+                Assert.IsTrue(animationPreserveState.IsValid,
+                    "PlayOneShot: Preserve state is invalid while trying to return to previous animation state");
+
+                if (animationPreserveState.IsValid)
+                {
+                    animationStateTransitionRequest = AnimationStateTransitionRequest.New(
+                        (byte)animationPreserveState.AnimationStateId, oneShotState.BlendOutDuration);
+                    animationPreserveState = AnimationPreserveState.Null;
+                }
+
+                oneShotState = OneShotState.Null;
             }
         }
 

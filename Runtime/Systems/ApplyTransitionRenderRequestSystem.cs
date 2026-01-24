@@ -86,11 +86,6 @@ namespace DMotion
             float toWeight = math.saturate(request.BlendWeight);
             float fromWeight = 1f - toWeight;
             
-            #if UNITY_EDITOR
-            // Diagnostic: trace blend position through the system
-            UnityEngine.Debug.Log($"[ApplyTransitionRenderRequest] FromBlendPos={request.FromBlendPosition}, ToBlendPos={request.ToBlendPosition}, BlendWeight={request.BlendWeight:F2}");
-            #endif
-            
             // Apply FROM state (index 0)
             if (request.FromStateIndex < smBlob.States.Length)
             {
@@ -108,14 +103,6 @@ namespace DMotion
             // Apply TO state (index 1)
             if (request.ToStateIndex < smBlob.States.Length && animationStates.Length > 1)
             {
-                #if UNITY_EDITOR
-                // Diagnostic: Check if TO state samplers are valid
-                var toAnimState = animationStates[1];
-                int toSamplerStart = samplers.IdToIndex(toAnimState.StartSamplerId);
-                ref var toStateBlob = ref smBlob.States[request.ToStateIndex];
-                UnityEngine.Debug.Log($"[ApplyTransitionRenderRequest] TO State: StateIndex={request.ToStateIndex}, Type={toStateBlob.Type}, SamplerStart={toSamplerStart}, ToWeight={toWeight:F2}");
-                #endif
-                
                 ApplyStateAtIndex(
                     ref smBlob,
                     ref animationStates,
@@ -127,12 +114,31 @@ namespace DMotion
                     request.ToBlendPosition);
             }
             
-            // Zero out any remaining states
+            // Zero out any remaining states (beyond FROM and TO)
+            // IMPORTANT: Must also zero the ClipSampler weights, not just AnimationState.Weight
             for (int i = 2; i < animationStates.Length; i++)
             {
                 var otherState = animationStates[i];
                 otherState.Weight = 0f;
                 animationStates[i] = otherState;
+
+                // Zero out the ClipSampler weights for this state
+
+                int otherSamplerStart = samplers.IdToIndex(otherState.StartSamplerId);
+                
+                if (otherSamplerStart < 0) continue;
+                
+                for (int j = 0; j < otherState.ClipCount; j++)
+                {
+                    int samplerIdx = otherSamplerStart + j;
+
+                    if (samplerIdx >= samplers.Length) continue; 
+                    
+                    var sampler = samplers[samplerIdx];
+                    sampler.Weight = 0f;
+                    samplers[samplerIdx] = sampler;
+
+                }
             }
         }
         
@@ -249,11 +255,6 @@ namespace DMotion
             int clipCount = thresholds.Length;
             if (clipCount == 0 || count == 0)
                 return;
-            
-            #if UNITY_EDITOR
-            // Diagnostic: trace blend ratio being applied to linear blend
-            UnityEngine.Debug.Log($"[ApplyLinearBlendState] StateIndex={stateIndex}, BlendRatio={blendRatio:F2}, StateWeight={stateWeight:F2}, ClipCount={clipCount}, StartIdx={startIndex}");
-            #endif
             
             // Use shared utility for weights
             var thresholdsArray = CollectionUtils.AsArray(ref thresholds);

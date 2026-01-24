@@ -10,7 +10,7 @@ namespace DMotion
     [BurstCompile]
     [WithAll(typeof(SkeletonRootTag))]
     internal partial struct SampleRootDeltasJob : IJobEntity
-    {
+    { 
         internal ProfilerMarker Marker;
         internal void Execute(
             ref RootDeltaTranslation rootDeltaTranslation,

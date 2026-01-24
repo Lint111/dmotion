@@ -10,42 +10,81 @@ using UnityEngine;
 
 namespace DMotion.Authoring
 {
-    public static class AnimationStateMachineConversionUtils
+    /// <summary>
+    /// Cached parameter lists to avoid repeated LINQ allocations during conversion.
+    /// Created once per state machine conversion and passed through the build pipeline.
+    /// </summary>
+    internal readonly struct ParameterCache
     {
-        /// <summary>
-        /// Resolves a parameter to its index in the root machine's parameter list.
-        /// Handles parameter linking: if the parameter is from a nested SubStateMachine,
-        /// it checks for a ParameterLink and resolves to the source parameter.
-        /// </summary>
-        /// <typeparam name="T">The parameter type (BoolParameterAsset, IntParameterAsset, FloatParameterAsset)</typeparam>
-        /// <param name="rootMachine">The root state machine containing all parameters</param>
-        /// <param name="parameter">The parameter to resolve</param>
-        /// <param name="flattenedState">Optional: the flattened state context for link resolution</param>
-        /// <returns>The index in the typed parameter list, or -1 if not found</returns>
-        private static int ResolveParameterIndex<T>(
-            StateMachineAsset rootMachine,
-            AnimationParameterAsset parameter,
-            FlattenedState? flattenedState = null) where T : AnimationParameterAsset
+        public readonly List<BoolParameterAsset> BoolParameters;
+        public readonly List<IntParameterAsset> IntParameters;
+        public readonly List<FloatParameterAsset> FloatParameters;
+        public readonly StateMachineAsset RootMachine;
+
+        public ParameterCache(StateMachineAsset rootMachine)
+        {
+            RootMachine = rootMachine;
+            BoolParameters = new List<BoolParameterAsset>();
+            IntParameters = new List<IntParameterAsset>();
+            FloatParameters = new List<FloatParameterAsset>();
+
+            // Single pass to categorize all parameters (avoids multiple OfType<T>().ToList() calls)
+            foreach (var param in rootMachine.Parameters)
+            {
+                switch (param)
+                {
+                    case BoolParameterAsset boolParam:
+                        BoolParameters.Add(boolParam);
+                        break;
+                    case IntParameterAsset intParam:
+                        IntParameters.Add(intParam);
+                        break;
+                    case FloatParameterAsset floatParam:
+                        FloatParameters.Add(floatParam);
+                        break;
+                }
+            }
+        }
+
+        public int FindBoolParameterIndex(AnimationParameterAsset parameter, FlattenedState? flattenedState)
+        {
+            return FindParameterIndex(BoolParameters, parameter, flattenedState);
+        }
+
+        public int FindIntParameterIndex(AnimationParameterAsset parameter, FlattenedState? flattenedState)
+        {
+            return FindParameterIndex(IntParameters, parameter, flattenedState);
+        }
+
+        public int FindFloatParameterIndex(AnimationParameterAsset parameter, FlattenedState? flattenedState)
+        {
+            return FindParameterIndex(FloatParameters, parameter, flattenedState);
+        }
+
+        private int FindParameterIndex<T>(List<T> typedParams, AnimationParameterAsset parameter, FlattenedState? flattenedState)
+            where T : AnimationParameterAsset
         {
             if (parameter == null)
                 return -1;
 
-            var typedParams = rootMachine.Parameters.OfType<T>().ToList();
-
             // First try direct lookup
-            var directIndex = typedParams.FindIndex(p => p == parameter);
-            if (directIndex >= 0)
-                return directIndex;
+            for (int i = 0; i < typedParams.Count; i++)
+            {
+                if (typedParams[i] == parameter)
+                    return i;
+            }
 
             // Try parameter linking - check if this parameter is linked from a parent parameter
             if (flattenedState.HasValue && flattenedState.Value.SourceSubMachine != null)
             {
-                var link = rootMachine.FindLinkForTarget(parameter, flattenedState.Value.SourceSubMachine);
+                var link = RootMachine.FindLinkForTarget(parameter, flattenedState.Value.SourceSubMachine);
                 if (link.HasValue && link.Value.SourceParameter is T sourceParam)
                 {
-                    var linkedIndex = typedParams.FindIndex(p => p == sourceParam);
-                    if (linkedIndex >= 0)
-                        return linkedIndex;
+                    for (int i = 0; i < typedParams.Count; i++)
+                    {
+                        if (typedParams[i] == sourceParam)
+                            return i;
+                    }
                 }
             }
 
@@ -59,6 +98,10 @@ namespace DMotion.Authoring
 
             return -1;
         }
+    }
+
+    public static class AnimationStateMachineConversionUtils
+    {
 
         public static BlobAssetReference<StateMachineBlob> CreateStateMachineBlob(StateMachineAsset stateMachineAsset)
         {
@@ -92,11 +135,14 @@ namespace DMotion.Authoring
                 DefaultStateIndex = (byte)assetToIndex[resolvedDefault]
             };
 
+            // Create parameter cache once for entire conversion (avoids repeated OfType<T>().ToList() calls)
+            var parameterCache = new ParameterCache(stateMachineAsset);
+
             try
             {
-                BuildFlattenedStates(stateMachineAsset, flattenedStates, assetToIndex, ref converter, Allocator.Persistent);
-                BuildAnyStateTransitions(stateMachineAsset, assetToIndex, ref converter, Allocator.Persistent);
-                BuildExitTransitionGroups(stateMachineAsset, exitTransitionInfos, assetToIndex, ref converter, Allocator.Persistent);
+                BuildFlattenedStates(parameterCache, flattenedStates, assetToIndex, ref converter, Allocator.Persistent);
+                BuildAnyStateTransitions(parameterCache, assetToIndex, ref converter, Allocator.Persistent);
+                BuildExitTransitionGroups(parameterCache, exitTransitionInfos, assetToIndex, ref converter, Allocator.Persistent);
             }
             catch
             {
@@ -113,16 +159,23 @@ namespace DMotion.Authoring
         /// All states are leaf states (Single or LinearBlend) with global indices.
         /// </summary>
         private static void BuildFlattenedStates(
-            StateMachineAsset rootMachine,
+            in ParameterCache parameterCache,
             List<FlattenedState> flattenedStates,
             Dictionary<AnimationStateAsset, int> assetToIndex,
             ref StateMachineBlobConverter converter,
             Allocator allocator)
         {
-            // Count state types
-            int singleCount = flattenedStates.Count(s => s.Asset is SingleClipStateAsset);
-            int linearCount = flattenedStates.Count(s => s.Asset is LinearBlendStateAsset);
-            int directional2DCount = flattenedStates.Count(s => s.Asset is Directional2DBlendStateAsset);
+            // Count state types without LINQ
+            int singleCount = 0, linearCount = 0, directional2DCount = 0;
+            foreach (var state in flattenedStates)
+            {
+                switch (state.Asset)
+                {
+                    case SingleClipStateAsset: singleCount++; break;
+                    case LinearBlendStateAsset: linearCount++; break;
+                    case Directional2DBlendStateAsset: directional2DCount++; break;
+                }
+            }
 
             converter.States = new UnsafeList<AnimationStateConversionData>(flattenedStates.Count, allocator);
             converter.States.Resize(flattenedStates.Count);
@@ -161,20 +214,20 @@ namespace DMotion.Authoring
                         if (usesIntParameter)
                         {
                             // Find index in Int parameters list (with link resolution)
-                            blendParameterIndex = ResolveParameterIndex<IntParameterAsset>(
-                                rootMachine, linearBlendAsset.BlendParameter, flatState);
+                            blendParameterIndex = parameterCache.FindIntParameterIndex(
+                                linearBlendAsset.BlendParameter, flatState);
                             
                             Assert.IsTrue(blendParameterIndex >= 0,
-                                $"({rootMachine.name}) Couldn't find Int blend parameter for state {stateAsset.name}");
+                                $"({parameterCache.RootMachine.name}) Couldn't find Int blend parameter for state {stateAsset.name}");
                         }
                         else
                         {
                             // Find index in Float parameters list (with link resolution)
-                            blendParameterIndex = ResolveParameterIndex<FloatParameterAsset>(
-                                rootMachine, linearBlendAsset.BlendParameter, flatState);
+                            blendParameterIndex = parameterCache.FindFloatParameterIndex(
+                                linearBlendAsset.BlendParameter, flatState);
                             
                             Assert.IsTrue(blendParameterIndex >= 0,
-                                $"({rootMachine.name}) Couldn't find Float blend parameter for state {stateAsset.name}");
+                                $"({parameterCache.RootMachine.name}) Couldn't find Float blend parameter for state {stateAsset.name}");
                         }
 
                         var linearBlendData = new LinearBlendStateConversionData
@@ -205,15 +258,15 @@ namespace DMotion.Authoring
                     case Directional2DBlendStateAsset directional2DAsset:
                         stateImplIndex = converter.Directional2DBlendStates.Length;
 
-                        var blendParamIndexX = ResolveParameterIndex<FloatParameterAsset>(
-                            rootMachine, directional2DAsset.BlendParameterX, flatState);
-                        var blendParamIndexY = ResolveParameterIndex<FloatParameterAsset>(
-                            rootMachine, directional2DAsset.BlendParameterY, flatState);
+                        var blendParamIndexX = parameterCache.FindFloatParameterIndex(
+                            directional2DAsset.BlendParameterX, flatState);
+                        var blendParamIndexY = parameterCache.FindFloatParameterIndex(
+                            directional2DAsset.BlendParameterY, flatState);
 
                         Assert.IsTrue(blendParamIndexX >= 0,
-                            $"({rootMachine.name}) Couldn't find Float blend parameter X for state {stateAsset.name}");
+                            $"({parameterCache.RootMachine.name}) Couldn't find Float blend parameter X for state {stateAsset.name}");
                         Assert.IsTrue(blendParamIndexY >= 0,
-                            $"({rootMachine.name}) Couldn't find Float blend parameter Y for state {stateAsset.name}");
+                            $"({parameterCache.RootMachine.name}) Couldn't find Float blend parameter Y for state {stateAsset.name}");
 
                         var dir2DConvData = new Directional2DBlendStateConversionData
                         {
@@ -245,7 +298,7 @@ namespace DMotion.Authoring
 
                 // Build state conversion data with transitions
                 converter.States[globalIndex] = BuildFlattenedStateConversionData(
-                    rootMachine, flatState, stateImplIndex, assetToIndex, allocator);
+                    parameterCache, flatState, stateImplIndex, assetToIndex, allocator);
             }
         }
 
@@ -253,7 +306,7 @@ namespace DMotion.Authoring
         /// Builds state conversion data with transitions remapped to flattened indices.
         /// </summary>
         private static AnimationStateConversionData BuildFlattenedStateConversionData(
-            StateMachineAsset rootMachine,
+            in ParameterCache parameterCache,
             FlattenedState flatState,
             int stateImplIndex,
             Dictionary<AnimationStateAsset, int> assetToIndex,
@@ -273,8 +326,7 @@ namespace DMotion.Authoring
             // Resolve speed parameter (with link resolution for nested states)
             if (state.SpeedParameter != null)
             {
-                var speedParamIndex = ResolveParameterIndex<FloatParameterAsset>(
-                    rootMachine, state.SpeedParameter, flatState);
+                var speedParamIndex = parameterCache.FindFloatParameterIndex(state.SpeedParameter, flatState);
 
                 if (speedParamIndex >= 0)
                 {
@@ -290,7 +342,7 @@ namespace DMotion.Authoring
             for (var i = 0; i < transitions.Count; i++)
             {
                 stateData.Transitions[i] = BuildFlattenedTransitionData(
-                    rootMachine, transitions[i], flatState, assetToIndex, allocator);
+                    parameterCache, transitions[i], flatState, assetToIndex, allocator);
             }
 
             return stateData;
@@ -301,7 +353,7 @@ namespace DMotion.Authoring
         /// If target is a SubStateMachine, redirects to its entry state.
         /// </summary>
         private static StateOutTransitionConversionData BuildFlattenedTransitionData(
-            StateMachineAsset rootMachine,
+            in ParameterCache parameterCache,
             StateOutTransition transition,
             FlattenedState? sourceState,
             Dictionary<AnimationStateAsset, int> assetToIndex,
@@ -319,46 +371,38 @@ namespace DMotion.Authoring
             };
 
             // Bool conditions (with link resolution for nested states)
-            var boolConditions = transition.BoolTransitions.ToArray();
-            transitionData.BoolTransitions = new UnsafeList<BoolTransition>(boolConditions.Length, allocator);
-            transitionData.BoolTransitions.Resize(boolConditions.Length);
-
-            for (var i = 0; i < boolConditions.Length; i++)
+            // Use foreach to avoid ToArray() allocation
+            transitionData.BoolTransitions = new UnsafeList<BoolTransition>(4, allocator);
+            foreach (var boolCond in transition.BoolTransitions)
             {
-                var boolCond = boolConditions[i];
-                var paramIndex = ResolveParameterIndex<BoolParameterAsset>(
-                    rootMachine, boolCond.BoolParameter, sourceState);
+                var paramIndex = parameterCache.FindBoolParameterIndex(boolCond.BoolParameter, sourceState);
 
                 Assert.IsTrue(paramIndex >= 0,
-                    $"({rootMachine.name}) Bool parameter not found: {boolCond.BoolParameter?.name}");
+                    $"({parameterCache.RootMachine.name}) Bool parameter not found: {boolCond.BoolParameter?.name}");
 
-                transitionData.BoolTransitions[i] = new BoolTransition
+                transitionData.BoolTransitions.Add(new BoolTransition
                 {
                     ComparisonValue = boolCond.ComparisonValue == BoolConditionComparison.True,
                     ParameterIndex = paramIndex
-                };
+                });
             }
 
             // Int conditions (with link resolution for nested states)
-            var intConditions = transition.IntTransitions.ToArray();
-            transitionData.IntTransitions = new UnsafeList<IntTransition>(intConditions.Length, allocator);
-            transitionData.IntTransitions.Resize(intConditions.Length);
-
-            for (var i = 0; i < intConditions.Length; i++)
+            // Use foreach to avoid ToArray() allocation
+            transitionData.IntTransitions = new UnsafeList<IntTransition>(4, allocator);
+            foreach (var intCond in transition.IntTransitions)
             {
-                var intCond = intConditions[i];
-                var paramIndex = ResolveParameterIndex<IntParameterAsset>(
-                    rootMachine, intCond.IntParameter, sourceState);
+                var paramIndex = parameterCache.FindIntParameterIndex(intCond.IntParameter, sourceState);
 
                 Assert.IsTrue(paramIndex >= 0,
-                    $"({rootMachine.name}) Int parameter not found: {intCond.IntParameter?.name}");
+                    $"({parameterCache.RootMachine.name}) Int parameter not found: {intCond.IntParameter?.name}");
 
-                transitionData.IntTransitions[i] = new IntTransition
+                transitionData.IntTransitions.Add(new IntTransition
                 {
                     ParameterIndex = paramIndex,
                     ComparisonValue = intCond.ComparisonValue,
                     ComparisonMode = intCond.ComparisonMode
-                };
+                });
             }
 
             // Convert blend curve (empty = linear fast-path)
@@ -427,12 +471,12 @@ namespace DMotion.Authoring
         /// Any State transitions are always at root level, so no parameter linking is needed.
         /// </summary>
         private static void BuildAnyStateTransitions(
-            StateMachineAsset stateMachineAsset,
+            in ParameterCache parameterCache,
             Dictionary<AnimationStateAsset, int> assetToIndex,
             ref StateMachineBlobConverter converter,
             Allocator allocator)
         {
-            var anyStateCount = stateMachineAsset.AnyStateTransitions.Count;
+            var anyStateCount = parameterCache.RootMachine.AnyStateTransitions.Count;
 
             converter.AnyStateTransitions = new UnsafeList<StateOutTransitionConversionData>(anyStateCount, allocator);
             converter.AnyStateTransitions.Resize(anyStateCount);
@@ -440,8 +484,8 @@ namespace DMotion.Authoring
             for (var i = 0; i < anyStateCount; i++)
             {
                 converter.AnyStateTransitions[i] = BuildFlattenedTransitionData(
-                    stateMachineAsset,
-                    stateMachineAsset.AnyStateTransitions[i],
+                    parameterCache,
+                    parameterCache.RootMachine.AnyStateTransitions[i],
                     null, // Any State transitions are at root level
                     assetToIndex,
                     allocator);
@@ -453,7 +497,7 @@ namespace DMotion.Authoring
         /// Each SubStateMachine with exit states gets its own group.
         /// </summary>
         private static void BuildExitTransitionGroups(
-            StateMachineAsset rootMachine,
+            in ParameterCache parameterCache,
             List<ExitTransitionInfo> exitTransitionInfos,
             Dictionary<AnimationStateAsset, int> assetToIndex,
             ref StateMachineBlobConverter converter,
@@ -484,7 +528,7 @@ namespace DMotion.Authoring
                 for (var i = 0; i < info.ExitTransitions.Count; i++)
                 {
                     exitTransitions[i] = BuildFlattenedTransitionData(
-                        rootMachine,
+                        parameterCache,
                         info.ExitTransitions[i],
                         null, // Exit transitions use root-level parameters
                         assetToIndex,
