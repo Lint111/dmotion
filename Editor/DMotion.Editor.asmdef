@@ -2,6 +2,7 @@
     "name": "DMotion.Editor",
     "rootNamespace": "",
     "references": [
+        "GUID:46fe9b4ef94d76744bc0b97bc2f73d94",
         "GUID:c39b61f68344c5e46ad36a286c992104",
         "GUID:343deaaf83e0cee4ca978e7df0b80d21",
         "GUID:2bafac87e7f4b9b418d9448d219b01ab",
@@ -15,7 +16,6 @@
         "GUID:2665a8d13d1b3f18800f46e256720795",
         "GUID:a5baed0c9693541a5bd947d336ec7659",
         "GUID:8819f35a0fc84499b990e90a4ca1911f",
-        "GUID:46fe9b4ef94d76744bc0b97bc2f73d94",
         "GUID:5f3cf485eb0554709a8abbeace890c86"
     ],
     "includePlatforms": [

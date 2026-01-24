@@ -284,9 +284,11 @@ namespace DMotion
                     
                 case TimelineSectionType.GhostTo:
                     activeRequest = ActiveRenderRequest.State;
+                    // GhostTo may have an animation time offset (though typically 0 for a new cycle)
+                    float ghostToNormalizedTime = section.AnimationTimeOffset + progress * (1f - section.AnimationTimeOffset);
                     stateRequest = AnimationStateRenderRequest.GhostTo(
                         section.StateIndex,
-                        progress,
+                        ghostToNormalizedTime,
                         section.BlendPosition);
                     transitionRequest = AnimationTransitionRenderRequest.None;
                     break;
@@ -304,10 +306,12 @@ namespace DMotion
                     
                 case TimelineSectionType.ToBar:
                     // TO state at 100% weight (after transition overlap)
+                    // Use AnimationTimeOffset to continue from where transition ended
                     activeRequest = ActiveRenderRequest.State;
+                    float toBarNormalizedTime = section.AnimationTimeOffset + progress * (1f - section.AnimationTimeOffset);
                     stateRequest = AnimationStateRenderRequest.Create(
                         section.StateIndex,
-                        progress,
+                        toBarNormalizedTime,
                         section.BlendPosition,
                         TimelineSectionType.ToBar);
                     transitionRequest = AnimationTransitionRenderRequest.None;
@@ -533,16 +537,21 @@ namespace DMotion
             time += transitionDuration;
             
             // 4. TO bar (TO state at 100% after blend)
+            // Calculate animation time offset: TO state continues from where transition ended
+            float toStateDuration = transitionDuration + toBarDuration;
+            float toBarAnimationOffset = toStateDuration > 0 ? transitionDuration / toStateDuration : 0f;
+            
             if (toBarDuration > 0)
             {
-                sections.Add(TimelineSection.ToBar(toStateIndex, toBarDuration, time, toBlendPosition));
+                sections.Add(TimelineSection.ToBar(toStateIndex, toBarDuration, time, toBlendPosition, toBarAnimationOffset));
                 time += toBarDuration;
             }
             
             // 5. Ghost TO (optional context cycle after main action)
+            // GhostTo starts a new cycle from the beginning (offset = 0)
             if (ghostToDuration > 0)
             {
-                sections.Add(TimelineSection.GhostTo(toStateIndex, ghostToDuration, time, toBlendPosition));
+                sections.Add(TimelineSection.GhostTo(toStateIndex, ghostToDuration, time, toBlendPosition, animationTimeOffset: 0f));
                 time += ghostToDuration;
             }
             

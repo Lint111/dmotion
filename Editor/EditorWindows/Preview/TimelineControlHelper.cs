@@ -286,10 +286,12 @@ namespace DMotion.Editor
                     {
                         case TimelineSectionType.GhostFrom:
                         case TimelineSectionType.State:
+                        case TimelineSectionType.FromBar:
                             section.BlendPosition = fromBlendPosition;
                             break;
                             
                         case TimelineSectionType.GhostTo:
+                        case TimelineSectionType.ToBar:
                             section.BlendPosition = toBlendPosition;
                             break;
                             

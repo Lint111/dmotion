@@ -171,6 +171,12 @@ namespace DMotion
         /// <summary>Blend position for "to" state (transitions only).</summary>
         public float2 ToBlendPosition;
         
+        /// <summary>
+        /// Normalized time offset for animation start.
+        /// Used by ToBar/GhostTo to continue animation from where transition ended.
+        /// </summary>
+        public float AnimationTimeOffset;
+        
         public float EndTime => StartTime + Duration;
         
         /// <summary>Creates a state section.</summary>
@@ -202,7 +208,7 @@ namespace DMotion
         }
         
         /// <summary>Creates a ghost "to" section (after transition).</summary>
-        public static TimelineSection GhostTo(ushort stateIndex, float duration, float startTime, float2 blendPosition = default)
+        public static TimelineSection GhostTo(ushort stateIndex, float duration, float startTime, float2 blendPosition = default, float animationTimeOffset = 0f)
         {
             return new TimelineSection
             {
@@ -211,7 +217,8 @@ namespace DMotion
                 Duration = duration,
                 StartTime = startTime,
                 BlendPosition = blendPosition,
-                TransitionIndex = -1
+                TransitionIndex = -1,
+                AnimationTimeOffset = animationTimeOffset
             };
         }
         
@@ -251,7 +258,7 @@ namespace DMotion
         }
         
         /// <summary>Creates a TO bar section (TO state at 100% after overlap).</summary>
-        public static TimelineSection ToBar(ushort stateIndex, float duration, float startTime, float2 blendPosition = default)
+        public static TimelineSection ToBar(ushort stateIndex, float duration, float startTime, float2 blendPosition = default, float animationTimeOffset = 0f)
         {
             return new TimelineSection
             {
@@ -260,7 +267,8 @@ namespace DMotion
                 Duration = duration,
                 StartTime = startTime,
                 BlendPosition = blendPosition,
-                TransitionIndex = -1
+                TransitionIndex = -1,
+                AnimationTimeOffset = animationTimeOffset
             };
         }
     }
