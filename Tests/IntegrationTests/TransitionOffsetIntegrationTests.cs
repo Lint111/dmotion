@@ -1,7 +1,5 @@
 using System.Collections;
-using Latios.Kinemation;
 using NUnit.Framework;
-using Unity.Entities;
 using UnityEngine.TestTools;
 
 namespace DMotion.Tests
@@ -11,26 +9,13 @@ namespace DMotion.Tests
     /// </summary>
     public class TransitionOffsetIntegrationTests : IntegrationTestBase
     {
+        // AnimationStateMachineSystem runs UpdateStateMachineJob which handles offsets
         protected override System.Type[] SystemTypes => new[]
         {
-            typeof(UpdateStateMachineJob), // The job that creates states with offset
+            typeof(AnimationStateMachineSystem),
             typeof(BlendAnimationStatesSystem),
             typeof(UpdateAnimationStatesSystem)
         };
-
-        // Note: UpdateStateMachineJob is a job, not a system, but it's run by AnimationStateMachineSystem
-        // which we should include if we want full pipeline. For unit testing CreateState, we might need
-        // to manually run the job or mock it, but here we can rely on the fact that
-        // UpdateStateMachineJob is what we modified.
-        // Wait, UpdateStateMachineJob IS internal and run by AnimationStateMachineSystem.
-        // Let's include AnimationStateMachineSystem.
-
-        protected override void AddSystems()
-        {
-            base.AddSystems();
-            // AnimationStateMachineSystem is required to run UpdateStateMachineJob
-            World.GetOrCreateSystem<AnimationStateMachineSystem>();
-        }
 
         [UnityTest]
         public IEnumerator Transition_RespectsOffset()

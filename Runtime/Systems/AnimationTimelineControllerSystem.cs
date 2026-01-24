@@ -305,11 +305,6 @@ namespace DMotion
                     float fromNormalizedTime = progress;  // FROM continues playing forward
                     float toNormalizedTime = progress;    // TO starts at 0, advances
                     
-                    #if UNITY_EDITOR
-                    // Diagnostic: trace blend position from TimelineSection
-                    UnityEngine.Debug.Log($"[GenerateRenderRequest] Transition: FromBlendPos={section.BlendPosition}, ToBlendPos={section.ToBlendPosition}, Progress={progress:F2}");
-                    #endif
-                    
                     transitionRequest = AnimationTransitionRenderRequest.Create(
                         section.FromStateIndex,
                         section.ToStateIndex,
