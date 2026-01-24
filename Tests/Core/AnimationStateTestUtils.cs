@@ -182,6 +182,8 @@ namespace DMotion.Tests
             var linearBlend = manager.GetBuffer<LinearBlendStateMachineState>(entity);
             var animationStates = manager.GetBuffer<AnimationState>(entity);
             var samplers = manager.GetBuffer<ClipSampler>(entity);
+            var floatParameters = manager.GetBuffer<FloatParameter>(entity);
+            var intParameters = manager.GetBuffer<IntParameter>(entity);
             return LinearBlendStateUtils.NewForStateMachine(stateIndex,
                 stateMachine.StateMachineBlob,
                 stateMachine.ClipsBlob,
@@ -189,7 +191,9 @@ namespace DMotion.Tests
                 ref linearBlend,
                 ref animationStates,
                 ref samplers,
-                1.0f // default speed
+                1.0f, // default speed
+                floatParameters,
+                intParameters
             );
         }
 
@@ -203,6 +207,7 @@ namespace DMotion.Tests
             var directional2DBlend = manager.GetBuffer<Directional2DBlendStateMachineState>(entity);
             var animationStates = manager.GetBuffer<AnimationState>(entity);
             var samplers = manager.GetBuffer<ClipSampler>(entity);
+            var floatParameters = manager.GetBuffer<FloatParameter>(entity);
             return Directional2DBlendStateUtils.NewForStateMachine(stateIndex,
                 stateMachine.StateMachineBlob,
                 stateMachine.ClipsBlob,
@@ -210,7 +215,8 @@ namespace DMotion.Tests
                 ref directional2DBlend,
                 ref animationStates,
                 ref samplers,
-                1.0f // default speed
+                1.0f, // default speed
+                floatParameters
             );
         }
 
