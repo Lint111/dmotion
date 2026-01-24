@@ -54,7 +54,23 @@ namespace DMotion
             float[] clipDurations,
             float[] clipSpeeds)
         {
-            return LinearBlendStateUtils.CalculateEffectiveDuration(weights, clipDurations, clipSpeeds);
+            float weightedDuration = 0f;
+            float totalWeight = 0f;
+            
+            for (int i = 0; i < weights.Length; i++)
+            {
+                if (weights[i] > 0.001f)
+                {
+                    float speed = clipSpeeds[i];
+                    if (speed <= 0.0001f) speed = 1f;
+                    
+                    float duration = clipDurations[i] / speed;
+                    weightedDuration += weights[i] * duration;
+                    totalWeight += weights[i];
+                }
+            }
+            
+            return totalWeight > 0.001f ? weightedDuration / totalWeight : 1f;
         }
 
         /// <summary>
@@ -66,7 +82,22 @@ namespace DMotion
             float[] weights,
             float[] clipSpeeds)
         {
-            return LinearBlendStateUtils.CalculateEffectiveSpeed(weights, clipSpeeds);
+            float weightedSpeed = 0f;
+            float totalWeight = 0f;
+            
+            for (int i = 0; i < weights.Length; i++)
+            {
+                if (weights[i] > 0.001f)
+                {
+                    float speed = clipSpeeds[i];
+                    if (speed <= 0.0001f) speed = 1f;
+                    
+                    weightedSpeed += weights[i] * speed;
+                    totalWeight += weights[i];
+                }
+            }
+            
+            return totalWeight > 0.001f ? weightedSpeed / totalWeight : 1f;
         }
 
         /// <summary>

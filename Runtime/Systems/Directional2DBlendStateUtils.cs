@@ -59,11 +59,21 @@ namespace DMotion
                     clipDurations[i] = clips.Value.clips[clipIndex].duration;
                 }
                 
-                // 4. Calculate effective duration
-                float effectiveDuration = AnimationTimeUtils.CalculateEffectiveDuration(
-                    weights,
-                    clipDurations,
-                    speeds);
+                // 4. Calculate effective duration (weighted average of clip durations)
+                float weightedDuration = 0f;
+                float totalWeight = 0f;
+                for (int i = 0; i < weights.Length; i++)
+                {
+                    if (weights[i] > 0.001f)
+                    {
+                        float speed = speeds[i];
+                        if (speed <= 0.0001f) speed = 1f;
+                        float duration = clipDurations[i] / speed;
+                        weightedDuration += weights[i] * duration;
+                        totalWeight += weights[i];
+                    }
+                }
+                float effectiveDuration = totalWeight > 0.001f ? weightedDuration / totalWeight : 1f;
 
                 initialTime = normalizedOffset * effectiveDuration;
             }
