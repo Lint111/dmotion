@@ -86,14 +86,11 @@ namespace DMotion.Editor
         /// <summary>
         /// Sets up the timeline for transition preview with ghost bars.
         /// Extracts timing info directly from the transition asset to match TransitionTimeline behavior.
+        /// 
+        /// Ghost bar rules (matching TransitionTimeline):
+        /// - FROM ghost (LEFT of from-bar): appears when exitTime==0 OR requestedExitTime > fromStateDuration
+        /// - TO ghost (RIGHT of to-bar): appears when transitionDuration > toStateDuration OR bars end together
         /// </summary>
-        /// <param name="fromState">The state we're transitioning from (can be null for AnyState)</param>
-        /// <param name="toState">The state we're transitioning to</param>
-        /// <param name="transition">The transition definition (contains duration, exit time, curve)</param>
-        /// <param name="transitionIndex">Index of transition for curve lookup</param>
-        /// <param name="curveSource">Source of transition (State or AnyState)</param>
-        /// <param name="fromBlendPosition">Blend position for from-state (for blend trees)</param>
-        /// <param name="toBlendPosition">Blend position for to-state (for blend trees)</param>
         public void SetupTransitionPreview(
             AnimationStateAsset fromState,
             AnimationStateAsset toState,
@@ -117,62 +114,86 @@ namespace DMotion.Editor
             var em = targetWorld.EntityManager;
             
             // Set up animation states for BOTH FROM and TO states
-            // Transition preview requires samplers for both states to blend between them
-            ushort fromIdx = fromIndex >= 0 ? (ushort)fromIndex : (ushort)toIndex; // Fallback to TO if no FROM
+            ushort fromIdx = fromIndex >= 0 ? (ushort)fromIndex : (ushort)toIndex;
             if (!em.SetupTransitionStatesForPreview(targetEntity, fromIdx, (ushort)toIndex))
             {
                 Debug.LogWarning($"[TimelineControlHelper] Failed to set up animation states for transition preview");
                 return;
             }
             
-            // Extract timing from transition asset (matching TransitionTimeline logic)
-            float transitionDuration = transition?.TransitionDuration ?? 0.25f;
-            float exitTime = transition?.EndTime ?? 0f;
+            // Extract timing from transition asset
+            float requestedTransitionDuration = transition?.TransitionDuration ?? 0.25f;
+            float requestedExitTime = transition?.EndTime ?? 0f;
             bool hasExitTime = transition?.HasEndTime ?? false;
             
             // Calculate state durations
             float fromStateDuration = fromState != null ? GetStateDuration(fromState, fromBlendPosition) : 0f;
             float toStateDuration = GetStateDuration(toState, toBlendPosition);
             
-            // Clamp transition duration to to-state duration (can't blend longer than target state)
-            float effectiveTransitionDuration = Mathf.Min(transitionDuration, toStateDuration);
+            // Clamp values for logic (matching TransitionTimeline)
+            float minExitTime = Mathf.Max(0f, fromStateDuration - toStateDuration);
+            float exitTime = Mathf.Clamp(requestedExitTime, minExitTime, fromStateDuration);
+            float transitionDuration = Mathf.Clamp(requestedTransitionDuration, 0.01f, toStateDuration);
             
-            // Calculate section durations for the 5-section layout:
-            // [GhostFrom?] [FromBar] [Transition/Overlap] [ToBar] [GhostTo?]
-            
-            // FromBar: FROM state at 100% weight before transition starts
-            // This is the time from "start of preview" until exit time
-            float fromBarDuration;
-            if (hasExitTime && fromState != null && exitTime > 0)
+            // Calculate FROM visual cycles (ghost bars LEFT of from-bar)
+            // Case 1: Duration shrunk - requestedExitTime exceeds fromStateDuration
+            // Case 2: Context ghost - exitTime is at zero (full overlap)
+            int fromVisualCycles = 1;
+            if (fromStateDuration > 0.001f)
             {
-                // Exit time is when transition starts - FROM plays at 100% until then
-                fromBarDuration = Mathf.Min(exitTime, fromStateDuration);
+                if (requestedExitTime > fromStateDuration)
+                {
+                    fromVisualCycles = Mathf.CeilToInt(requestedExitTime / fromStateDuration);
+                }
+                else if (exitTime < 0.001f && minExitTime < 0.001f)
+                {
+                    fromVisualCycles = 2; // Context ghost for full overlap
+                }
             }
-            else if (fromState != null)
-            {
-                // No exit time - show small from-bar before immediate transition (25% of from state)
-                fromBarDuration = fromStateDuration * 0.25f;
-            }
-            else
-            {
-                fromBarDuration = 0f;
-            }
+            fromVisualCycles = Mathf.Clamp(fromVisualCycles, 1, 4);
             
-            // ToBar: TO state at 100% weight after transition ends
-            // This is the remaining TO state duration after the crossfade completes
-            float toBarDuration = Mathf.Max(0, toStateDuration - effectiveTransitionDuration);
+            // Calculate TO visual cycles (ghost bars RIGHT of to-bar)
+            // Case 1: Duration shrunk - transitionDuration exceeds toStateDuration
+            // Case 2: Bars end together - context ghost
+            int toVisualCycles = 1;
+            if (toStateDuration > 0.001f)
+            {
+                if (requestedTransitionDuration > toStateDuration)
+                {
+                    toVisualCycles = Mathf.CeilToInt(requestedTransitionDuration / toStateDuration);
+                }
+                else
+                {
+                    // Check if bars end together
+                    bool barsEndTogether = (exitTime + toStateDuration) <= (fromStateDuration + 0.001f);
+                    if (barsEndTogether)
+                    {
+                        toVisualCycles = 2; // Context ghost when bars end together
+                    }
+                }
+            }
+            toVisualCycles = Mathf.Clamp(toVisualCycles, 1, 4);
             
-            // Ghost sections mirror their corresponding bars (same state, same duration)
-            // They represent the same cycle of the same state, just shown as context
-            float ghostFromDuration = fromBarDuration;
-            float ghostToDuration = toBarDuration;
+            // Calculate section durations
+            // FromBar: FROM state at 100% weight until exitTime
+            float fromBarDuration = exitTime;
+            
+            // ToBar: TO state at 100% after transition completes
+            // This is the remaining TO state duration after the crossfade
+            float toBarDuration = Mathf.Max(0f, toStateDuration - transitionDuration);
+            
+            // Ghost durations (only if cycles > 1)
+            // GhostFrom goes BEFORE fromBar, showing previous cycles
+            float ghostFromDuration = (fromVisualCycles > 1) ? (fromVisualCycles - 1) * fromStateDuration : 0f;
+            // GhostTo goes AFTER toBar, showing continuation cycles  
+            float ghostToDuration = (toVisualCycles > 1) ? (toVisualCycles - 1) * toStateDuration : 0f;
             
             em.SetupTransitionPreview(
                 targetEntity,
                 fromIndex >= 0 ? (ushort)fromIndex : (ushort)0,
                 (ushort)toIndex,
                 ghostFromDuration,
-                effectiveTransitionDuration,
+                transitionDuration,
                 ghostToDuration,
                 transitionIndex,
                 curveSource,
@@ -181,7 +202,7 @@ namespace DMotion.Editor
                 fromBarDuration,
                 toBarDuration);
             
-            em.ActivateTimelineControl(targetEntity, startPaused: true); // Start paused - user must click play
+            em.ActivateTimelineControl(targetEntity, startPaused: true);
         }
         
         /// <summary>

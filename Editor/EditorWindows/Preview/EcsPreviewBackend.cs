@@ -1,7 +1,5 @@
 using System;
 using System.Linq;
-using System.Threading;
-using Cysharp.Threading.Tasks;
 using DMotion;
 using DMotion.Authoring;
 using Latios.Kinemation;
@@ -37,10 +35,12 @@ namespace DMotion.Editor
         private string errorMessage;
         private bool isInitialized;
         
-        // Async setup state
-        private CancellationTokenSource setupCancellation;
-        private UniTask currentSetupTask;
-        private bool isSetupTaskRunning;
+        // Pending setup state (coroutine-based entity waiting)
+        private enum PendingSetupType { None, State, Transition }
+        private PendingSetupType pendingSetup = PendingSetupType.None;
+        private float setupStartTime;
+        private const float SetupTimeoutSeconds = 30f;
+        private bool isSetupCoroutineRunning;
         
         // Blend positions (with smoothing)
         private float2 blendPosition;
@@ -137,37 +137,8 @@ namespace DMotion.Editor
                 return;
             }
             
-            // Start tracked async setup
-            StartSetupTask(SetupStatePreviewAsync);
-        }
-        
-        /// <summary>
-        /// Async setup for state preview - waits for entity to be available.
-        /// </summary>
-        private async UniTask SetupStatePreviewAsync(CancellationToken token)
-        {
-            errorMessage = "Waiting for animation entity...";
-            
-            // Wait for entity to be available (check every 100ms, timeout after 30s)
-            bool entityFound = await WaitForEntityAsync(token);
-            
-            if (!entityFound)
-            {
-                errorMessage = "No animation entity found.\nEnter Play mode with an animated character.";
-                return;
-            }
-            
-            // Initialize timeline control
-            if (!InitializeTimelineHelper())
-            {
-                return;
-            }
-            
-            // Setup timeline for state preview
-            timelineHelper.SetupStatePreview(currentState, blendPosition);
-            
-            isInitialized = true;
-            errorMessage = null;
+            // Start setup coroutine
+            StartSetupCoroutine(PendingSetupType.State);
         }
         
         public void CreateTransitionPreview(AnimationStateAsset fromState, AnimationStateAsset toState, float duration)
@@ -195,37 +166,111 @@ namespace DMotion.Editor
                 return;
             }
             
-            // Start tracked async setup
-            StartSetupTask(SetupTransitionPreviewAsync);
+            // Start setup coroutine
+            StartSetupCoroutine(PendingSetupType.Transition);
         }
         
         /// <summary>
-        /// Async setup for transition preview - waits for entity to be available.
+        /// Starts the setup coroutine using EditorApplication.update.
         /// </summary>
-        private async UniTask SetupTransitionPreviewAsync(CancellationToken token)
+        private void StartSetupCoroutine(PendingSetupType setupType)
         {
+            pendingSetup = setupType;
+            setupStartTime = (float)EditorApplication.timeSinceStartup;
             errorMessage = "Waiting for animation entity...";
             
-            // Wait for entity to be available
-            bool entityFound = await WaitForEntityAsync(token);
+            if (!isSetupCoroutineRunning)
+            {
+                isSetupCoroutineRunning = true;
+                EditorApplication.update += SetupCoroutineUpdate;
+            }
+        }
+        
+        /// <summary>
+        /// Coroutine update called by EditorApplication.update.
+        /// Polls for entity availability and completes setup when ready.
+        /// </summary>
+        private void SetupCoroutineUpdate()
+        {
+            if (pendingSetup == PendingSetupType.None)
+            {
+                StopSetupCoroutine();
+                return;
+            }
             
-            if (!entityFound)
+            // Check timeout
+            float elapsed = (float)EditorApplication.timeSinceStartup - setupStartTime;
+            if (elapsed > SetupTimeoutSeconds)
             {
                 errorMessage = "No animation entity found.\nEnter Play mode with an animated character.";
+                StopSetupCoroutine();
                 return;
             }
             
-            // Initialize timeline control
+            // Try to select entity
+            if (!TrySelectEntity())
+            {
+                return; // Keep waiting
+            }
+            
+            // Entity found - complete setup based on type
+            bool success = pendingSetup switch
+            {
+                PendingSetupType.State => TryCompleteStateSetup(),
+                PendingSetupType.Transition => TryCompleteTransitionSetup(),
+                _ => false
+            };
+            
+            if (success)
+            {
+                StopSetupCoroutine();
+            }
+        }
+        
+        /// <summary>
+        /// Stops the setup coroutine.
+        /// </summary>
+        private void StopSetupCoroutine()
+        {
+            if (isSetupCoroutineRunning)
+            {
+                EditorApplication.update -= SetupCoroutineUpdate;
+                isSetupCoroutineRunning = false;
+            }
+            pendingSetup = PendingSetupType.None;
+        }
+        
+        /// <summary>
+        /// Completes state preview setup after entity is found.
+        /// </summary>
+        private bool TryCompleteStateSetup()
+        {
             if (!InitializeTimelineHelper())
             {
-                return;
+                errorMessage = "Failed to initialize timeline control";
+                return true;
             }
             
-            // Find transition definition for curve lookup and timing
+            timelineHelper.SetupStatePreview(currentState, blendPosition);
+            isInitialized = true;
+            errorMessage = null;
+            return true;
+        }
+        
+        /// <summary>
+        /// Completes transition preview setup after entity is found.
+        /// </summary>
+        private bool TryCompleteTransitionSetup()
+        {
+            if (!InitializeTimelineHelper())
+            {
+                errorMessage = "Failed to initialize timeline control";
+                return true;
+            }
+            
             var (transitionIndex, curveSource) = FindTransitionIndices(transitionFromState, transitionToState);
             var (transition, _, _, _) = GetTransitionInfo();
             
-            // Setup timeline for transition preview
             timelineHelper.SetupTransitionPreview(
                 transitionFromState,
                 transitionToState,
@@ -237,99 +282,45 @@ namespace DMotion.Editor
             
             isInitialized = true;
             errorMessage = null;
+            return true;
         }
         
         /// <summary>
-        /// Starts and tracks an async setup task with proper cancellation and error handling.
+        /// Tries to select an animation entity.
         /// </summary>
-        private void StartSetupTask(Func<CancellationToken, UniTask> setupFunc)
+        private bool TrySelectEntity()
         {
-            setupCancellation = new CancellationTokenSource();
-            isSetupTaskRunning = true;
+            // Auto-setup preview scene if needed
+            if (!sceneManager.IsSetup && previewModel != null)
+            {
+                sceneManager.Setup(stateMachineAsset, previewModel);
+            }
             
-            // Run the setup task and track completion
-            currentSetupTask = RunSetupWithErrorHandling(setupFunc, setupCancellation.Token);
-        }
-        
-        /// <summary>
-        /// Wraps the setup function with error handling and completion tracking.
-        /// </summary>
-        private async UniTask RunSetupWithErrorHandling(Func<CancellationToken, UniTask> setupFunc, CancellationToken token)
-        {
-            try
-            {
-                await setupFunc(token);
-            }
-            catch (OperationCanceledException)
-            {
-                // Setup was cancelled - this is expected when switching previews
-            }
-            catch (Exception e)
-            {
-                errorMessage = $"Setup failed: {e.Message}";
-                Debug.LogException(e);
-            }
-            finally
-            {
-                isSetupTaskRunning = false;
-            }
-        }
-        
-        /// <summary>
-        /// Waits for an animation entity to become available.
-        /// </summary>
-        private async UniTask<bool> WaitForEntityAsync(CancellationToken token)
-        {
-            const int maxAttempts = 300; // 30 seconds at 100ms intervals
-            const int delayMs = 100;
+            // Refresh and try to select entity
+            entityBrowser.RefreshEntityList();
             
-            for (int i = 0; i < maxAttempts; i++)
+            if (!entityBrowser.HasSelection)
             {
-                token.ThrowIfCancellationRequested();
-                
-                // Auto-setup preview scene if needed
-                if (!sceneManager.IsSetup && previewModel != null)
+                if (stateMachineAsset != null)
                 {
-                    sceneManager.Setup(stateMachineAsset, previewModel);
+                    entityBrowser.SelectByStateMachine(stateMachineAsset);
                 }
-                
-                // Refresh and try to select entity
-                entityBrowser.RefreshEntityList();
                 
                 if (!entityBrowser.HasSelection)
                 {
-                    if (stateMachineAsset != null)
-                    {
-                        entityBrowser.SelectByStateMachine(stateMachineAsset);
-                    }
-                    
-                    if (!entityBrowser.HasSelection)
-                    {
-                        entityBrowser.AutoSelectFirst();
-                    }
+                    entityBrowser.AutoSelectFirst();
                 }
-                
-                if (entityBrowser.HasSelection)
-                {
-                    return true;
-                }
-                
-                // Wait before retry
-                await UniTask.Delay(delayMs, cancellationToken: token);
             }
             
-            return false;
+            return entityBrowser.HasSelection;
         }
         
         /// <summary>
-        /// Cancels any pending async setup.
+        /// Cancels any pending setup.
         /// </summary>
         private void CancelPendingSetup()
         {
-            setupCancellation?.Cancel();
-            setupCancellation?.Dispose();
-            setupCancellation = null;
-            isSetupTaskRunning = false;
+            StopSetupCoroutine();
         }
         
         public void SetPreviewModel(GameObject model)
@@ -479,8 +470,8 @@ namespace DMotion.Editor
         {
             bool needsRepaint = false;
             
-            // If async setup is in progress, just request repaint to update waiting message
-            if (isSetupTaskRunning)
+            // If setup coroutine is in progress, just request repaint to update waiting message
+            if (pendingSetup != PendingSetupType.None)
             {
                 return true;
             }
