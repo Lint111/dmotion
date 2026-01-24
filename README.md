@@ -35,11 +35,32 @@ I've built this tool with usability and performance in mind. *The runtime is 100
 - Multiple layers
 - Skeleton Masks
 
-## Instalation
+## Installation
 
 ### Requirements
 
 DMotion requires [URP](https://docs.unity3d.com/Packages/com.unity.render-pipelines.universal@12.0/manual/InstallURPIntoAProject.html) or [HDRP](https://docs.unity3d.com/Packages/com.unity.render-pipelines.high-definition@12.1/manual/Upgrading-To-HDRP.html), and [ShaderGraph](https://docs.unity3d.com/Packages/com.unity.shadergraph@14.0/manual/Getting-Started.html) to be installed. 
+
+### OpenUPM Scoped Registry (Required)
+
+DMotion uses [UniTask](https://github.com/Cysharp/UniTask) for async operations. Before installing, add the OpenUPM scoped registry to your project's `Packages/manifest.json`:
+
+```json
+{
+  "scopedRegistries": [
+    {
+      "name": "OpenUPM",
+      "url": "https://package.openupm.com",
+      "scopes": [
+        "com.cysharp"
+      ]
+    }
+  ],
+  "dependencies": {
+    ...
+  }
+}
+```
 
 ### Install via Package Manager
 
