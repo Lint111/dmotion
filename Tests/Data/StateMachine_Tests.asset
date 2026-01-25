@@ -73,7 +73,7 @@ MonoBehaviour:
   OutTransitions:
   - ToState: {fileID: 5953759798062009019}
     HasEndTime: 1
-    EndTime: 0.776119
+    EndTime: 1.3086302
     TransitionDuration: 2.0117064
     Offset: 0
     Conditions:
