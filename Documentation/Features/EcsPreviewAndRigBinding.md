@@ -2,7 +2,7 @@
 
 ## Status: ✅ COMPLETE (DMotion Scope)
 
-**Completed:** 7/8 phases (Phase 4 deferred, Phase 8 in Mechination repo)
+**Completed:** 8/8 phases (Phase 8 is Mechination repo scope)
 
 | Phase | Status | Description |
 |-------|--------|-------------|
@@ -10,7 +10,7 @@
 | 1 | ✅ | Rig Binding Data Model |
 | 2 | ✅ | Preview Session Abstraction |
 | 3 | ✅ | Rig-Aware Preview |
-| 4 | ⏸️ | Asset Creation Workflow (deferred - low priority) |
+| 4 | ✅ | Asset Creation Workflow |
 | 5 | ✅ | ECS Preview World Service |
 | 6 | ✅ | ECS Preview Rendering |
 | 7 | ✅ | Mode Toggle UI |
@@ -291,30 +291,33 @@ Resolution order in preview window:
 - Model extracted from clips when no explicit selection
 - Camera state preserved across model/mode changes
 
-### Phase 4: Asset Creation Workflow ⏸️ DEFERRED (Low Priority)
+### Phase 4: Asset Creation Workflow ✅ COMPLETE
 
 **Goal:** "Create DMotion Controller from Rig" context menu
 
 **Changes:**
 - Add context menu on `UnityEngine.Avatar` (and later other armature types):
-  - `Create/DMotion/State Machine Asset`
+  - `Assets/Create/DMotion/State Machine from Avatar`
+  - `Assets/Create/DMotion/State Machine from Model`
 - Creates new `StateMachineAsset` with:
-  - `BoundArmatureData = selected`
+  - `BoundArmatureData = selected avatar`
   - `RigBindingStatus = Resolved`
   - `RigBindingSource = UserSelected`
 
-**Files to add/modify:**
-- `Editor/CustomEditors/ArmatureContextMenu.cs` (new)
+**Files added:**
+- `Editor/CustomEditors/ArmatureContextMenu.cs`
 
 **Acceptance Criteria:**
-- [ ] Context menu appears on Avatar assets (including sub-assets)
-- [ ] Created asset has correct binding
-- [ ] Preview works immediately without prompts
+- [x] Context menu appears on Avatar assets (including sub-assets)
+- [x] Context menu appears on Model assets (FBX, etc.)
+- [x] Created asset has correct binding
+- [x] Preview works immediately without prompts
 
-**Deferral Reason:**
-- Nice-to-have workflow enhancement
-- Current workflow (create asset, assign model in preview) is functional
-- Can be added later if requested
+**Implementation Notes:**
+- Two menu items: "State Machine from Avatar" and "State Machine from Model"
+- Model path extracts Avatar from ModelImporter
+- Logs available animation clips from source model for reference
+- Asset created in same folder as source, with unique name
 
 ### Phase 5: ECS Preview World Service ✅ COMPLETE
 
