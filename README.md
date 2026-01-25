@@ -13,24 +13,28 @@ I've built this tool with usability and performance in mind. *The runtime is 100
 
 ![image](https://user-images.githubusercontent.com/15620434/181847356-0f04a5e1-c5d4-4f6d-99c5-ecee51a379bb.png)
 
-### Current Features (v0.3.4)
+### Current Features
 
-- Fully bursted runtime
-- State Machine visual editor
-- Transitions: Boolean, Int, Enum and End Time
+- Fully bursted runtime (~6x faster than Mecanim)
+- State Machine visual editor with graph-based workflow
+- **SubStateMachines** - Visual hierarchy for organizing states (like Mecanim)
+- **1D Blend Tree** - Linear blend between clips based on parameter
+- **2D Blend Tree** - Cartesian and freeform directional blending
+- Transitions: Boolean, Int, Enum, End Time, and **Any State** transitions
+- **Exit transitions** - Explicit exit nodes for cleaner flow
+- **Transition blend curves** - Custom easing for smooth transitions
+- **Speed parameters** - Dynamic playback speed control
 - Simple API for playing clips through code (see samples)
-- 1D Blend Tree
 - Animation Events
-- Root Motion (with WriteGroup support, if you need to override default behaviour)
+- Root Motion (with WriteGroup support for custom behavior)
 - Object Attachment
 - Support for optimized and non-optimized skeletons
 - State Machine Visual Debugging
+- **ECS Preview Mode** - True runtime preview in editor using actual ECS systems
 
 ### Planned Features
 
-- 2D Blend Tree (cartesian/freeform)
 - State Machine Override (a.k.a Animator Override Controller)
-- SubStates
 - IK Support
 - Multiple layers
 - Skeleton Masks
