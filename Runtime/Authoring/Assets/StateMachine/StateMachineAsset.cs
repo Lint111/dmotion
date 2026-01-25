@@ -213,7 +213,7 @@ namespace DMotion.Authoring
                 var existing = _parameterLinks[i];
                 if (existing.SourceParameter == link.SourceParameter &&
                     existing.TargetParameter == link.TargetParameter &&
-                    existing.SubMachine == link.SubMachine)
+                    existing.NestedContainer == link.NestedContainer)
                 {
                     return;
                 }
@@ -230,14 +230,20 @@ namespace DMotion.Authoring
             }
         }
 
-        /// <summary>Removes all links for a specific SubStateMachine.</summary>
-        internal void RemoveLinksForSubMachine(SubStateMachineStateAsset subMachine)
+        /// <summary>Removes all links for a specific nested container (SubStateMachine or Layer).</summary>
+        internal void RemoveLinksForContainer(INestedStateMachineContainer container)
         {
             for (int i = _parameterLinks.Count - 1; i >= 0; i--)
             {
-                if (_parameterLinks[i].SubMachine == subMachine)
+                if (_parameterLinks[i].NestedContainer == container)
                     _parameterLinks.RemoveAt(i);
             }
+        }
+        
+        /// <summary>Removes all links for a specific SubStateMachine (backwards compatibility).</summary>
+        internal void RemoveLinksForSubMachine(SubStateMachineStateAsset subMachine)
+        {
+            RemoveLinksForContainer(subMachine);
         }
 
         /// <summary>Removes all links that reference a specific parameter (as source or target).</summary>
@@ -251,24 +257,30 @@ namespace DMotion.Authoring
             }
         }
 
-        /// <summary>Removes all exclusion markers for a specific SubStateMachine.</summary>
-        internal void RemoveExclusionsForSubMachine(SubStateMachineStateAsset subMachine)
+        /// <summary>Removes all exclusion markers for a specific nested container.</summary>
+        internal void RemoveExclusionsForContainer(INestedStateMachineContainer container)
         {
             for (int i = _parameterLinks.Count - 1; i >= 0; i--)
             {
                 var link = _parameterLinks[i];
-                if (link.SubMachine == subMachine && link.IsExclusion)
+                if (link.NestedContainer == container && link.IsExclusion)
                     _parameterLinks.RemoveAt(i);
             }
         }
+        
+        /// <summary>Removes all exclusion markers for a specific SubStateMachine (backwards compatibility).</summary>
+        internal void RemoveExclusionsForSubMachine(SubStateMachineStateAsset subMachine)
+        {
+            RemoveExclusionsForContainer(subMachine);
+        }
 
-        /// <summary>Removes a specific link matching source, target, and subMachine.</summary>
-        internal void RemoveLink(AnimationParameterAsset source, AnimationParameterAsset target, SubStateMachineStateAsset subMachine)
+        /// <summary>Removes a specific link matching source, target, and container.</summary>
+        internal void RemoveLink(AnimationParameterAsset source, AnimationParameterAsset target, INestedStateMachineContainer container)
         {
             for (int i = _parameterLinks.Count - 1; i >= 0; i--)
             {
                 var link = _parameterLinks[i];
-                if (link.SubMachine == subMachine && 
+                if (link.NestedContainer == container && 
                     link.SourceParameter == source && 
                     link.TargetParameter == target)
                 {
@@ -277,12 +289,12 @@ namespace DMotion.Authoring
             }
         }
 
-        /// <summary>Finds a parameter link for a target parameter in a SubStateMachine.</summary>
-        public ParameterLink? FindLinkForTarget(AnimationParameterAsset targetParam, SubStateMachineStateAsset subMachine)
+        /// <summary>Finds a parameter link for a target parameter in a nested container.</summary>
+        public ParameterLink? FindLinkForTarget(AnimationParameterAsset targetParam, INestedStateMachineContainer container)
         {
             foreach (var link in _parameterLinks)
             {
-                if (link.TargetParameter == targetParam && link.SubMachine == subMachine)
+                if (link.TargetParameter == targetParam && link.NestedContainer == container)
                     return link;
             }
             return null;

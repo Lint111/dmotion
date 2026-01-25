@@ -305,7 +305,8 @@ namespace DMotion.Editor
                     EditorGUILayout.LabelField(link.SourceParameter.name, GUILayout.Width(120));
                     EditorGUILayout.LabelField("->", GUILayout.Width(25));
                     EditorGUILayout.LabelField(link.TargetParameter.name, GUILayout.Width(120));
-                    EditorGUILayout.LabelField(StringBuilderCache.FormatInName(link.SubMachine.name), EditorStyles.miniLabel);
+                    var containerName = link.NestedContainer?.name ?? "(unknown)";
+                    EditorGUILayout.LabelField(StringBuilderCache.FormatInName(containerName), EditorStyles.miniLabel);
                     
                     if (link.Transform.HasTransform)
                     {

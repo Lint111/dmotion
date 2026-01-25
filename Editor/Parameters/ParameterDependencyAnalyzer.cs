@@ -6,23 +6,23 @@ using UnityEngine;
 namespace DMotion.Editor
 {
     /// <summary>
-    /// Analyzes parameter requirements for SubStateMachines and provides
-    /// auto-resolution and dependency tracking utilities.
+    /// Analyzes parameter requirements for nested state machine containers (SubStateMachines and Layers)
+    /// and provides auto-resolution and dependency tracking utilities.
     /// </summary>
     public static class ParameterDependencyAnalyzer
     {
         /// <summary>
-        /// Analyzes a SubStateMachine and returns all parameters it requires.
+        /// Analyzes a nested container and returns all parameters it requires.
         /// Recursively analyzes nested SubStateMachines.
         /// </summary>
-        public static List<ParameterRequirement> AnalyzeRequiredParameters(SubStateMachineStateAsset subMachine)
+        public static List<ParameterRequirement> AnalyzeRequiredParameters(INestedStateMachineContainer container)
         {
             var requirements = new List<ParameterRequirement>();
 
-            if (subMachine?.NestedStateMachine == null)
+            if (container?.NestedStateMachine == null)
                 return requirements;
 
-            AnalyzeStateMachineRecursive(subMachine.NestedStateMachine, requirements);
+            AnalyzeStateMachineRecursive(container.NestedStateMachine, requirements);
 
             // Deduplicate by parameter (keep first occurrence)
             var seen = new HashSet<AnimationParameterAsset>();
@@ -36,6 +36,14 @@ namespace DMotion.Editor
                 }
             }
             return deduplicated;
+        }
+        
+        /// <summary>
+        /// Analyzes a SubStateMachine and returns all parameters it requires (backwards compatibility).
+        /// </summary>
+        public static List<ParameterRequirement> AnalyzeRequiredParameters(SubStateMachineStateAsset subMachine)
+        {
+            return AnalyzeRequiredParameters((INestedStateMachineContainer)subMachine);
         }
 
         private static void AnalyzeStateMachineRecursive(
@@ -149,24 +157,24 @@ namespace DMotion.Editor
         }
 
         /// <summary>
-        /// Auto-resolves parameter dependencies when a SubStateMachine is added.
+        /// Auto-resolves parameter dependencies when a nested container is added.
         /// Creates missing parameters and establishes links.
         /// Skips requirements that already have a link established.
         /// </summary>
         public static ParameterResolutionResult ResolveParameterDependencies(
             StateMachineAsset parentMachine,
-            SubStateMachineStateAsset subMachine)
+            INestedStateMachineContainer container)
         {
             var result = new ParameterResolutionResult();
-            var requirements = AnalyzeRequiredParameters(subMachine);
+            var requirements = AnalyzeRequiredParameters(container);
 
-            // Build set of already-linked target parameters for this SubMachine
+            // Build set of already-linked target parameters for this container
             var linkedTargets = new HashSet<AnimationParameterAsset>();
             var parentLinks = parentMachine.ParameterLinks;
             for (int i = 0; i < parentLinks.Count; i++)
             {
                 var link = parentLinks[i];
-                if (link.SubMachine == subMachine && link.TargetParameter != null)
+                if (link.NestedContainer == container && link.TargetParameter != null)
                 {
                     linkedTargets.Add(link.TargetParameter);
                 }
@@ -184,11 +192,14 @@ namespace DMotion.Editor
                 if (existingParam != null)
                 {
                     // Create link to existing parameter
-                    var link = ParameterLink.Direct(existingParam, requirement.Parameter, subMachine);
+                    var link = ParameterLink.Direct(existingParam, requirement.Parameter, container);
                     result.ParameterLinks.Add(link);
 
-                    // Track dependency
-                    existingParam.AddRequiredBy(subMachine);
+                    // Track dependency (only for SubStateMachines for backwards compatibility)
+                    if (container is SubStateMachineStateAsset subMachine)
+                    {
+                        existingParam.AddRequiredBy(subMachine);
+                    }
                 }
                 else
                 {
@@ -206,7 +217,7 @@ namespace DMotion.Editor
         /// </summary>
         public static List<AnimationParameterAsset> CreateMissingParameters(
             StateMachineAsset parentMachine,
-            SubStateMachineStateAsset subMachine,
+            INestedStateMachineContainer container,
             List<ParameterRequirement> missingRequirements,
             string assetPath)
         {
@@ -219,7 +230,12 @@ namespace DMotion.Editor
 
                 newParam.name = requirement.Parameter.name;
                 newParam.IsAutoGenerated = true;
-                newParam.AddRequiredBy(subMachine);
+                
+                // Track dependency (only for SubStateMachines for backwards compatibility)
+                if (container is SubStateMachineStateAsset subMachine)
+                {
+                    newParam.AddRequiredBy(subMachine);
+                }
 
                 // Add to parent machine
                 parentMachine.Parameters.Add(newParam);

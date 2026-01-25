@@ -50,10 +50,11 @@ namespace DMotion.Authoring
     }
 
     /// <summary>
-    /// Links a source parameter in the parent scope to a target parameter in a child SubStateMachine.
+    /// Links a source parameter in the parent scope to a target parameter in a nested state machine.
     /// This allows reusing parameters across hierarchy levels without duplication.
+    /// Works with both SubStateMachines and Layers.
     /// 
-    /// Example: Parent has "MovementSpeed", child SubStateMachine needs "Speed"
+    /// Example: Parent has "MovementSpeed", child has "Speed"
     /// A ParameterLink maps MovementSpeed -> Speed so they share the same runtime value.
     /// </summary>
     [Serializable]
@@ -66,15 +67,32 @@ namespace DMotion.Authoring
         public AnimationParameterAsset SourceParameter;
 
         /// <summary>
-        /// The target parameter in the child SubStateMachine.
+        /// The target parameter in the nested state machine.
         /// At runtime, this will resolve to the source parameter's index.
         /// </summary>
         public AnimationParameterAsset TargetParameter;
 
         /// <summary>
-        /// The SubStateMachine where this link applies.
+        /// The nested container (SubStateMachine or Layer) where this link applies.
+        /// Stored as AnimationStateAsset for Unity serialization, but must implement INestedStateMachineContainer.
         /// </summary>
-        public SubStateMachineStateAsset SubMachine;
+        [SerializeField]
+        private AnimationStateAsset nestedContainer;
+        
+        /// <summary>
+        /// Gets the nested container as the interface type.
+        /// </summary>
+        public INestedStateMachineContainer NestedContainer => nestedContainer as INestedStateMachineContainer;
+        
+        /// <summary>
+        /// Gets the nested container as SubStateMachineStateAsset (for backwards compatibility).
+        /// </summary>
+        public SubStateMachineStateAsset SubMachine => nestedContainer as SubStateMachineStateAsset;
+        
+        /// <summary>
+        /// Gets the nested container as LayerStateAsset.
+        /// </summary>
+        public LayerStateAsset Layer => nestedContainer as LayerStateAsset;
 
         /// <summary>
         /// Optional value transformation (scale, offset).
@@ -85,12 +103,12 @@ namespace DMotion.Authoring
         public ParameterLink(
             AnimationParameterAsset source,
             AnimationParameterAsset target,
-            SubStateMachineStateAsset subMachine,
+            INestedStateMachineContainer container,
             ParameterTransform transform = default)
         {
             SourceParameter = source;
             TargetParameter = target;
-            SubMachine = subMachine;
+            nestedContainer = container as AnimationStateAsset;
             Transform = transform.HasTransform ? transform : ParameterTransform.Identity;
         }
 
@@ -100,18 +118,18 @@ namespace DMotion.Authoring
         public static ParameterLink Direct(
             AnimationParameterAsset source,
             AnimationParameterAsset target,
-            SubStateMachineStateAsset subMachine)
+            INestedStateMachineContainer container)
         {
-            return new ParameterLink(source, target, subMachine, ParameterTransform.Identity);
+            return new ParameterLink(source, target, container, ParameterTransform.Identity);
         }
 
         /// <summary>
-        /// True if this is a valid link (has source, target, and submachine).
+        /// True if this is a valid link (has source, target, and container).
         /// </summary>
         public bool IsValid =>
             SourceParameter != null &&
             TargetParameter != null &&
-            SubMachine != null;
+            nestedContainer != null;
 
         /// <summary>
         /// True if this is an exclusion marker (null source means "don't auto-match this target").
@@ -119,25 +137,25 @@ namespace DMotion.Authoring
         public bool IsExclusion =>
             SourceParameter == null &&
             TargetParameter != null &&
-            SubMachine != null;
+            nestedContainer != null;
 
         /// <summary>
         /// Creates an exclusion marker that prevents auto-matching for a target parameter.
         /// </summary>
         public static ParameterLink Exclusion(
             AnimationParameterAsset target,
-            SubStateMachineStateAsset subMachine)
+            INestedStateMachineContainer container)
         {
-            return new ParameterLink(null, target, subMachine, ParameterTransform.Identity);
+            return new ParameterLink(null, target, container, ParameterTransform.Identity);
         }
 
         public override string ToString()
         {
             var sourceName = SourceParameter != null ? SourceParameter.name : "null";
             var targetName = TargetParameter != null ? TargetParameter.name : "null";
-            var subMachineName = SubMachine != null ? SubMachine.name : "null";
+            var containerName = nestedContainer != null ? nestedContainer.name : "null";
             var transformStr = Transform.HasTransform ? $" (x{Transform.Scale}+{Transform.Offset})" : "";
-            return $"{sourceName} -> {targetName} in {subMachineName}{transformStr}";
+            return $"{sourceName} -> {targetName} in {containerName}{transformStr}";
         }
     }
 
