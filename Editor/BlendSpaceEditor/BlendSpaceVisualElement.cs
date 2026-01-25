@@ -176,7 +176,7 @@ namespace DMotion.Editor
         {
             // Load stylesheet
             var uss = AssetDatabase.LoadAssetAtPath<StyleSheet>(
-                "Packages/com.gamedevpro.dmotion/Editor/EditorWindows/BlendSpaceVisualElement.uss");
+                "Packages/com.gamedevpro.dmotion/Editor/BlendSpaceEditor/BlendSpaceVisualElement.uss");
             if (uss != null)
             {
                 styleSheets.Add(uss);

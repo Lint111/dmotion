@@ -17,7 +17,7 @@ namespace DMotion.Editor
     {
         #region Constants
         
-        private const string UssPath = "Packages/com.gamedevpro.dmotion/Editor/EditorWindows/Preview/StateContent/BlendContent.uss";
+        private const string UssPath = "Packages/com.gamedevpro.dmotion/Editor/Preview/StateContent/BlendContent.uss";
         
         // Use shared constants
         protected const float FloatFieldWidth = PreviewEditorConstants.FloatFieldWidth;

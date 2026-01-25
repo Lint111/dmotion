@@ -15,7 +15,7 @@ namespace DMotion.Editor
     {
         #region Constants
         
-        private const string UssPath = "Packages/com.gamedevpro.dmotion/Editor/EditorWindows/Preview/TransitionInspector.uss";
+        private const string UssPath = "Packages/com.gamedevpro.dmotion/Editor/Preview/Inspectors/TransitionInspector.uss";
         private const float MaxTransitionDuration = 2f;
         private const float MaxExitTime = 5f;
         

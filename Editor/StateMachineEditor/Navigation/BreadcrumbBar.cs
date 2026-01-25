@@ -13,7 +13,7 @@ namespace DMotion.Editor
     [UxmlElement]
     internal partial class BreadcrumbBar : VisualElement
     {
-        private const string UssPath = "Packages/com.gamedevpro.dmotion/Editor/EditorWindows/BreadcrumbBar.uss";
+        private const string UssPath = "Packages/com.gamedevpro.dmotion/Editor/StateMachineEditor/Navigation/BreadcrumbBar.uss";
         
         /// <summary>
         /// Fired when user clicks a breadcrumb to navigate to that level.
