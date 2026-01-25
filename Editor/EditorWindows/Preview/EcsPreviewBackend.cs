@@ -173,6 +173,13 @@ namespace DMotion.Editor
                 return;
             }
             
+            // Only auto-setup in Play mode - ECS world doesn't exist in Edit mode
+            if (!Application.isPlaying)
+            {
+                errorMessage = "Enter Play mode to preview\nECS animations";
+                return;
+            }
+            
             // Start setup coroutine
             StartSetupCoroutine(PendingSetupType.State);
         }
@@ -199,6 +206,13 @@ namespace DMotion.Editor
             if (stateMachineAsset == null)
             {
                 errorMessage = $"Could not find StateMachineAsset\nfor state: {toState.name}";
+                return;
+            }
+            
+            // Only auto-setup in Play mode - ECS world doesn't exist in Edit mode
+            if (!Application.isPlaying)
+            {
+                errorMessage = "Enter Play mode to preview\nECS animations";
                 return;
             }
             
