@@ -175,7 +175,7 @@ namespace DMotion.Editor
             //   exitTime = max(0, fromDuration - transitionDuration)
             // For single clip states: use explicit exit time from transition asset
             bool fromIsBlendState = fromState != null && IsBlendState(fromState);
-            bool toIsBlendState = IsBlendState(toState);
+            bool toIsBlendState = toState != null && IsBlendState(toState);
             
             float fromBarDuration;
             if (fromIsBlendState || toIsBlendState)
