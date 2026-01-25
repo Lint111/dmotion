@@ -138,13 +138,14 @@ namespace DMotion
     
     /// <summary>
     /// Defines a section of the animation preview timeline.
-    /// The timeline is composed of sections: [GhostFrom?] [Transition] [GhostTo?] or just [State].
+    /// Each section is a self-contained rendering block with its own 0→1 progress
+    /// that maps to a specific animation time range.
     /// </summary>
     internal struct TimelineSection : IBufferElementData
     {
         public TimelineSectionType Type;
         
-        /// <summary>State index for State/Ghost sections.</summary>
+        /// <summary>State index for single-state sections (State/Ghost/FromBar/ToBar).</summary>
         public ushort StateIndex;
         
         /// <summary>From state for Transition sections.</summary>
@@ -171,15 +172,27 @@ namespace DMotion
         /// <summary>Blend position for "to" state (transitions only).</summary>
         public float2 ToBlendPosition;
         
-        /// <summary>
-        /// Normalized time offset for animation start.
-        /// Used by ToBar/GhostTo to continue animation from where transition ended.
-        /// </summary>
-        public float AnimationTimeOffset;
+        /// <summary>Animation normalized time at section progress=0.</summary>
+        public float AnimStartTime;
+        
+        /// <summary>Animation normalized time at section progress=1.</summary>
+        public float AnimEndTime;
+        
+        /// <summary>TO state animation normalized time at section progress=0 (transitions only).</summary>
+        public float ToAnimStartTime;
+        
+        /// <summary>TO state animation normalized time at section progress=1 (transitions only).</summary>
+        public float ToAnimEndTime;
         
         public float EndTime => StartTime + Duration;
         
-        /// <summary>Creates a state section.</summary>
+        /// <summary>Gets the animation normalized time for a given section progress (0-1).</summary>
+        public float GetAnimTime(float progress) => math.lerp(AnimStartTime, AnimEndTime, progress);
+        
+        /// <summary>Gets the TO state animation normalized time for a given section progress (transitions only).</summary>
+        public float GetToAnimTime(float progress) => math.lerp(ToAnimStartTime, ToAnimEndTime, progress);
+        
+        /// <summary>Creates a state section (full clip, 0→1).</summary>
         public static TimelineSection State(ushort stateIndex, float duration, float startTime, float2 blendPosition = default)
         {
             return new TimelineSection
@@ -189,11 +202,13 @@ namespace DMotion
                 Duration = duration,
                 StartTime = startTime,
                 BlendPosition = blendPosition,
+                AnimStartTime = 0f,
+                AnimEndTime = 1f,
                 TransitionIndex = -1
             };
         }
         
-        /// <summary>Creates a ghost "from" section (before transition).</summary>
+        /// <summary>Creates a ghost "from" section (previous cycle, 0→1).</summary>
         public static TimelineSection GhostFrom(ushort stateIndex, float duration, float startTime, float2 blendPosition = default)
         {
             return new TimelineSection
@@ -203,12 +218,14 @@ namespace DMotion
                 Duration = duration,
                 StartTime = startTime,
                 BlendPosition = blendPosition,
+                AnimStartTime = 0f,
+                AnimEndTime = 1f,
                 TransitionIndex = -1
             };
         }
         
-        /// <summary>Creates a ghost "to" section (after transition).</summary>
-        public static TimelineSection GhostTo(ushort stateIndex, float duration, float startTime, float2 blendPosition = default, float animationTimeOffset = 0f)
+        /// <summary>Creates a ghost "to" section (continuation cycle).</summary>
+        public static TimelineSection GhostTo(ushort stateIndex, float duration, float startTime, float2 blendPosition, float animStartTime, float animEndTime)
         {
             return new TimelineSection
             {
@@ -217,34 +234,42 @@ namespace DMotion
                 Duration = duration,
                 StartTime = startTime,
                 BlendPosition = blendPosition,
-                TransitionIndex = -1,
-                AnimationTimeOffset = animationTimeOffset
+                AnimStartTime = animStartTime,
+                AnimEndTime = animEndTime,
+                TransitionIndex = -1
             };
         }
         
-        /// <summary>Creates a transition section.</summary>
+        /// <summary>Creates a transition section with animation time ranges for both states.</summary>
         public static TimelineSection Transition(
             ushort fromStateIndex, ushort toStateIndex,
             float duration, float startTime,
             short transitionIndex, TransitionSource curveSource,
-            float2 fromBlendPosition = default, float2 toBlendPosition = default)
+            float2 fromBlendPosition, float2 toBlendPosition,
+            float fromAnimStart, float fromAnimEnd,
+            float toAnimStart, float toAnimEnd)
         {
             return new TimelineSection
             {
                 Type = TimelineSectionType.Transition,
                 FromStateIndex = fromStateIndex,
+                StateIndex = fromStateIndex, // Also set StateIndex for consistency
                 ToStateIndex = toStateIndex,
                 Duration = duration,
                 StartTime = startTime,
                 TransitionIndex = transitionIndex,
                 CurveSource = curveSource,
                 BlendPosition = fromBlendPosition,
-                ToBlendPosition = toBlendPosition
+                ToBlendPosition = toBlendPosition,
+                AnimStartTime = fromAnimStart,
+                AnimEndTime = fromAnimEnd,
+                ToAnimStartTime = toAnimStart,
+                ToAnimEndTime = toAnimEnd
             };
         }
         
-        /// <summary>Creates a FROM bar section (FROM state at 100% before overlap).</summary>
-        public static TimelineSection FromBar(ushort stateIndex, float duration, float startTime, float2 blendPosition = default)
+        /// <summary>Creates a FROM bar section with animation time range.</summary>
+        public static TimelineSection FromBar(ushort stateIndex, float duration, float startTime, float2 blendPosition, float animStartTime, float animEndTime)
         {
             return new TimelineSection
             {
@@ -253,12 +278,14 @@ namespace DMotion
                 Duration = duration,
                 StartTime = startTime,
                 BlendPosition = blendPosition,
+                AnimStartTime = animStartTime,
+                AnimEndTime = animEndTime,
                 TransitionIndex = -1
             };
         }
         
-        /// <summary>Creates a TO bar section (TO state at 100% after overlap).</summary>
-        public static TimelineSection ToBar(ushort stateIndex, float duration, float startTime, float2 blendPosition = default, float animationTimeOffset = 0f)
+        /// <summary>Creates a TO bar section with animation time range.</summary>
+        public static TimelineSection ToBar(ushort stateIndex, float duration, float startTime, float2 blendPosition, float animStartTime, float animEndTime)
         {
             return new TimelineSection
             {
@@ -267,8 +294,9 @@ namespace DMotion
                 Duration = duration,
                 StartTime = startTime,
                 BlendPosition = blendPosition,
-                TransitionIndex = -1,
-                AnimationTimeOffset = animationTimeOffset
+                AnimStartTime = animStartTime,
+                AnimEndTime = animEndTime,
+                TransitionIndex = -1
             };
         }
     }

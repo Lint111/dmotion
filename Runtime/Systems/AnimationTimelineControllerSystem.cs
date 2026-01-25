@@ -267,7 +267,7 @@ namespace DMotion
                     activeRequest = ActiveRenderRequest.State;
                     stateRequest = AnimationStateRenderRequest.Create(
                         section.StateIndex,
-                        progress,
+                        section.GetAnimTime(progress),
                         section.BlendPosition,
                         TimelineSectionType.State);
                     transitionRequest = AnimationTransitionRenderRequest.None;
@@ -277,41 +277,35 @@ namespace DMotion
                     activeRequest = ActiveRenderRequest.State;
                     stateRequest = AnimationStateRenderRequest.GhostFrom(
                         section.StateIndex,
-                        progress,
+                        section.GetAnimTime(progress),
                         section.BlendPosition);
                     transitionRequest = AnimationTransitionRenderRequest.None;
                     break;
                     
                 case TimelineSectionType.GhostTo:
                     activeRequest = ActiveRenderRequest.State;
-                    // GhostTo may have an animation time offset (though typically 0 for a new cycle)
-                    float ghostToNormalizedTime = section.AnimationTimeOffset + progress * (1f - section.AnimationTimeOffset);
                     stateRequest = AnimationStateRenderRequest.GhostTo(
                         section.StateIndex,
-                        ghostToNormalizedTime,
+                        section.GetAnimTime(progress),
                         section.BlendPosition);
                     transitionRequest = AnimationTransitionRenderRequest.None;
                     break;
                     
                 case TimelineSectionType.FromBar:
-                    // FROM state at 100% weight (before transition overlap)
                     activeRequest = ActiveRenderRequest.State;
                     stateRequest = AnimationStateRenderRequest.Create(
                         section.StateIndex,
-                        progress,
+                        section.GetAnimTime(progress),
                         section.BlendPosition,
                         TimelineSectionType.FromBar);
                     transitionRequest = AnimationTransitionRenderRequest.None;
                     break;
                     
                 case TimelineSectionType.ToBar:
-                    // TO state at 100% weight (after transition overlap)
-                    // Use AnimationTimeOffset to continue from where transition ended
                     activeRequest = ActiveRenderRequest.State;
-                    float toBarNormalizedTime = section.AnimationTimeOffset + progress * (1f - section.AnimationTimeOffset);
                     stateRequest = AnimationStateRenderRequest.Create(
                         section.StateIndex,
-                        toBarNormalizedTime,
+                        section.GetAnimTime(progress),
                         section.BlendPosition,
                         TimelineSectionType.ToBar);
                     transitionRequest = AnimationTransitionRenderRequest.None;
@@ -329,14 +323,9 @@ namespace DMotion
                         section.FromStateIndex,
                         stateMachine);
                     
-                    // Both states continue playing during transition:
-                    // - FROM state: continues from where it was (ghost-from ended ~0.75-1.0)
-                    //   We use progress to let it keep advancing during the transition
-                    // - TO state: starts at 0 and advances with transition progress
-                    // Note: The actual clip time is calculated in ApplyTransitionRenderRequestSystem
-                    // using the state's duration, so progress (0-1) maps correctly.
-                    float fromNormalizedTime = progress;  // FROM continues playing forward
-                    float toNormalizedTime = progress;    // TO starts at 0, advances
+                    // Both states use their own AnimStart→AnimEnd ranges
+                    float fromNormalizedTime = section.GetAnimTime(progress);
+                    float toNormalizedTime = section.GetToAnimTime(progress);
                     
                     transitionRequest = AnimationTransitionRenderRequest.Create(
                         section.FromStateIndex,
@@ -482,81 +471,99 @@ namespace DMotion
         
         /// <summary>
         /// Configures timeline for transition preview with all sections.
+        /// Each section is a self-contained rendering block with its own animation time range.
         /// 
-        /// Full layout: [GhostFrom?] [FromBar] [Transition/Overlap] [ToBar] [GhostTo?]
-        /// 
-        /// - GhostFrom: Optional context showing FROM state cycle before main action
-        /// - FromBar: FROM state at 100% weight (before blend starts)
-        /// - Transition: Crossfade zone where weights blend
-        /// - ToBar: TO state at 100% weight (after blend ends)
-        /// - GhostTo: Optional context showing TO state cycle after main action
+        /// Full layout: [GhostFrom?] [FromBar] [Transition] [ToBar] [GhostTo?]
         /// </summary>
+        /// <param name="fromStateDuration">Full duration of FROM state clip (for normalized time calculation)</param>
+        /// <param name="toStateDuration">Full duration of TO state clip (for normalized time calculation)</param>
+        /// <param name="fromBarDuration">Duration of FromBar section in seconds (usually = exitTime)</param>
+        /// <param name="toBarDuration">Duration of ToBar section in seconds (usually = toStateDuration - transitionDuration)</param>
         public static void SetupTransitionPreview(
             this EntityManager em,
             Entity entity,
             ushort fromStateIndex,
             ushort toStateIndex,
-            float ghostFromDuration,
+            float fromStateDuration,
+            float toStateDuration,
             float transitionDuration,
-            float ghostToDuration,
             short transitionIndex,
             TransitionSource curveSource,
-            float2 fromBlendPosition = default,
-            float2 toBlendPosition = default,
-            float fromBarDuration = 0f,
-            float toBarDuration = 0f)
+            float2 fromBlendPosition,
+            float2 toBlendPosition,
+            float fromBarDuration,
+            float toBarDuration,
+            float ghostFromDuration = 0f,
+            float ghostToDuration = 0f)
         {
             var sections = em.GetBuffer<TimelineSection>(entity);
             sections.Clear();
             
             float time = 0f;
-            int transitionSectionIndex = 0;
             
-            // 1. Ghost FROM (optional context cycle before main action)
-            if (ghostFromDuration > 0)
+            // Track animation time progression for FROM and TO states
+            float fromAnimTime = 0f;  // Current position in FROM animation (normalized)
+            float toAnimTime = 0f;    // Current position in TO animation (normalized)
+            
+            // 1. Ghost FROM (previous cycle, plays 0→1)
+            if (ghostFromDuration > 0 && fromStateDuration > 0)
             {
                 sections.Add(TimelineSection.GhostFrom(fromStateIndex, ghostFromDuration, time, fromBlendPosition));
                 time += ghostFromDuration;
-                transitionSectionIndex++;
+                // Ghost plays full cycle, FROM animation resets to 0 for FromBar
+                fromAnimTime = 0f;
             }
             
-            // 2. FROM bar (FROM state at 100% before blend)
-            if (fromBarDuration > 0)
+            // 2. FROM bar (FROM state at 100%, plays from 0 to exitTime/fromStateDuration)
+            if (fromBarDuration > 0 && fromStateDuration > 0)
             {
-                sections.Add(TimelineSection.FromBar(fromStateIndex, fromBarDuration, time, fromBlendPosition));
+                float fromBarAnimStart = fromAnimTime;
+                float fromBarAnimEnd = fromAnimTime + (fromBarDuration / fromStateDuration);
+                sections.Add(TimelineSection.FromBar(fromStateIndex, fromBarDuration, time, fromBlendPosition, fromBarAnimStart, fromBarAnimEnd));
                 time += fromBarDuration;
-                transitionSectionIndex++;
+                fromAnimTime = fromBarAnimEnd;
             }
             
-            // 3. Transition/Overlap section (crossfade zone)
-            sections.Add(TimelineSection.Transition(
-                fromStateIndex, toStateIndex,
-                transitionDuration, time,
-                transitionIndex, curveSource,
-                fromBlendPosition, toBlendPosition));
-            time += transitionDuration;
-            
-            // 4. TO bar (TO state at 100% after blend)
-            // Calculate animation time offset: TO state continues from where transition ended
-            float toStateDuration = transitionDuration + toBarDuration;
-            float toBarAnimationOffset = toStateDuration > 0 ? transitionDuration / toStateDuration : 0f;
-            
-            if (toBarDuration > 0)
+            // 3. Transition (FROM continues, TO starts at 0)
+            if (transitionDuration > 0)
             {
-                sections.Add(TimelineSection.ToBar(toStateIndex, toBarDuration, time, toBlendPosition, toBarAnimationOffset));
+                float transFromAnimStart = fromAnimTime;
+                float transFromAnimEnd = fromStateDuration > 0 ? fromAnimTime + (transitionDuration / fromStateDuration) : fromAnimTime;
+                float transToAnimStart = toAnimTime;
+                float transToAnimEnd = toStateDuration > 0 ? toAnimTime + (transitionDuration / toStateDuration) : toAnimTime;
+                
+                sections.Add(TimelineSection.Transition(
+                    fromStateIndex, toStateIndex,
+                    transitionDuration, time,
+                    transitionIndex, curveSource,
+                    fromBlendPosition, toBlendPosition,
+                    transFromAnimStart, transFromAnimEnd,
+                    transToAnimStart, transToAnimEnd));
+                time += transitionDuration;
+                fromAnimTime = transFromAnimEnd;
+                toAnimTime = transToAnimEnd;
+            }
+            
+            // 4. TO bar (TO state at 100%, continues from where transition ended)
+            if (toBarDuration > 0 && toStateDuration > 0)
+            {
+                float toBarAnimStart = toAnimTime;
+                float toBarAnimEnd = toAnimTime + (toBarDuration / toStateDuration);
+                sections.Add(TimelineSection.ToBar(toStateIndex, toBarDuration, time, toBlendPosition, toBarAnimStart, toBarAnimEnd));
                 time += toBarDuration;
+                toAnimTime = toBarAnimEnd;
             }
             
-            // 5. Ghost TO (optional context cycle after main action)
-            // GhostTo starts a new cycle from the beginning (offset = 0)
-            if (ghostToDuration > 0)
+            // 5. Ghost TO (continuation cycle, continues from where ToBar ended or starts new cycle)
+            if (ghostToDuration > 0 && toStateDuration > 0)
             {
-                sections.Add(TimelineSection.GhostTo(toStateIndex, ghostToDuration, time, toBlendPosition, animationTimeOffset: 0f));
+                // If we've already played a full cycle, start fresh; otherwise continue
+                float ghostToAnimStart = toAnimTime >= 1f ? 0f : toAnimTime;
+                float ghostToAnimEnd = ghostToAnimStart + (ghostToDuration / toStateDuration);
+                sections.Add(TimelineSection.GhostTo(toStateIndex, ghostToDuration, time, toBlendPosition, ghostToAnimStart, ghostToAnimEnd));
                 time += ghostToDuration;
             }
             
-            // Start at the beginning of the timeline to show full flow:
-            // [GhostFrom] → [FromBar] → [Transition] → [ToBar] → [GhostTo]
             em.SetComponentData(entity, new AnimationTimelinePosition
             {
                 CurrentTime = 0f,

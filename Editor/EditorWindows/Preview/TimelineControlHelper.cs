@@ -149,24 +149,36 @@ namespace DMotion.Editor
             Debug.Log($"[TimelineControlHelper] Clamped: minExitTime={minExitTime:F3}, exitTime={exitTime:F3}, transitionDuration={transitionDuration:F3}");
             
             // Calculate FROM visual cycles (ghost bars LEFT of from-bar)
-            // For ECS runtime, only create ghost when animation actually loops
-            // (requestedExitTime exceeds fromStateDuration)
-            // The "context ghost at exitTime==0" is only for visual TransitionTimeline UI
             int fromVisualCycles = 1;
-            if (fromStateDuration > 0.001f && requestedExitTime > fromStateDuration)
+            if (fromStateDuration > 0.001f)
             {
-                fromVisualCycles = Mathf.CeilToInt(requestedExitTime / fromStateDuration);
+                if (requestedExitTime > fromStateDuration)
+                {
+                    fromVisualCycles = Mathf.CeilToInt(requestedExitTime / fromStateDuration);
+                }
+                else if (exitTime < 0.001f && minExitTime < 0.001f)
+                {
+                    fromVisualCycles = 2;
+                }
             }
             fromVisualCycles = Mathf.Clamp(fromVisualCycles, 1, 4);
             
             // Calculate TO visual cycles (ghost bars RIGHT of to-bar)
-            // For ECS runtime, only create ghost when animation actually loops
-            // (transitionDuration exceeds toStateDuration)
-            // The "bars end together" context ghost is only for visual TransitionTimeline UI
             int toVisualCycles = 1;
-            if (toStateDuration > 0.001f && requestedTransitionDuration > toStateDuration)
+            if (toStateDuration > 0.001f)
             {
-                toVisualCycles = Mathf.CeilToInt(requestedTransitionDuration / toStateDuration);
+                if (requestedTransitionDuration > toStateDuration)
+                {
+                    toVisualCycles = Mathf.CeilToInt(requestedTransitionDuration / toStateDuration);
+                }
+                else
+                {
+                    bool barsEndTogether = (exitTime + toStateDuration) <= (fromStateDuration + 0.001f);
+                    if (barsEndTogether)
+                    {
+                        toVisualCycles = 2;
+                    }
+                }
             }
             toVisualCycles = Mathf.Clamp(toVisualCycles, 1, 4);
             
@@ -183,15 +195,17 @@ namespace DMotion.Editor
                 targetEntity,
                 fromIndex >= 0 ? (ushort)fromIndex : (ushort)0,
                 (ushort)toIndex,
-                ghostFromDuration,
+                fromStateDuration,
+                toStateDuration,
                 transitionDuration,
-                ghostToDuration,
                 transitionIndex,
                 curveSource,
                 fromBlendPosition,
                 toBlendPosition,
                 fromBarDuration,
-                toBarDuration);
+                toBarDuration,
+                ghostFromDuration,
+                ghostToDuration);
             
             em.ActivateTimelineControl(targetEntity, startPaused: true);
             Debug.Log("[TimelineControlHelper] SetupTransitionPreview complete");
