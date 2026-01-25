@@ -347,6 +347,28 @@ namespace DMotion.Editor
         }
         
         /// <summary>
+        /// Gets the current section type based on current position.
+        /// </summary>
+        public TimelineSectionType GetCurrentSectionType()
+        {
+            if (!ValidateState()) return TimelineSectionType.State;
+            
+            var em = targetWorld.EntityManager;
+            if (!em.HasComponent<AnimationTimelinePosition>(targetEntity)) return TimelineSectionType.State;
+            if (!em.HasBuffer<TimelineSection>(targetEntity)) return TimelineSectionType.State;
+            
+            var position = em.GetComponentData<AnimationTimelinePosition>(targetEntity);
+            var sections = em.GetBuffer<TimelineSection>(targetEntity);
+            
+            if (position.CurrentSectionIndex >= 0 && position.CurrentSectionIndex < sections.Length)
+            {
+                return sections[position.CurrentSectionIndex].Type;
+            }
+            
+            return TimelineSectionType.State;
+        }
+        
+        /// <summary>
         /// Gets the active render request type.
         /// </summary>
         public ActiveRenderRequest GetActiveRequest()

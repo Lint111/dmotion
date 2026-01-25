@@ -848,9 +848,10 @@ namespace DMotion.Editor
                 
                 var position = timelineHelper?.GetPosition() ?? default;
                 var activeRequest = timelineHelper?.GetActiveRequest() ?? ActiveRenderRequest.None;
+                var currentSectionType = timelineHelper?.GetCurrentSectionType() ?? TimelineSectionType.State;
                 
                 GUILayout.Label($"Time: {position.CurrentTime:F2}s / {position.TotalDuration:F2}s");
-                GUILayout.Label($"Section: {position.CurrentSectionIndex}");
+                GUILayout.Label($"Section: [{position.CurrentSectionIndex}] {currentSectionType}");
                 GUILayout.Label($"Progress: {position.SectionProgress:P0}");
                 GUILayout.Label($"Request Type: {activeRequest.Type}");
                 
