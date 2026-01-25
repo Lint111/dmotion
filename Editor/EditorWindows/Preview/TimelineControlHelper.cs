@@ -294,12 +294,13 @@ namespace DMotion.Editor
         
         /// <summary>
         /// Updates blend positions for transition preview.
-        /// Directly updates the TimelineSection blend positions without rebuilding.
+        /// For blend states, this rebuilds the timeline since blend position affects duration.
+        /// For single clip states, just updates the blend positions on existing sections.
         /// </summary>
         public void UpdateTransitionBlendPositions(
             AnimationStateAsset fromState,
             AnimationStateAsset toState,
-            float transitionDuration,
+            StateOutTransition transition,
             short transitionIndex,
             TransitionSource curveSource,
             float2 fromBlendPosition,
@@ -307,9 +308,19 @@ namespace DMotion.Editor
         {
             if (!ValidateState()) return;
             
-            var em = targetWorld.EntityManager;
+            // For blend states, changing blend position changes duration, so rebuild everything
+            bool fromIsBlendState = fromState != null && IsBlendState(fromState);
+            bool toIsBlendState = toState != null && IsBlendState(toState);
             
-            // Directly update blend positions in existing TimelineSection(s)
+            if (fromIsBlendState || toIsBlendState)
+            {
+                // Rebuild the entire timeline with new blend positions
+                SetupTransitionPreview(fromState, toState, transition, transitionIndex, curveSource, fromBlendPosition, toBlendPosition);
+                return;
+            }
+            
+            // For single clip states, just update blend positions without rebuilding
+            var em = targetWorld.EntityManager;
             if (em.HasBuffer<TimelineSection>(targetEntity))
             {
                 var sections = em.GetBuffer<TimelineSection>(targetEntity);

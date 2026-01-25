@@ -523,10 +523,11 @@ namespace DMotion.Editor
             if (IsTransitionPreview)
             {
                 var (transitionIndex, curveSource) = FindTransitionIndices(transitionFromState, transitionToState);
+                var (transition, _, _, _) = GetTransitionInfo();
                 timelineHelper.UpdateTransitionBlendPositions(
                     transitionFromState,
                     transitionToState,
-                    GetTransitionDuration(),
+                    transition,
                     transitionIndex,
                     curveSource,
                     blendPosition,
