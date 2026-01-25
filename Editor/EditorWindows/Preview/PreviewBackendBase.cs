@@ -367,6 +367,19 @@ namespace DMotion.Editor
         }
         
         /// <summary>
+        /// Rebuilds the transition timeline with current blend positions.
+        /// Called when transition properties (duration, exit time) change.
+        /// Base implementation just updates blend positions.
+        /// </summary>
+        public virtual void RebuildTransitionTimeline(float2 fromBlendPos, float2 toBlendPos)
+        {
+            // Base implementation - just update blend positions
+            // Derived classes (like EcsPreviewBackend) can override for full rebuild
+            SetTransitionFromBlendPosition(fromBlendPos);
+            SetTransitionToBlendPosition(toBlendPos);
+        }
+        
+        /// <summary>
         /// Sets the solo clip index (-1 for blended mode).
         /// </summary>
         public virtual void SetSoloClip(int clipIndex)

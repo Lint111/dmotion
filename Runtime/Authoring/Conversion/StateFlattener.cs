@@ -60,6 +60,33 @@ namespace DMotion.Authoring
     }
 
     /// <summary>
+    /// Shared context for state flattening operations.
+    /// Bundles collections that are passed through recursive calls.
+    /// </summary>
+    internal class FlatteningContext
+    {
+        /// <summary>Accumulated flattened states.</summary>
+        internal List<FlattenedState> FlattenedStates { get; }
+        
+        /// <summary>Mapping from original asset to global index.</summary>
+        internal Dictionary<AnimationStateAsset, int> AssetToIndex { get; }
+        
+        /// <summary>Mapping from SubStateMachine to its resolved entry state.</summary>
+        internal Dictionary<SubStateMachineStateAsset, AnimationStateAsset> SubMachineToEntry { get; }
+        
+        /// <summary>Exit transition info for sub-state machines.</summary>
+        internal List<ExitTransitionInfo> ExitTransitionInfos { get; }
+
+        internal FlatteningContext()
+        {
+            FlattenedStates = new List<FlattenedState>();
+            AssetToIndex = new Dictionary<AnimationStateAsset, int>();
+            SubMachineToEntry = new Dictionary<SubStateMachineStateAsset, AnimationStateAsset>();
+            ExitTransitionInfos = new List<ExitTransitionInfo>();
+        }
+    }
+
+    /// <summary>
     /// Handles flattening of hierarchical state machines.
     /// All nested states become top-level states with remapped clip and transition indices.
     /// </summary>
@@ -73,42 +100,28 @@ namespace DMotion.Authoring
         internal static (List<FlattenedState> states, Dictionary<AnimationStateAsset, int> assetToIndex, List<ExitTransitionInfo> exitTransitionInfos)
             FlattenStates(StateMachineAsset rootMachine)
         {
-            var flattenedStates = new List<FlattenedState>();
-            var assetToIndex = new Dictionary<AnimationStateAsset, int>();
-            var subMachineToEntry = new Dictionary<SubStateMachineStateAsset, AnimationStateAsset>();
-            var exitTransitionInfos = new List<ExitTransitionInfo>();
+            var context = new FlatteningContext();
 
             // First pass: collect all leaf states and build mappings
-            CollectStatesRecursive(
-                rootMachine,
-                "",
-                0,
-                flattenedStates,
-                assetToIndex,
-                subMachineToEntry,
-                exitTransitionInfos,
-                parentSubMachine: null);
+            CollectStatesRecursive(rootMachine, "", 0, context, parentSubMachine: null);
 
             // Second pass: assign exit group indices to flattened states
-            AssignExitGroupIndices(flattenedStates, assetToIndex, exitTransitionInfos);
+            AssignExitGroupIndices(context);
 
-            return (flattenedStates, assetToIndex, exitTransitionInfos);
+            return (context.FlattenedStates, context.AssetToIndex, context.ExitTransitionInfos);
         }
 
         /// <summary>
         /// Assigns exit group indices to flattened states based on exit transition info.
         /// </summary>
-        private static void AssignExitGroupIndices(
-            List<FlattenedState> flattenedStates,
-            Dictionary<AnimationStateAsset, int> assetToIndex,
-            List<ExitTransitionInfo> exitTransitionInfos)
+        private static void AssignExitGroupIndices(FlatteningContext context)
         {
             // Build a mapping from flattened index to exit group index
             var indexToExitGroup = new Dictionary<int, short>();
 
-            for (short groupIndex = 0; groupIndex < exitTransitionInfos.Count; groupIndex++)
+            for (short groupIndex = 0; groupIndex < context.ExitTransitionInfos.Count; groupIndex++)
             {
-                var info = exitTransitionInfos[groupIndex];
+                var info = context.ExitTransitionInfos[groupIndex];
                 foreach (var exitStateIndex in info.ExitStateIndices)
                 {
                     indexToExitGroup[exitStateIndex] = groupIndex;
@@ -116,13 +129,13 @@ namespace DMotion.Authoring
             }
 
             // Update flattened states with exit group indices
-            for (int i = 0; i < flattenedStates.Count; i++)
+            for (int i = 0; i < context.FlattenedStates.Count; i++)
             {
-                var state = flattenedStates[i];
+                var state = context.FlattenedStates[i];
                 if (indexToExitGroup.TryGetValue(state.GlobalIndex, out var exitGroupIndex))
                 {
                     state.ExitGroupIndex = exitGroupIndex;
-                    flattenedStates[i] = state;
+                    context.FlattenedStates[i] = state;
                 }
             }
         }
@@ -207,21 +220,17 @@ namespace DMotion.Authoring
             StateMachineAsset machine,
             string pathPrefix,
             int clipIndexOffset,
-            List<FlattenedState> flattenedStates,
-            Dictionary<AnimationStateAsset, int> assetToIndex,
-            Dictionary<SubStateMachineStateAsset, AnimationStateAsset> subMachineToEntry,
-            List<ExitTransitionInfo> exitTransitionInfos,
+            FlatteningContext context,
             SubStateMachineStateAsset parentSubMachine)
         {
             foreach (var state in machine.States)
             {
                 var statePath = BuildStatePath(pathPrefix, state.name);
-                ProcessState(state, statePath, machine, clipIndexOffset, flattenedStates, assetToIndex,
-                    subMachineToEntry, exitTransitionInfos, parentSubMachine);
+                ProcessState(state, statePath, machine, clipIndexOffset, context, parentSubMachine);
             }
 
             // After processing all states, collect exit transition info for this machine
-            CollectExitTransitionInfo(machine, parentSubMachine, assetToIndex, exitTransitionInfos);
+            CollectExitTransitionInfo(machine, parentSubMachine, context);
         }
 
         private static string BuildStatePath(string pathPrefix, string stateName)
@@ -234,22 +243,18 @@ namespace DMotion.Authoring
             string statePath,
             StateMachineAsset machine,
             int clipIndexOffset,
-            List<FlattenedState> flattenedStates,
-            Dictionary<AnimationStateAsset, int> assetToIndex,
-            Dictionary<SubStateMachineStateAsset, AnimationStateAsset> subMachineToEntry,
-            List<ExitTransitionInfo> exitTransitionInfos,
+            FlatteningContext context,
             SubStateMachineStateAsset parentSubMachine)
         {
             if (state is SubStateMachineStateAsset subMachine)
             {
-                ProcessSubStateMachine(subMachine, statePath, machine, clipIndexOffset, flattenedStates,
-                    assetToIndex, subMachineToEntry, exitTransitionInfos);
+                ProcessSubStateMachine(subMachine, statePath, machine, clipIndexOffset, context);
                 return;
             }
 
             if (state is SingleClipStateAsset or LinearBlendStateAsset or Directional2DBlendStateAsset)
             {
-                ProcessLeafState(state, statePath, machine, clipIndexOffset, flattenedStates, assetToIndex, parentSubMachine);
+                ProcessLeafState(state, statePath, machine, clipIndexOffset, context, parentSubMachine);
                 return;
             }
 
@@ -261,10 +266,7 @@ namespace DMotion.Authoring
             string statePath,
             StateMachineAsset machine,
             int clipIndexOffset,
-            List<FlattenedState> flattenedStates,
-            Dictionary<AnimationStateAsset, int> assetToIndex,
-            Dictionary<SubStateMachineStateAsset, AnimationStateAsset> subMachineToEntry,
-            List<ExitTransitionInfo> exitTransitionInfos)
+            FlatteningContext context)
         {
             if (!subMachine.IsValid())
             {
@@ -276,7 +278,7 @@ namespace DMotion.Authoring
             var entryState = ResolveEntryState(subMachine);
             if (entryState != null)
             {
-                subMachineToEntry[subMachine] = entryState;
+                context.SubMachineToEntry[subMachine] = entryState;
             }
 
             // Recurse into nested machine - clips before this point determine offset
@@ -285,10 +287,7 @@ namespace DMotion.Authoring
                 subMachine.NestedStateMachine,
                 statePath,
                 nestedClipOffset,
-                flattenedStates,
-                assetToIndex,
-                subMachineToEntry,
-                exitTransitionInfos,
+                context,
                 parentSubMachine: subMachine);
         }
 
@@ -297,14 +296,13 @@ namespace DMotion.Authoring
             string statePath,
             StateMachineAsset machine,
             int clipIndexOffset,
-            List<FlattenedState> flattenedStates,
-            Dictionary<AnimationStateAsset, int> assetToIndex,
+            FlatteningContext context,
             SubStateMachineStateAsset parentSubMachine)
         {
-            var globalIndex = flattenedStates.Count;
+            var globalIndex = context.FlattenedStates.Count;
             var stateClipOffset = clipIndexOffset + CountClipsBeforeState(machine, state);
 
-            flattenedStates.Add(new FlattenedState
+            context.FlattenedStates.Add(new FlattenedState
             {
                 Asset = state,
                 GlobalIndex = globalIndex,
@@ -314,7 +312,7 @@ namespace DMotion.Authoring
                 SourceSubMachine = parentSubMachine // Track source for parameter linking
             });
 
-            assetToIndex[state] = globalIndex;
+            context.AssetToIndex[state] = globalIndex;
         }
 
         /// <summary>
@@ -323,18 +321,17 @@ namespace DMotion.Authoring
         private static void CollectExitTransitionInfo(
             StateMachineAsset machine,
             SubStateMachineStateAsset parentSubMachine,
-            Dictionary<AnimationStateAsset, int> assetToIndex,
-            List<ExitTransitionInfo> exitTransitionInfos)
+            FlatteningContext context)
         {
             // Early returns for invalid conditions
             if (parentSubMachine == null) return;
             if (machine.ExitStates == null || machine.ExitStates.Count == 0) return;
             if (parentSubMachine.OutTransitions == null || parentSubMachine.OutTransitions.Count == 0) return;
 
-            var exitStateIndices = ResolveExitStateIndices(machine.ExitStates, assetToIndex, parentSubMachine.name);
+            var exitStateIndices = ResolveExitStateIndices(machine.ExitStates, context.AssetToIndex, parentSubMachine.name);
             if (exitStateIndices.Count == 0) return;
 
-            exitTransitionInfos.Add(new ExitTransitionInfo
+            context.ExitTransitionInfos.Add(new ExitTransitionInfo
             {
                 SubMachine = parentSubMachine,
                 ExitStateIndices = exitStateIndices,

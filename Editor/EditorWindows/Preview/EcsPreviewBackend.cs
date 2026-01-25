@@ -42,13 +42,6 @@ namespace DMotion.Editor
         private const float SetupTimeoutSeconds = 30f;
         private bool isSetupCoroutineRunning;
         
-        // Blend positions (with smoothing)
-        private float2 blendPosition;
-        private float2 targetBlendPosition;
-        private float2 toBlendPosition;
-        private float2 targetToBlendPosition;
-        private const float BlendSmoothSpeed = 8f;
-        
         // Timeline control
         private TimelineControlHelper timelineHelper;
         
@@ -86,8 +79,6 @@ namespace DMotion.Editor
         
         private void OnPlayModeStateChanged(PlayModeStateChange state)
         {
-            Debug.Log($"[EcsPreviewBackend] PlayModeStateChanged: {state}");
-            
             if (state == PlayModeStateChange.EnteredPlayMode)
             {
                 // World was recreated - need to re-setup
@@ -100,12 +91,10 @@ namespace DMotion.Editor
                 // Re-trigger setup with cached state/transition
                 if (transitionToState != null)
                 {
-                    Debug.Log($"[EcsPreviewBackend] Re-triggering transition setup: {transitionFromState?.name} -> {transitionToState?.name}");
                     StartSetupCoroutine(PendingSetupType.Transition);
                 }
                 else if (currentState != null)
                 {
-                    Debug.Log($"[EcsPreviewBackend] Re-triggering state setup: {currentState?.name}");
                     StartSetupCoroutine(PendingSetupType.State);
                 }
             }
@@ -229,13 +218,10 @@ namespace DMotion.Editor
             setupStartTime = (float)EditorApplication.timeSinceStartup;
             errorMessage = "Waiting for animation entity...";
             
-            Debug.Log($"[EcsPreviewBackend] StartSetupCoroutine: type={setupType}, coroutineRunning={isSetupCoroutineRunning}");
-            
             if (!isSetupCoroutineRunning)
             {
                 isSetupCoroutineRunning = true;
                 EditorApplication.update += SetupCoroutineUpdate;
-                Debug.Log("[EcsPreviewBackend] EditorApplication.update += SetupCoroutineUpdate");
             }
         }
         
@@ -247,7 +233,6 @@ namespace DMotion.Editor
         {
             if (pendingSetup == PendingSetupType.None)
             {
-                Debug.Log("[EcsPreviewBackend] SetupCoroutineUpdate: pendingSetup is None, stopping");
                 StopSetupCoroutine();
                 return;
             }
@@ -256,7 +241,6 @@ namespace DMotion.Editor
             float elapsed = (float)EditorApplication.timeSinceStartup - setupStartTime;
             if (elapsed > SetupTimeoutSeconds)
             {
-                Debug.Log($"[EcsPreviewBackend] SetupCoroutineUpdate: timeout after {elapsed}s");
                 errorMessage = "No animation entity found.\nEnter Play mode with an animated character.";
                 StopSetupCoroutine();
                 return;
@@ -265,15 +249,8 @@ namespace DMotion.Editor
             // Try to select entity
             if (!TrySelectEntity())
             {
-                // Only log occasionally to avoid spam
-                if ((int)(elapsed * 10) % 10 == 0)
-                {
-                    Debug.Log($"[EcsPreviewBackend] SetupCoroutineUpdate: waiting for entity... ({elapsed:F1}s)");
-                }
                 return; // Keep waiting
             }
-            
-            Debug.Log($"[EcsPreviewBackend] SetupCoroutineUpdate: entity found! HasSelection={entityBrowser.HasSelection}");
             
             // Entity found - complete setup based on type
             bool success = pendingSetup switch
@@ -282,8 +259,6 @@ namespace DMotion.Editor
                 PendingSetupType.Transition => TryCompleteTransitionSetup(),
                 _ => false
             };
-            
-            Debug.Log($"[EcsPreviewBackend] SetupCoroutineUpdate: setup complete, success={success}, isInitialized={isInitialized}");
             
             if (success)
             {
@@ -309,8 +284,6 @@ namespace DMotion.Editor
         /// </summary>
         private bool TryCompleteStateSetup()
         {
-            Debug.Log($"[EcsPreviewBackend] TryCompleteStateSetup: state={currentState?.name}, blendPos={blendPosition}");
-            
             if (!InitializeTimelineHelper())
             {
                 Debug.LogWarning("[EcsPreviewBackend] TryCompleteStateSetup: InitializeTimelineHelper failed");
@@ -318,11 +291,12 @@ namespace DMotion.Editor
                 return true;
             }
             
-            Debug.Log($"[EcsPreviewBackend] TryCompleteStateSetup: calling SetupStatePreview");
-            timelineHelper.SetupStatePreview(currentState, blendPosition);
+            // Get blend position from state asset (via PreviewSettings)
+            var blendPos = GetBlendPositionForState(currentState);
+            
+            timelineHelper.SetupStatePreview(currentState, blendPos);
             isInitialized = true;
             errorMessage = null;
-            Debug.Log($"[EcsPreviewBackend] TryCompleteStateSetup: complete, isInitialized={isInitialized}");
             return true;
         }
         
@@ -331,9 +305,6 @@ namespace DMotion.Editor
         /// </summary>
         private bool TryCompleteTransitionSetup()
         {
-            Debug.Log($"[EcsPreviewBackend] TryCompleteTransitionSetup: from={transitionFromState?.name}, to={transitionToState?.name}");
-            Debug.Log($"[EcsPreviewBackend] TryCompleteTransitionSetup: fromBlendPos={blendPosition}, toBlendPos={toBlendPosition}");
-            
             if (!InitializeTimelineHelper())
             {
                 Debug.LogWarning("[EcsPreviewBackend] TryCompleteTransitionSetup: InitializeTimelineHelper failed");
@@ -341,10 +312,12 @@ namespace DMotion.Editor
                 return true;
             }
             
-            var (transitionIndex, curveSource) = FindTransitionIndices(transitionFromState, transitionToState);
-            var (transition, duration, exitTime, hasExitTime) = GetTransitionInfo();
+            // Get blend positions from state assets (via PreviewSettings)
+            var fromBlendPos = GetBlendPositionForState(transitionFromState);
+            var toBlendPos = GetBlendPositionForState(transitionToState);
             
-            Debug.Log($"[EcsPreviewBackend] TryCompleteTransitionSetup: transitionIndex={transitionIndex}, duration={duration}, exitTime={exitTime}, hasExitTime={hasExitTime}");
+            var (transitionIndex, curveSource) = FindTransitionIndices(transitionFromState, transitionToState);
+            var (transition, _, _, _) = GetTransitionInfo();
             
             timelineHelper.SetupTransitionPreview(
                 transitionFromState,
@@ -352,12 +325,11 @@ namespace DMotion.Editor
                 transition,
                 transitionIndex,
                 curveSource,
-                blendPosition,
-                toBlendPosition);
+                fromBlendPos,
+                toBlendPos);
             
             isInitialized = true;
             errorMessage = null;
-            Debug.Log($"[EcsPreviewBackend] TryCompleteTransitionSetup: complete, isInitialized={isInitialized}");
             return true;
         }
         
@@ -475,68 +447,95 @@ namespace DMotion.Editor
         
         public void SetBlendPosition1D(float value)
         {
-            targetBlendPosition = new float2(value, 0);
+            RebuildTimelineForState(new float2(value, 0));
         }
         
         public void SetBlendPosition2D(float2 position)
         {
-            targetBlendPosition = position;
+            RebuildTimelineForState(position);
         }
         
         public void SetBlendPosition1DImmediate(float value)
         {
-            blendPosition = new float2(value, 0);
-            targetBlendPosition = blendPosition;
-            ApplyBlendPositionToTimeline();
+            RebuildTimelineForState(new float2(value, 0));
         }
         
         public void SetBlendPosition2DImmediate(float2 position)
         {
-            blendPosition = position;
-            targetBlendPosition = position;
-            ApplyBlendPositionToTimeline();
+            RebuildTimelineForState(position);
         }
         
         public void SetTransitionFromBlendPosition(float2 position)
         {
-            blendPosition = position;
-            targetBlendPosition = position;
-            ApplyBlendPositionToTimeline();
+            RebuildTimelineForTransition(position, GetBlendPositionForState(transitionToState));
         }
         
         public void SetTransitionToBlendPosition(float2 position)
         {
-            toBlendPosition = position;
-            targetToBlendPosition = position;
-            ApplyBlendPositionToTimeline();
+            RebuildTimelineForTransition(GetBlendPositionForState(transitionFromState), position);
+        }
+        
+        public void RebuildTransitionTimeline(float2 fromBlendPos, float2 toBlendPos)
+        {
+            RebuildTimelineForTransition(fromBlendPos, toBlendPos);
         }
         
         public void SetSoloClip(int clipIndex)
         {
-            // TODO: Implement solo clip mode
+            // Solo clip mode not supported in ECS preview.
+            // Would require modifying clip weights in the ECS sampler buffers.
+            // For now, solo clip only works in PlayableGraph preview mode.
         }
         
-        private void ApplyBlendPositionToTimeline()
+        /// <summary>
+        /// Gets the blend position for a state from PreviewSettings.
+        /// </summary>
+        private static float2 GetBlendPositionForState(AnimationStateAsset state)
         {
-            if (!isInitialized || timelineHelper == null) return;
+            if (state == null) return float2.zero;
+            var pos = PreviewSettings.GetBlendPosition(state);
+            return new float2(pos.x, pos.y);
+        }
+        
+        /// <summary>
+        /// Rebuilds the timeline for a single state preview with the given blend position.
+        /// </summary>
+        private void RebuildTimelineForState(float2 blendPos)
+        {
+            if (!isInitialized || timelineHelper == null || currentState == null)
+            {
+                return;
+            }
             
-            if (IsTransitionPreview)
+            timelineHelper.UpdateBlendPosition(currentState, blendPos);
+        }
+        
+        /// <summary>
+        /// Rebuilds the timeline for a transition preview with the given blend positions.
+        /// </summary>
+        private void RebuildTimelineForTransition(float2 fromBlendPos, float2 toBlendPos)
+        {
+            if (!isInitialized || timelineHelper == null)
             {
-                var (transitionIndex, curveSource) = FindTransitionIndices(transitionFromState, transitionToState);
-                var (transition, _, _, _) = GetTransitionInfo();
-                timelineHelper.UpdateTransitionBlendPositions(
-                    transitionFromState,
-                    transitionToState,
-                    transition,
-                    transitionIndex,
-                    curveSource,
-                    blendPosition,
-                    toBlendPosition);
+                return;
             }
-            else if (currentState != null)
+            
+            if (!IsTransitionPreview)
             {
-                timelineHelper.UpdateBlendPosition(currentState, blendPosition);
+                return;
             }
+            
+            var (transitionIndex, curveSource) = FindTransitionIndices(transitionFromState, transitionToState);
+            var (transition, _, _, _) = GetTransitionInfo();
+            
+            timelineHelper.UpdateTransitionBlendPositions(
+                transitionFromState,
+                transitionToState,
+                transition,
+                transitionIndex,
+                curveSource,
+                fromBlendPos,
+                toBlendPos);
         }
         
         #endregion
@@ -545,48 +544,10 @@ namespace DMotion.Editor
         
         public bool Tick(float deltaTime)
         {
-            bool needsRepaint = false;
-            
             // If setup coroutine is in progress, just request repaint to update waiting message
             if (pendingSetup != PendingSetupType.None)
             {
                 return true;
-            }
-            
-            // Smooth blend position interpolation
-            if (math.any(blendPosition != targetBlendPosition))
-            {
-                var diff = targetBlendPosition - blendPosition;
-                var maxStep = BlendSmoothSpeed * deltaTime;
-                
-                if (math.length(diff) <= maxStep)
-                {
-                    blendPosition = targetBlendPosition;
-                }
-                else
-                {
-                    blendPosition += math.normalize(diff) * maxStep;
-                }
-                ApplyBlendPositionToTimeline();
-                needsRepaint = true;
-            }
-            
-            // Smooth to-state blend position interpolation
-            if (math.any(toBlendPosition != targetToBlendPosition))
-            {
-                var diff = targetToBlendPosition - toBlendPosition;
-                var maxStep = BlendSmoothSpeed * deltaTime;
-                
-                if (math.length(diff) <= maxStep)
-                {
-                    toBlendPosition = targetToBlendPosition;
-                }
-                else
-                {
-                    toBlendPosition += math.normalize(diff) * maxStep;
-                }
-                ApplyBlendPositionToTimeline();
-                needsRepaint = true;
             }
             
             // Tick ECS world ONLY in Edit mode - in Play mode, Unity handles updates automatically
@@ -595,9 +556,9 @@ namespace DMotion.Editor
             {
                 TickEcsWorld(deltaTime);
             }
-            needsRepaint = true; // Always repaint when ECS systems may have changed state
             
-            return needsRepaint;
+            // Always repaint - ECS systems may have changed animation state
+            return true;
         }
         
         /// <summary>
@@ -681,12 +642,17 @@ namespace DMotion.Editor
             var position = timelineHelper?.GetPosition() ?? default;
             var activeRequest = timelineHelper?.GetActiveRequest() ?? ActiveRenderRequest.None;
             
+            // Get current blend position from state asset
+            var currentBlendPos = IsTransitionPreview 
+                ? GetBlendPositionForState(transitionFromState)
+                : GetBlendPositionForState(currentState);
+            
             return new PreviewSnapshot
             {
                 IsInitialized = isInitialized,
                 ErrorMessage = errorMessage,
                 NormalizedTime = position.NormalizedTime,
-                BlendPosition = blendPosition,
+                BlendPosition = currentBlendPos,
                 TransitionProgress = activeRequest.Type == RenderRequestType.Transition 
                     ? position.SectionProgress 
                     : -1f

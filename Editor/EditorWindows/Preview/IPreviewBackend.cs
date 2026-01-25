@@ -181,6 +181,12 @@ namespace DMotion.Editor
         void SetTransitionToBlendPosition(float2 position);
         
         /// <summary>
+        /// Rebuilds the transition timeline with current blend positions.
+        /// Called when transition properties (duration, exit time) change.
+        /// </summary>
+        void RebuildTransitionTimeline(float2 fromBlendPos, float2 toBlendPos);
+        
+        /// <summary>
         /// Sets the solo clip index (-1 for blended mode).
         /// </summary>
         void SetSoloClip(int clipIndex);

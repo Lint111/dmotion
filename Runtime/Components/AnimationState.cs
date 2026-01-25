@@ -28,7 +28,7 @@ namespace DMotion
     /// <summary>
     /// Identifies the source of a transition for curve lookup.
     /// </summary>
-    internal enum TransitionSource : byte
+    public enum TransitionSource : byte
     {
         /// <summary>Regular state-to-state transition.</summary>
         State = 0,

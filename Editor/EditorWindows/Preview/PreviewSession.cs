@@ -201,8 +201,6 @@ namespace DMotion.Editor
         /// </summary>
         public void CreateTransitionPreview(AnimationStateAsset fromState, AnimationStateAsset toState, float transitionDuration)
         {
-            Debug.Log($"[PreviewSession] CreateTransitionPreview: Mode={currentMode}, Backend={activeBackend?.GetType().Name ?? "null"}");
-            
             cachedState = null;
             cachedTransitionFrom = fromState;
             cachedTransitionTo = toState;
@@ -368,6 +366,16 @@ namespace DMotion.Editor
         {
             activeBackend?.SetTransitionToBlendPosition(position);
             MarkDirty(PreviewDirtyFlags.Parameters);
+        }
+        
+        /// <summary>
+        /// Rebuilds the transition timeline with current blend positions.
+        /// Called when transition properties (duration, exit time) change.
+        /// </summary>
+        public void RebuildTransitionTimeline(float2 fromBlendPos, float2 toBlendPos)
+        {
+            activeBackend?.RebuildTransitionTimeline(fromBlendPos, toBlendPos);
+            MarkDirty(PreviewDirtyFlags.All);
         }
         
         /// <summary>

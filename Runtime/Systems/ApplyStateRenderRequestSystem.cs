@@ -96,6 +96,11 @@ namespace DMotion
             if (samplerStart < 0)
                 return;
             
+            #if UNITY_EDITOR
+            // Diagnostic: trace which section and state we're processing
+            UnityEngine.Debug.Log($"[ApplyStateRenderRequest] SectionType={request.SectionType}, StateIndex={request.StateIndex}, BufferIndex={stateBufferIndex}, SamplerStart={samplerStart}, NormalizedTime={request.NormalizedTime}");
+            #endif
+            
             // Calculate state duration and update based on state type
             float stateDuration = GetStateDuration(ref samplers, samplerStart, animState.ClipCount);
             
@@ -123,7 +128,9 @@ namespace DMotion
                 for (int j = 0; j < otherState.ClipCount; j++)
                 {
                     int samplerIdx = otherSamplerStart + j;
+
                     if (samplerIdx >= samplers.Length) continue;
+                    
                     var sampler = samplers[samplerIdx];
                     sampler.Weight = 0f;
                     samplers[samplerIdx] = sampler;

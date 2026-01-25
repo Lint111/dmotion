@@ -156,8 +156,6 @@ namespace DMotion.Editor
                 currentStateMachine = stateMachine;
                 currentModel = model;
                 isSetup = true;
-                
-                Debug.Log("[EcsPreviewSceneManager] Preview scene setup complete. SubScene will bake automatically.");
                 return true;
             }
             catch (Exception e)
@@ -197,8 +195,6 @@ namespace DMotion.Editor
                 isSetup = false;
                 currentStateMachine = null;
                 currentModel = null;
-                
-                Debug.Log("[EcsPreviewSceneManager] Preview scene closed");
             }
             catch (Exception e)
             {
@@ -214,7 +210,6 @@ namespace DMotion.Editor
             if (!isSetup || string.IsNullOrEmpty(contentScenePath)) return;
             
             AssetDatabase.ImportAsset(contentScenePath, ImportAssetOptions.ForceUpdate);
-            Debug.Log("[EcsPreviewSceneManager] Forced rebake of preview SubScene");
         }
         
         /// <summary>
@@ -230,7 +225,6 @@ namespace DMotion.Editor
                 {
                     AssetDatabase.DeleteAsset(PreviewFolderPath);
                     AssetDatabase.Refresh();
-                    Debug.Log("[EcsPreviewSceneManager] Cleaned up preview folder");
                 }
             }
             catch (Exception e)
@@ -331,7 +325,6 @@ namespace DMotion.Editor
             
             // Save the content scene
             EditorSceneManager.SaveScene(contentScene, contentScenePath);
-            Debug.Log($"[EcsPreviewSceneManager] Created content scene: {contentScenePath}");
         }
         
         private void CreateMainScene()
@@ -387,7 +380,6 @@ namespace DMotion.Editor
             
             // Save main scene
             EditorSceneManager.SaveScene(mainScene, mainScenePath);
-            Debug.Log($"[EcsPreviewSceneManager] Created main scene: {mainScenePath}");
         }
         
         private GameObject TryGetModelFromStateMachine(StateMachineAsset stateMachine)

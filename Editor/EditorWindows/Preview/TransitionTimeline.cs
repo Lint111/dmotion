@@ -76,16 +76,19 @@ namespace DMotion.Editor
         // Cached blend curve (read from asset on configure)
         private AnimationCurve blendCurve = AnimationCurve.Linear(0f, 1f, 1f, 0f);
         
-        // Min/max bounds
-        private const float MinTransitionDuration = 0.05f;
-        private const float MaxTransitionDuration = 2f;
-        private const int MaxVisualCycles = 4;
+        // Min/max bounds - use shared calculator constants
+        private const float MinTransitionDuration = TransitionTimingCalculator.MinTransitionDuration;
+        private const float MaxTransitionDuration = TransitionTimingCalculator.MaxTransitionDuration;
+        private const int MaxVisualCycles = TransitionTimingCalculator.MaxVisualCycles;
         
         // Transition timing values (requested = user intent, effective = clamped for logic)
         private float requestedExitTime = 0.75f;
         private float exitTime = 0.75f;
         private float requestedTransitionDuration = 0.25f;
         private float transitionDuration = 0.25f;
+        
+        // Cached timing result from TransitionTimingCalculator
+        private TransitionTimingResult cachedTimingResult;
         
         #endregion
         
@@ -117,6 +120,11 @@ namespace DMotion.Editor
         private readonly Button playButton;
         private readonly Label timeLabel;
         private readonly Label blendLabel;
+        
+        // Cached label values to avoid string allocations
+        private float cachedTimeSeconds = -1f;
+        private float cachedTotalDuration = -1f;
+        private float cachedBlendWeight = -1f;
         
         #endregion
         
@@ -170,8 +178,7 @@ namespace DMotion.Editor
                     // Clamp for logic - always within one cycle
                     exitTime = Mathf.Clamp(requestedExitTime, 0f, fromStateDuration);
                     RecalculateTransitionDuration();
-                    UpdateDuration();
-                    UpdateLayout();
+                    RefreshLayout();
                 }
             }
         }
@@ -189,8 +196,7 @@ namespace DMotion.Editor
                 {
                     requestedTransitionDuration = newValue;
                     transitionDuration = Mathf.Clamp(newValue, MinTransitionDuration, toStateDuration);
-                    UpdateDuration();
-                    UpdateLayout();
+                    RefreshLayout();
                 }
             }
         }
@@ -205,8 +211,7 @@ namespace DMotion.Editor
             {
                 fromStateDuration = Mathf.Max(0.01f, value);
                 RecalculateTransitionDuration();
-                UpdateDuration();
-                UpdateLayout();
+                RefreshLayout();
             }
         }
         
@@ -220,8 +225,7 @@ namespace DMotion.Editor
             {
                 toStateDuration = Mathf.Max(0.01f, value);
                 RecalculateTransitionDuration();
-                UpdateDuration();
-                UpdateLayout();
+                RefreshLayout();
             }
         }
         
@@ -283,76 +287,21 @@ namespace DMotion.Editor
         
         /// <summary>
         /// Computed property: number of FROM bar cycles to display.
-        /// Shows ghost bars (cycles > 1) when:
-        /// - exitTime == 0 (context ghost to show previous cycle)
-        /// - requestedExitTime > fromStateDuration (from-duration shrunk below exit time)
+        /// Uses cached timing result from TransitionTimingCalculator.
         /// </summary>
-        private int FromVisualCycles
-        {
-            get
-            {
-                if (fromStateDuration <= 0.001f) return 1;
-                
-                float minExitTime = Mathf.Max(0f, fromStateDuration - toStateDuration);
-                float clampedExitTime = Mathf.Clamp(requestedExitTime, minExitTime, fromStateDuration);
-                
-                // Case 1: Duration shrunk - requestedExitTime exceeds fromStateDuration
-                if (requestedExitTime > fromStateDuration)
-                {
-                    // Use shared runtime utility for cycle count calculation
-                    int cycles = AnimationTimeUtils.CalculateCycleCount(requestedExitTime, fromStateDuration);
-                    return Mathf.Clamp(cycles, 1, MaxVisualCycles);
-                }
-                
-                // Case 2: Context ghost - exitTime is at zero (full overlap)
-                if (clampedExitTime < 0.001f && minExitTime < 0.001f)
-                {
-                    return 2; // Show one previous cycle for context
-                }
-                
-                // Normal case - no ghost
-                return 1;
-            }
-        }
+        private int FromVisualCycles => cachedTimingResult.FromVisualCycles > 0 ? cachedTimingResult.FromVisualCycles : 1;
         
         /// <summary>
         /// Computed property: number of TO bar cycles to display.
-        /// Shows ghost bars (cycles > 1) when:
-        /// - transitionDuration > toStateDuration (to-duration shrunk)
-        /// - bars end together (context ghost to show continuation)
+        /// Uses cached timing result from TransitionTimingCalculator.
         /// </summary>
-        private int ToVisualCycles
-        {
-            get
-            {
-                if (toStateDuration <= 0.001f) return 1;
-                
-                // Case 1: Duration shrunk - transitionDuration exceeds toStateDuration
-                if (requestedTransitionDuration > toStateDuration)
-                {
-                    // Use shared runtime utility for cycle count calculation
-                    int cycles = AnimationTimeUtils.CalculateCycleCount(requestedTransitionDuration, toStateDuration);
-                    return Mathf.Clamp(cycles, 1, MaxVisualCycles);
-                }
-                
-                // Case 2: Context ghost - bars end together
-                float clampedExitTime = EffectiveExitTime;
-                bool barsEndTogether = (clampedExitTime + toStateDuration) <= (fromStateDuration + 0.001f);
-                if (barsEndTogether)
-                {
-                    return 2; // Show one continuation cycle for context
-                }
-                
-                // Normal case - no ghost
-                return 1;
-            }
-        }
+        private int ToVisualCycles => cachedTimingResult.ToVisualCycles > 0 ? cachedTimingResult.ToVisualCycles : 1;
         
         /// <summary>
         /// Computed property: whether the FROM ghost is due to duration shrink (vs context).
         /// This affects how the to-bar position is calculated.
         /// </summary>
-        private bool IsFromGhostDurationShrink => requestedExitTime > fromStateDuration;
+        private bool IsFromGhostDurationShrink => cachedTimingResult.IsFromGhostDurationShrink;
         
         /// <summary>
         /// Computed property: the effective exit time clamped to valid range.
@@ -656,8 +605,7 @@ namespace DMotion.Editor
             this.transitionOffset = Mathf.Clamp01(transitionOffset);
             this.blendCurve = blendCurve ?? AnimationCurve.Linear(0f, 1f, 1f, 0f);
             
-            UpdateDuration();
-            UpdateLayout();
+            RefreshLayout();
         }
         
         /// <summary>
@@ -697,9 +645,27 @@ namespace DMotion.Editor
             {
                 // Recalculate layout while keeping transition duration constant
                 AdjustTimingsForDurationChange(oldFromDuration);
-                UpdateDuration();
-                UpdateLayout();
+                RefreshLayout();
             }
+        }
+        
+        /// <summary>
+        /// Recalculates the cached timing result using TransitionTimingCalculator.
+        /// Should be called whenever timing values change.
+        /// </summary>
+        private void RecalculateTimingResult()
+        {
+            var input = new TransitionTimingInput
+            {
+                FromStateDuration = fromStateDuration,
+                ToStateDuration = toStateDuration,
+                RequestedExitTime = requestedExitTime,
+                RequestedTransitionDuration = requestedTransitionDuration,
+                FromIsBlendState = fromStateAsset != null && AnimationStateUtils.IsBlendState(fromStateAsset),
+                ToIsBlendState = toStateAsset != null && AnimationStateUtils.IsBlendState(toStateAsset)
+            };
+            
+            cachedTimingResult = TransitionTimingCalculator.Calculate(input);
         }
         
         /// <summary>
@@ -710,37 +676,33 @@ namespace DMotion.Editor
         private void AdjustTimingsForDurationChange(float oldFromDuration)
         {
             float oldExitTime = exitTime;
-            
+
             // Preserve transition duration, adjust exit time to maintain overlap
             // exitTime = fromStateDuration - transitionDuration (so overlap = transitionDuration)
             float desiredExitTime = fromStateDuration - requestedTransitionDuration;
-            
+
             // Minimum exit time ensures to-bar ends at or after from-bar
             float minExitTime = Mathf.Max(0f, fromStateDuration - toStateDuration);
-            
+
             // Clamp exit time to valid range
             exitTime = Mathf.Clamp(desiredExitTime, minExitTime, fromStateDuration);
             requestedExitTime = exitTime; // Update requested to match (no ghost bars from exit time)
-            
+
             // Transition duration stays as requested, clamped to to-state duration
             transitionDuration = Mathf.Clamp(requestedTransitionDuration, MinTransitionDuration, toStateDuration);
-            
+
             // Notify listeners that exit time changed (so inspector updates)
-            if (Math.Abs(exitTime - oldExitTime) > ValueChangeEpsilon)
-            {
-                OnExitTimeChanged?.Invoke(exitTime);
-            }
+            if (Math.Abs(exitTime - oldExitTime) <= ValueChangeEpsilon) return; 
+            
+            OnExitTimeChanged?.Invoke(exitTime);
         }
-        
+
         #endregion
-        
+
         #region TimelineBase Overrides
-        
-        protected override Rect GetTrackRect()
-        {
-            return trackArea?.contentRect ?? Rect.zero;
-        }
-        
+
+        protected override Rect GetTrackRect() => trackArea?.contentRect ?? Rect.zero;
+
         protected override void OnCurrentTimeChanged()
         {
             base.OnCurrentTimeChanged();
@@ -752,13 +714,13 @@ namespace DMotion.Editor
         protected override void OnPlayingStateChanged()
         {
             base.OnPlayingStateChanged();
-            if (playButton != null)
-            {
-                playButton.text = IsPlaying ? "\u275a\u275a" : "\u25b6";
-                playButton.tooltip = IsPlaying ? "Pause" : "Play";
-            }
+            
+            if (playButton == null) return;
+
+            playButton.text = IsPlaying ? "\u275a\u275a" : "\u25b6";
+            playButton.tooltip = IsPlaying ? "Pause" : "Play";
         }
-        
+
         protected override void OnGeometryChanged(GeometryChangedEvent evt)
         {
             base.OnGeometryChanged(evt);
@@ -945,8 +907,10 @@ namespace DMotion.Editor
             overlapDurationLabel.text = $"{effectiveTransitionDuration:F2}s";
             
             // Update header duration labels
-            if (fromDurationLabel != null) fromDurationLabel.text = $"({fromStateDuration:F2}s)";
-            if (toDurationLabel != null) toDurationLabel.text = $"({toStateDuration:F2}s)";
+            if (fromDurationLabel != null)
+                fromDurationLabel.text = $"({fromStateDuration:F2}s)";
+            if (toDurationLabel != null)
+                toDurationLabel.text = $"({toStateDuration:F2}s)";
             
             // Update scrubber
             UpdateScrubberPosition();
@@ -988,15 +952,14 @@ namespace DMotion.Editor
             {
                 bool visible = i < count;
                 fromGhostBars[i].style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
-                
-                if (visible)
-                {
-                    // Position ghost bar to the LEFT of main from-bar
-                    fromGhostBars[i].style.top = barTop;
-                    fromGhostBars[i].style.height = BarHeight;
-                    fromGhostBars[i].style.left = Padding + i * barWidthPx;
-                    fromGhostBars[i].style.width = barWidthPx;
-                }
+
+                if (!visible) continue;
+
+                // Position ghost bar to the LEFT of main from-bar
+                fromGhostBars[i].style.top = barTop;
+                fromGhostBars[i].style.height = BarHeight;
+                fromGhostBars[i].style.left = Padding + i * barWidthPx;
+                fromGhostBars[i].style.width = barWidthPx;
             }
         }
         
@@ -1029,15 +992,14 @@ namespace DMotion.Editor
             {
                 bool visible = i < count;
                 toGhostBars[i].style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
-                
-                if (visible)
-                {
-                    // Position ghost bar to the RIGHT of main to-bar
-                    toGhostBars[i].style.top = barTop;
-                    toGhostBars[i].style.height = BarHeight;
-                    toGhostBars[i].style.left = toBarRightPx + i * barWidthPx;
-                    toGhostBars[i].style.width = barWidthPx;
-                }
+
+                if (!visible) continue; 
+
+                // Position ghost bar to the RIGHT of main to-bar
+                toGhostBars[i].style.top = barTop;
+                toGhostBars[i].style.height = BarHeight;
+                toGhostBars[i].style.left = toBarRightPx + i * barWidthPx;
+                toGhostBars[i].style.width = barWidthPx;
             }
         }
         
@@ -1214,30 +1176,28 @@ namespace DMotion.Editor
                 float deltaX = mouseX - dragStartMouseX;
                 float deltaSeconds = deltaX / pixelsPerSecond;
                 float newExitTime = dragStartValue + deltaSeconds;
-                
+
                 // Minimum exit time ensures to-bar ends at or after from-bar (must end in to-state)
                 float minExitTime = Mathf.Max(0f, fromStateDuration - toStateDuration);
                 newExitTime = Mathf.Clamp(newExitTime, minExitTime, fromStateDuration);
-                
-                if (Math.Abs(newExitTime - exitTime) > ValueChangeEpsilon)
-                {
-                    // Update exit time
-                    requestedExitTime = newExitTime;
-                    exitTime = newExitTime;
-                    
-                    // Update transition duration to match the new overlap
-                    // Overlap = fromStateDuration - exitTime
-                    float newTransitionDuration = fromStateDuration - exitTime;
-                    requestedTransitionDuration = Mathf.Max(MinTransitionDuration, newTransitionDuration);
-                    transitionDuration = Mathf.Clamp(requestedTransitionDuration, MinTransitionDuration, toStateDuration);
-                    
-                    UpdateDuration();
-                    UpdateLayout();
-                    OnExitTimeChanged?.Invoke(exitTime);
-                    // Fire event with the actual overlap duration (not clamped)
-                    // This is what gets stored in the asset
-                    OnTransitionDurationChanged?.Invoke(requestedTransitionDuration);
-                }
+
+                if (Math.Abs(newExitTime - exitTime) <= ValueChangeEpsilon) return; 
+
+                // Update exit time
+                requestedExitTime = newExitTime;
+                exitTime = newExitTime;
+
+                // Update transition duration to match the new overlap
+                // Overlap = fromStateDuration - exitTime
+                float newTransitionDuration = fromStateDuration - exitTime;
+                requestedTransitionDuration = Mathf.Max(MinTransitionDuration, newTransitionDuration);
+                transitionDuration = Mathf.Clamp(requestedTransitionDuration, MinTransitionDuration, toStateDuration);
+
+                RefreshLayout();
+                OnExitTimeChanged?.Invoke(exitTime);
+                // Fire event with the actual overlap duration (not clamped)
+                // This is what gets stored in the asset
+                OnTransitionDurationChanged?.Invoke(requestedTransitionDuration);
             }
         }
         
@@ -1245,14 +1205,9 @@ namespace DMotion.Editor
         
         #region Helpers
         
-        /// <summary>
-        /// Checks if a state is a blend state (LinearBlend or Directional2D).
-        /// Blend states have their exit time derived from duration - transitionDuration.
-        /// Simple states (SingleClip) use the stored EndTime value.
-        /// </summary>
         private static bool IsBlendState(AnimationStateAsset state)
         {
-            return state is LinearBlendStateAsset or Directional2DBlendStateAsset;
+            return AnimationStateUtils.IsBlendState(state);
         }
         
         private void RecalculateTransitionDuration()
@@ -1275,6 +1230,16 @@ namespace DMotion.Editor
                 Mathf.Min(MaxTransitionDuration, Mathf.Min(maxPossibleTransition, toStateDuration)));
         }
         
+        /// <summary>
+        /// Refreshes timing calculations and layout. Call after any timing value changes.
+        /// </summary>
+        private void RefreshLayout()
+        {
+            RecalculateTimingResult();
+            UpdateDuration();
+            UpdateLayout();
+        }
+        
         private void UpdateDuration()
         {
             Duration = GetTotalTimelineDuration();
@@ -1287,19 +1252,31 @@ namespace DMotion.Editor
             {
                 float totalDuration = GetTotalTimelineDuration();
                 float currentSeconds = NormalizedTime * totalDuration;
-                timeLabel.text = $"{currentSeconds:F2}s / {totalDuration:F2}s";
+
+                // Only update if values changed (avoid string allocations)
+                if (Mathf.Abs(currentSeconds - cachedTimeSeconds) > 0.005f ||
+                    Mathf.Abs(totalDuration - cachedTotalDuration) > 0.005f)
+                {
+                    cachedTimeSeconds = currentSeconds;
+                    cachedTotalDuration = totalDuration;
+                    timeLabel.text = $"{currentSeconds:F2}s / {totalDuration:F2}s";
+                }
             }
+
+            if (blendLabel == null) return;
+
+            // Apply blend curve: curve Y is "from" weight, so "to" weight = 1 - curve
+            float progress = TransitionProgress;
+            float curveValue = blendCurve?.Evaluate(progress) ?? (1f - progress);
+            float blendWeight = 1f - curveValue; // Convert from "from weight" to "to weight"
+
+            // Only update if value changed (avoid string allocations)
+            if (Mathf.Abs(blendWeight - cachedBlendWeight) <= 0.005f) return; 
             
-            if (blendLabel != null)
-            {
-                // Apply blend curve: curve Y is "from" weight, so "to" weight = 1 - curve
-                float progress = TransitionProgress;
-                float curveValue = blendCurve?.Evaluate(progress) ?? (1f - progress);
-                float blendWeight = 1f - curveValue; // Convert from "from weight" to "to weight"
-                blendLabel.text = $"Blend: {blendWeight:P0}";
-            }
+            cachedBlendWeight = blendWeight;
+            blendLabel.text = $"Blend: {blendWeight:P0}";
         }
-        
+
         private float GetTotalTimelineDuration()
         {
             // Total FROM bar end (all cycles)

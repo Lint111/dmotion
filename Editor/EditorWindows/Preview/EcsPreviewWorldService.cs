@@ -100,8 +100,6 @@ namespace DMotion.Editor
                 // ScriptBehaviourUpdateOrder.AppendWorldToCurrentPlayerLoop(world);
                 
                 isInitialized = true;
-                
-                Debug.Log($"[EcsPreviewWorldService] Created preview world: {WorldName}");
             }
             catch (Exception e)
             {
@@ -130,8 +128,6 @@ namespace DMotion.Editor
                     
                     // Dispose the world
                     world.Dispose();
-                    
-                    Debug.Log($"[EcsPreviewWorldService] Destroyed preview world: {WorldName}");
                 }
                 catch (Exception e)
                 {
@@ -275,7 +271,6 @@ namespace DMotion.Editor
                 // - etc.
                 // These are typically set up during baking from the skeleton asset.
                 
-                Debug.Log($"[EcsPreviewWorldService] Created preview entity: {previewEntity}");
                 return previewEntity;
             }
             catch (Exception e)
@@ -550,6 +545,7 @@ namespace DMotion.Editor
                 // Pre-create ALL animation states and their samplers
                 int stateCount = smBlob.States.Length;
                 byte nextSamplerId = 0;
+                var clips = new ClipResources(clipsBlob, clipEventsBlob);
                 
                 for (int stateIndex = 0; stateIndex < stateCount; stateIndex++)
                 {
@@ -572,10 +568,9 @@ namespace DMotion.Editor
                     animationStates.Add(animState);
                     
                     // Create ClipSampler entries for this state
-                    CreateSamplersForState(ref smBlob, ref stateBlob, stateIndex, clipSamplers, clipsBlob, clipEventsBlob, ref nextSamplerId);
+                    CreateSamplersForState(ref smBlob, ref stateBlob, stateIndex, clipSamplers, clips, ref nextSamplerId);
                 }
                 
-                Debug.Log($"[EcsPreviewWorldService] Created full preview entity with {stateCount} states, {clipSamplers.Length} samplers");
                 return previewEntity;
             }
             catch (Exception e)
@@ -610,8 +605,7 @@ namespace DMotion.Editor
             ref AnimationStateBlob stateBlob,
             int stateIndex,
             DynamicBuffer<ClipSampler> samplers,
-            BlobAssetReference<SkeletonClipSetBlob> clipsBlob,
-            BlobAssetReference<ClipEventsBlob> clipEventsBlob,
+            ClipResources clips,
             ref byte nextSamplerId)
         {
             switch (stateBlob.Type)
@@ -622,8 +616,8 @@ namespace DMotion.Editor
                     samplers.Add(new ClipSampler
                     {
                         Id = nextSamplerId++,
-                        Clips = clipsBlob,
-                        ClipEventsBlob = clipEventsBlob,
+                        Clips = clips.Clips,
+                        ClipEventsBlob = clips.ClipEvents,
                         ClipIndex = singleState.ClipIndex,
                         Time = 0f,
                         PreviousTime = 0f,
@@ -638,10 +632,10 @@ namespace DMotion.Editor
                     for (int i = 0; i < linearState.SortedClipIndexes.Length; i++)
                     {
                         samplers.Add(new ClipSampler
-                        {
+                        { 
                             Id = nextSamplerId++,
-                            Clips = clipsBlob,
-                            ClipEventsBlob = clipEventsBlob,
+                            Clips = clips.Clips,
+                            ClipEventsBlob = clips.ClipEvents,
                             ClipIndex = (ushort)linearState.SortedClipIndexes[i],
                             Time = 0f,
                             PreviousTime = 0f,
@@ -659,8 +653,8 @@ namespace DMotion.Editor
                         samplers.Add(new ClipSampler
                         {
                             Id = nextSamplerId++,
-                            Clips = clipsBlob,
-                            ClipEventsBlob = clipEventsBlob,
+                            Clips = clips.Clips,
+                            ClipEventsBlob = clips.ClipEvents,
                             ClipIndex = (ushort)dir2DState.ClipIndexes[i],
                             Time = 0f,
                             PreviousTime = 0f,

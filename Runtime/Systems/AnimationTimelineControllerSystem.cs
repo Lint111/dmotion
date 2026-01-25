@@ -6,6 +6,42 @@ using Unity.Mathematics;
 
 namespace DMotion
 {
+    #region State Setup Helper Structs
+    
+    /// <summary>
+    /// Clip blob references needed for sampler creation.
+    /// Groups clips and clip events that always travel together.
+    /// </summary>
+    public struct ClipResources
+    {
+        public BlobAssetReference<SkeletonClipSetBlob> Clips;
+        public BlobAssetReference<ClipEventsBlob> ClipEvents;
+        
+        public ClipResources(BlobAssetReference<SkeletonClipSetBlob> clips, BlobAssetReference<ClipEventsBlob> clipEvents)
+        {
+            Clips = clips;
+            ClipEvents = clipEvents;
+        }
+    }
+    
+    /// <summary>
+    /// Parameters for setting up a state's animation.
+    /// </summary>
+    public struct StateSetupParams
+    {
+        public ushort StateIndex;
+        public float Speed;
+        public bool Loop;
+        
+        public StateSetupParams(ushort stateIndex, float speed, bool loop)
+        {
+            StateIndex = stateIndex;
+            Speed = speed;
+            Loop = loop;
+        }
+    }
+    
+    #endregion
     /// <summary>
     /// Processes animation timeline commands and generates render requests.
     /// 
@@ -78,16 +114,21 @@ namespace DMotion
                     sections,
                     deltaTime);
                 
-                // If not paused, advance time
-                if (!scrubber.ValueRO.IsPaused && scrubber.ValueRO.TimeScale > 0)
-                {
-                    AdvanceTime(ref position.ValueRW, sections, deltaTime * scrubber.ValueRO.TimeScale);
-                }
-                
-                // Generate render request from current position
+                // Get state machine for curve evaluation
                 var stateMachine = stateMachineLookup.HasComponent(entity) 
                     ? stateMachineLookup[entity] 
                     : default;
+                
+                // Update TimeScale based on current section's speed (uses transition curve for blending)
+                float sectionSpeed = GetCurrentSectionSpeed(position.ValueRO, sections, stateMachine);
+                
+                // If not paused, advance time using section speed
+                if (!scrubber.ValueRO.IsPaused && sectionSpeed > 0)
+                {
+                    AdvanceTime(ref position.ValueRW, sections, deltaTime * sectionSpeed);
+                }
+                
+                // Generate render request from current position
                 GenerateRenderRequest(
                     ref activeRequest.ValueRW,
                     ref stateRequest.ValueRW,
@@ -239,6 +280,42 @@ namespace DMotion
                 
                 accumulated = sectionEnd;
             }
+        }
+        
+        /// <summary>
+        /// Gets the effective playback speed for the current section.
+        /// For transitions, blends between FROM and TO speeds using the transition curve.
+        /// </summary>
+        [BurstCompile]
+        private static float GetCurrentSectionSpeed(
+            in AnimationTimelinePosition position,
+            in DynamicBuffer<TimelineSection> sections,
+            in AnimationStateMachine stateMachine)
+        {
+            if (sections.Length == 0 || position.CurrentSectionIndex < 0 || position.CurrentSectionIndex >= sections.Length)
+                return 1f;
+            
+            var section = sections[position.CurrentSectionIndex];
+            
+            // For transitions, blend between FROM and TO speeds using the transition curve
+            if (section.Type == TimelineSectionType.Transition)
+            {
+                float fromSpeed = section.Speed > 0 ? section.Speed : 1f;
+                float toSpeed = section.ToSpeed > 0 ? section.ToSpeed : 1f;
+                
+                // Use the transition curve for speed blending (same curve as animation weights)
+                float blendWeight = EvaluateTransitionBlendWeight(
+                    position.SectionProgress,
+                    section.TransitionIndex,
+                    section.CurveSource,
+                    section.FromStateIndex,
+                    stateMachine);
+                
+                return math.lerp(fromSpeed, toSpeed, blendWeight);
+            }
+            
+            // For other sections, use the section's speed directly
+            return section.Speed > 0 ? section.Speed : 1f;
         }
         
         [BurstCompile]
@@ -451,13 +528,14 @@ namespace DMotion
             Entity entity,
             ushort stateIndex,
             float stateDuration,
+            float speed,
             float2 blendPosition = default)
         {
             var sections = em.GetBuffer<TimelineSection>(entity);
             sections.Clear();
             
             // Single state section
-            sections.Add(TimelineSection.State(stateIndex, stateDuration, 0f, blendPosition));
+            sections.Add(TimelineSection.State(stateIndex, stateDuration, 0f, blendPosition, speed));
             
             // Reset position
             em.SetComponentData(entity, new AnimationTimelinePosition
@@ -476,9 +554,100 @@ namespace DMotion
         /// Full layout: [GhostFrom?] [FromBar] [Transition] [ToBar] [GhostTo?]
         /// </summary>
         /// <param name="fromStateDuration">Full duration of FROM state clip (for normalized time calculation)</param>
-        /// <param name="toStateDuration">Full duration of TO state clip (for normalized time calculation)</param>
-        /// <param name="fromBarDuration">Duration of FromBar section in seconds (usually = exitTime)</param>
-        /// <param name="toBarDuration">Duration of ToBar section in seconds (usually = toStateDuration - transitionDuration)</param>
+        /// <summary>
+        /// Configures timeline for transition preview using a config struct.
+        /// Cleaner API - preferred over the multi-parameter overload.
+        /// </summary>
+        public static void SetupTransitionPreview(this EntityManager em, Entity entity, in TransitionPreviewConfig config)
+        {
+            var sections = em.GetBuffer<TimelineSection>(entity);
+            sections.Clear();
+            
+            float time = 0f;
+            ref readonly var from = ref config.FromState;
+            ref readonly var to = ref config.ToState;
+            ref readonly var durations = ref config.Sections;
+            
+            // Track animation time progression for FROM and TO states
+            float fromAnimTime = 0f;
+            float toAnimTime = 0f;
+            
+            // 1. Ghost FROM (previous cycle, plays 0→1)
+            if (durations.GhostFromDuration > 0 && from.ClipDuration > 0)
+            {
+                sections.Add(TimelineSection.GhostFrom(StateSectionConfig.Create(
+                    from,
+                    SectionRenderParams.FullClip(time, durations.GhostFromDuration))));
+                time += durations.GhostFromDuration;
+                fromAnimTime = 0f;
+            }
+            
+            // 2. FROM bar (FROM state at 100%)
+            if (durations.FromBarDuration > 0 && from.ClipDuration > 0)
+            {
+                float fromBarAnimEnd = fromAnimTime + (durations.FromBarDuration / from.ClipDuration);
+                sections.Add(TimelineSection.FromBar(StateSectionConfig.Create(
+                    from,
+                    SectionRenderParams.Create(time, durations.FromBarDuration, new AnimTimeRange(fromAnimTime, fromBarAnimEnd)))));
+                time += durations.FromBarDuration;
+                fromAnimTime = fromBarAnimEnd;
+            }
+            
+            // 3. Transition (FROM continues, TO starts at 0)
+            if (durations.TransitionDuration > 0)
+            {
+                float transFromAnimEnd = from.ClipDuration > 0 ? fromAnimTime + (durations.TransitionDuration / from.ClipDuration) : fromAnimTime;
+                float transToAnimEnd = to.ClipDuration > 0 ? toAnimTime + (durations.TransitionDuration / to.ClipDuration) : toAnimTime;
+                
+                sections.Add(TimelineSection.Transition(new TransitionSectionConfig
+                {
+                    FromState = from,
+                    ToState = to,
+                    Render = SectionRenderParams.Create(time, durations.TransitionDuration, new AnimTimeRange(fromAnimTime, transFromAnimEnd)),
+                    ToAnimRange = new AnimTimeRange(toAnimTime, transToAnimEnd),
+                    Transition = config.Transition
+                }));
+                time += durations.TransitionDuration;
+                fromAnimTime = transFromAnimEnd;
+                toAnimTime = transToAnimEnd;
+            }
+            
+            // 4. TO bar (TO state at 100%)
+            if (durations.ToBarDuration > 0 && to.ClipDuration > 0)
+            {
+                float toBarAnimEnd = toAnimTime + (durations.ToBarDuration / to.ClipDuration);
+                sections.Add(TimelineSection.ToBar(StateSectionConfig.Create(
+                    to,
+                    SectionRenderParams.Create(time, durations.ToBarDuration, new AnimTimeRange(toAnimTime, toBarAnimEnd)))));
+                time += durations.ToBarDuration;
+                toAnimTime = toBarAnimEnd;
+            }
+            
+            // 5. Ghost TO (continuation cycle)
+            if (durations.GhostToDuration > 0 && to.ClipDuration > 0)
+            {
+                float ghostToAnimStart = toAnimTime >= 1f ? 0f : toAnimTime;
+                float ghostToAnimEnd = ghostToAnimStart + (durations.GhostToDuration / to.ClipDuration);
+                sections.Add(TimelineSection.GhostTo(StateSectionConfig.Create(
+                    to,
+                    SectionRenderParams.Create(time, durations.GhostToDuration, new AnimTimeRange(ghostToAnimStart, ghostToAnimEnd)))));
+                time += durations.GhostToDuration;
+            }
+            
+            em.SetComponentData(entity, new AnimationTimelinePosition
+            {
+                CurrentTime = 0f,
+                TotalDuration = time,
+                CurrentSectionIndex = 0,
+                SectionProgress = 0f
+            });
+        }
+        
+        /// <summary>
+        /// Configures timeline for transition preview (legacy multi-parameter overload).
+        /// Prefer using the TransitionPreviewConfig overload for cleaner code.
+        /// </summary>
+        [System.Obsolete("Use SetupTransitionPreview(EntityManager, Entity, TransitionPreviewConfig) instead")]
         public static void SetupTransitionPreview(
             this EntityManager em,
             Entity entity,
@@ -486,6 +655,8 @@ namespace DMotion
             ushort toStateIndex,
             float fromStateDuration,
             float toStateDuration,
+            float fromSpeed,
+            float toSpeed,
             float transitionDuration,
             short transitionIndex,
             TransitionSource curveSource,
@@ -496,84 +667,14 @@ namespace DMotion
             float ghostFromDuration = 0f,
             float ghostToDuration = 0f)
         {
-            var sections = em.GetBuffer<TimelineSection>(entity);
-            sections.Clear();
+            var config = TransitionPreviewConfig.Create(
+                fromStateIndex, fromStateDuration, fromSpeed, fromBlendPosition,
+                toStateIndex, toStateDuration, toSpeed, toBlendPosition,
+                transitionDuration, fromBarDuration, toBarDuration,
+                ghostFromDuration, ghostToDuration,
+                transitionIndex, curveSource);
             
-            float time = 0f;
-            
-            // Track animation time progression for FROM and TO states
-            float fromAnimTime = 0f;  // Current position in FROM animation (normalized)
-            float toAnimTime = 0f;    // Current position in TO animation (normalized)
-            
-            // 1. Ghost FROM (previous cycle, plays 0→1)
-            if (ghostFromDuration > 0 && fromStateDuration > 0)
-            {
-                sections.Add(TimelineSection.GhostFrom(fromStateIndex, ghostFromDuration, time, fromBlendPosition));
-                time += ghostFromDuration;
-                // Ghost plays full cycle, FROM animation resets to 0 for FromBar
-                fromAnimTime = 0f;
-            }
-            
-            // 2. FROM bar (FROM state at 100%, plays from 0 to exitTime/fromStateDuration)
-            if (fromBarDuration > 0 && fromStateDuration > 0)
-            {
-                float fromBarAnimStart = fromAnimTime;
-                float fromBarAnimEnd = fromAnimTime + (fromBarDuration / fromStateDuration);
-                UnityEngine.Debug.Log($"[SetupTransitionPreview] FromBar: duration={fromBarDuration:F3}, stateDur={fromStateDuration:F3}, animStart={fromBarAnimStart:F3}, animEnd={fromBarAnimEnd:F3}");
-                sections.Add(TimelineSection.FromBar(fromStateIndex, fromBarDuration, time, fromBlendPosition, fromBarAnimStart, fromBarAnimEnd));
-                time += fromBarDuration;
-                fromAnimTime = fromBarAnimEnd;
-            }
-            
-            // 3. Transition (FROM continues, TO starts at 0)
-            if (transitionDuration > 0)
-            {
-                float transFromAnimStart = fromAnimTime;
-                float transFromAnimEnd = fromStateDuration > 0 ? fromAnimTime + (transitionDuration / fromStateDuration) : fromAnimTime;
-                float transToAnimStart = toAnimTime;
-                float transToAnimEnd = toStateDuration > 0 ? toAnimTime + (transitionDuration / toStateDuration) : toAnimTime;
-                
-                UnityEngine.Debug.Log($"[SetupTransitionPreview] Transition: duration={transitionDuration:F3}, fromAnim={transFromAnimStart:F3}→{transFromAnimEnd:F3}, toAnim={transToAnimStart:F3}→{transToAnimEnd:F3}");
-                
-                sections.Add(TimelineSection.Transition(
-                    fromStateIndex, toStateIndex,
-                    transitionDuration, time,
-                    transitionIndex, curveSource,
-                    fromBlendPosition, toBlendPosition,
-                    transFromAnimStart, transFromAnimEnd,
-                    transToAnimStart, transToAnimEnd));
-                time += transitionDuration;
-                fromAnimTime = transFromAnimEnd;
-                toAnimTime = transToAnimEnd;
-            }
-            
-            // 4. TO bar (TO state at 100%, continues from where transition ended)
-            if (toBarDuration > 0 && toStateDuration > 0)
-            {
-                float toBarAnimStart = toAnimTime;
-                float toBarAnimEnd = toAnimTime + (toBarDuration / toStateDuration);
-                sections.Add(TimelineSection.ToBar(toStateIndex, toBarDuration, time, toBlendPosition, toBarAnimStart, toBarAnimEnd));
-                time += toBarDuration;
-                toAnimTime = toBarAnimEnd;
-            }
-            
-            // 5. Ghost TO (continuation cycle, continues from where ToBar ended or starts new cycle)
-            if (ghostToDuration > 0 && toStateDuration > 0)
-            {
-                // If we've already played a full cycle, start fresh; otherwise continue
-                float ghostToAnimStart = toAnimTime >= 1f ? 0f : toAnimTime;
-                float ghostToAnimEnd = ghostToAnimStart + (ghostToDuration / toStateDuration);
-                sections.Add(TimelineSection.GhostTo(toStateIndex, ghostToDuration, time, toBlendPosition, ghostToAnimStart, ghostToAnimEnd));
-                time += ghostToDuration;
-            }
-            
-            em.SetComponentData(entity, new AnimationTimelinePosition
-            {
-                CurrentTime = 0f,
-                TotalDuration = time,
-                CurrentSectionIndex = 0,
-                SectionProgress = 0f
-            });
+            em.SetupTransitionPreview(entity, in config);
         }
         
         /// <summary>
@@ -636,24 +737,10 @@ namespace DMotion
             animationStates.Clear();
             samplers.Clear();
             
-            // Set up based on state type
-            switch (stateBlob.Type)
-            {
-                case StateType.Single:
-                    SetupSingleClipState(ref smBlob, sm.ClipsBlob, sm.ClipEventsBlob, stateIndex, ref animationStates, ref samplers, stateBlob.Speed, stateBlob.Loop);
-                    break;
-                    
-                case StateType.LinearBlend:
-                    SetupLinearBlendState(ref smBlob, sm.ClipsBlob, sm.ClipEventsBlob, stateIndex, ref animationStates, ref samplers, stateBlob.Speed, stateBlob.Loop);
-                    break;
-                    
-                case StateType.Directional2DBlend:
-                    SetupDirectional2DState(ref smBlob, sm.ClipsBlob, sm.ClipEventsBlob, stateIndex, ref animationStates, ref samplers, stateBlob.Speed, stateBlob.Loop);
-                    break;
-                    
-                default:
-                    return false;
-            }
+            var clips = new ClipResources(sm.ClipsBlob, sm.ClipEventsBlob);
+            var setup = new StateSetupParams(stateIndex, stateBlob.Speed, stateBlob.Loop);
+            
+            SetupStateForTransition(ref smBlob, clips, ref animationStates, ref samplers, setup);
             
             return animationStates.Length > 0;
         }
@@ -682,15 +769,17 @@ namespace DMotion
             animationStates.Clear();
             samplers.Clear();
             
+            var clips = new ClipResources(sm.ClipsBlob, sm.ClipEventsBlob);
+            
             // Set up FROM state (index 0 in AnimationStates buffer)
             ref var fromStateBlob = ref smBlob.States[fromStateIndex];
-            SetupStateForTransition(ref smBlob, sm.ClipsBlob, sm.ClipEventsBlob, fromStateIndex, 
-                ref animationStates, ref samplers, fromStateBlob.Speed, fromStateBlob.Loop);
+            var fromSetup = new StateSetupParams(fromStateIndex, fromStateBlob.Speed, fromStateBlob.Loop);
+            SetupStateForTransition(ref smBlob, clips, ref animationStates, ref samplers, fromSetup);
             
             // Set up TO state (index 1 in AnimationStates buffer)
             ref var toStateBlob = ref smBlob.States[toStateIndex];
-            SetupStateForTransition(ref smBlob, sm.ClipsBlob, sm.ClipEventsBlob, toStateIndex, 
-                ref animationStates, ref samplers, toStateBlob.Speed, toStateBlob.Loop);
+            var toSetup = new StateSetupParams(toStateIndex, toStateBlob.Speed, toStateBlob.Loop);
+            SetupStateForTransition(ref smBlob, clips, ref animationStates, ref samplers, toSetup);
             
             return animationStates.Length >= 2;
         }
@@ -700,68 +789,59 @@ namespace DMotion
         /// </summary>
         private static void SetupStateForTransition(
             ref StateMachineBlob smBlob,
-            BlobAssetReference<SkeletonClipSetBlob> clips,
-            BlobAssetReference<ClipEventsBlob> clipEvents,
-            ushort stateIndex,
+            ClipResources clips,
             ref DynamicBuffer<AnimationState> animationStates,
             ref DynamicBuffer<ClipSampler> samplers,
-            float speed,
-            bool loop)
+            StateSetupParams setup)
         {
-            ref var stateBlob = ref smBlob.States[stateIndex];
+            ref var stateBlob = ref smBlob.States[setup.StateIndex];
             
             switch (stateBlob.Type)
             {
                 case StateType.Single:
-                    SetupSingleClipState(ref smBlob, clips, clipEvents, stateIndex, ref animationStates, ref samplers, speed, loop);
+                    SetupSingleClipState(ref smBlob, clips, ref animationStates, ref samplers, setup);
                     break;
                     
                 case StateType.LinearBlend:
-                    SetupLinearBlendState(ref smBlob, clips, clipEvents, stateIndex, ref animationStates, ref samplers, speed, loop);
+                    SetupLinearBlendState(ref smBlob, clips, ref animationStates, ref samplers, setup);
                     break;
                     
                 case StateType.Directional2DBlend:
-                    SetupDirectional2DState(ref smBlob, clips, clipEvents, stateIndex, ref animationStates, ref samplers, speed, loop);
+                    SetupDirectional2DState(ref smBlob, clips, ref animationStates, ref samplers, setup);
                     break;
             }
         }
         
         private static void SetupSingleClipState(
             ref StateMachineBlob smBlob,
-            BlobAssetReference<SkeletonClipSetBlob> clips,
-            BlobAssetReference<ClipEventsBlob> clipEvents,
-            ushort stateIndex,
+            ClipResources clips,
             ref DynamicBuffer<AnimationState> animationStates,
             ref DynamicBuffer<ClipSampler> samplers,
-            float speed,
-            bool loop)
+            StateSetupParams setup)
         {
-            ref var singleClipBlob = ref smBlob.SingleClipStates[smBlob.States[stateIndex].StateIndex];
+            ref var singleClipBlob = ref smBlob.SingleClipStates[smBlob.States[setup.StateIndex].StateIndex];
             
             var sampler = new ClipSampler
             {
                 ClipIndex = singleClipBlob.ClipIndex,
-                Clips = clips,
-                ClipEventsBlob = clipEvents,
+                Clips = clips.Clips,
+                ClipEventsBlob = clips.ClipEvents,
                 PreviousTime = 0,
                 Time = 0,
                 Weight = 1f
             };
             
-            AnimationState.New(ref animationStates, ref samplers, sampler, speed, loop);
+            AnimationState.New(ref animationStates, ref samplers, sampler, setup.Speed, setup.Loop);
         }
         
         private static void SetupLinearBlendState(
             ref StateMachineBlob smBlob,
-            BlobAssetReference<SkeletonClipSetBlob> clips,
-            BlobAssetReference<ClipEventsBlob> clipEvents,
-            ushort stateIndex,
+            ClipResources clips,
             ref DynamicBuffer<AnimationState> animationStates,
             ref DynamicBuffer<ClipSampler> samplers,
-            float speed,
-            bool loop)
+            StateSetupParams setup)
         {
-            ref var linearBlob = ref smBlob.LinearBlendStates[smBlob.States[stateIndex].StateIndex];
+            ref var linearBlob = ref smBlob.LinearBlendStates[smBlob.States[setup.StateIndex].StateIndex];
             int clipCount = linearBlob.SortedClipIndexes.Length;
             
             var newSamplers = new NativeArray<ClipSampler>(clipCount, Allocator.Temp);
@@ -770,29 +850,26 @@ namespace DMotion
                 newSamplers[i] = new ClipSampler
                 {
                     ClipIndex = (ushort)linearBlob.SortedClipIndexes[i],
-                    Clips = clips,
-                    ClipEventsBlob = clipEvents,
+                    Clips = clips.Clips,
+                    ClipEventsBlob = clips.ClipEvents,
                     PreviousTime = 0,
                     Time = 0,
                     Weight = 0
                 };
             }
             
-            AnimationState.New(ref animationStates, ref samplers, newSamplers, speed, loop);
+            AnimationState.New(ref animationStates, ref samplers, newSamplers, setup.Speed, setup.Loop);
             newSamplers.Dispose();
         }
         
         private static void SetupDirectional2DState(
             ref StateMachineBlob smBlob,
-            BlobAssetReference<SkeletonClipSetBlob> clips,
-            BlobAssetReference<ClipEventsBlob> clipEvents,
-            ushort stateIndex,
+            ClipResources clips,
             ref DynamicBuffer<AnimationState> animationStates,
             ref DynamicBuffer<ClipSampler> samplers,
-            float speed,
-            bool loop)
+            StateSetupParams setup)
         {
-            ref var blend2DBlob = ref smBlob.Directional2DBlendStates[smBlob.States[stateIndex].StateIndex];
+            ref var blend2DBlob = ref smBlob.Directional2DBlendStates[smBlob.States[setup.StateIndex].StateIndex];
             int clipCount = blend2DBlob.ClipIndexes.Length;
             
             var newSamplers = new NativeArray<ClipSampler>(clipCount, Allocator.Temp);
@@ -801,15 +878,15 @@ namespace DMotion
                 newSamplers[i] = new ClipSampler
                 {
                     ClipIndex = (ushort)blend2DBlob.ClipIndexes[i],
-                    Clips = clips,
-                    ClipEventsBlob = clipEvents,
+                    Clips = clips.Clips,
+                    ClipEventsBlob = clips.ClipEvents,
                     PreviousTime = 0,
                     Time = 0,
                     Weight = 0
                 };
             }
             
-            AnimationState.New(ref animationStates, ref samplers, newSamplers, speed, loop);
+            AnimationState.New(ref animationStates, ref samplers, newSamplers, setup.Speed, setup.Loop);
             newSamplers.Dispose();
         }
     }

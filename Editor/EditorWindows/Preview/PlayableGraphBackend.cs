@@ -174,6 +174,13 @@ namespace DMotion.Editor
             renderer.SetTransitionToBlendPosition(new Vector2(position.x, position.y));
         }
         
+        public void RebuildTransitionTimeline(float2 fromBlendPos, float2 toBlendPos)
+        {
+            // PlayableGraph backend doesn't need explicit rebuild - just update blend positions
+            renderer.SetTransitionFromBlendPosition(new Vector2(fromBlendPos.x, fromBlendPos.y));
+            renderer.SetTransitionToBlendPosition(new Vector2(toBlendPos.x, toBlendPos.y));
+        }
+        
         public void SetSoloClip(int clipIndex)
         {
             renderer.SetSoloClip(clipIndex);

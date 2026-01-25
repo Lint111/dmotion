@@ -80,6 +80,12 @@ namespace DMotion.Editor
         /// </summary>
         public event Action<bool> OnPlayStateChanged;
         
+        /// <summary>
+        /// Fired when transition properties (duration, exit time) change.
+        /// Used to trigger ECS timeline rebuild.
+        /// </summary>
+        public event Action OnTransitionPropertiesChanged;
+        
         #endregion
         
         #region Properties
@@ -707,6 +713,7 @@ namespace DMotion.Editor
                 transitionExitTime = newExitTime;
             }
             OnRepaintRequested?.Invoke();
+            OnTransitionPropertiesChanged?.Invoke();
         }
         
         private void OnTimelineDurationChanged(float newDuration)
@@ -726,6 +733,7 @@ namespace DMotion.Editor
                 transitionDuration = newDuration;
             }
             OnRepaintRequested?.Invoke();
+            OnTransitionPropertiesChanged?.Invoke();
         }
         
         private void OnTimelineOffsetChanged(float newOffset)
@@ -742,7 +750,7 @@ namespace DMotion.Editor
         
         private static bool IsBlendState(AnimationStateAsset state)
         {
-            return state is LinearBlendStateAsset || state is Directional2DBlendStateAsset;
+            return AnimationStateUtils.IsBlendState(state);
         }
         
         /// <summary>

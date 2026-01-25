@@ -1,4 +1,5 @@
 using System;
+using DMotion;
 using DMotion.Authoring;
 using Unity.Entities;
 using Unity.Mathematics;
@@ -68,6 +69,7 @@ namespace DMotion.Editor
             }
             
             float duration = GetStateDuration(state, blendPosition);
+            float speed = GetStateSpeed(state, blendPosition);
             
             var em = targetWorld.EntityManager;
             
@@ -79,7 +81,7 @@ namespace DMotion.Editor
                 return;
             }
             
-            em.SetupStatePreview(targetEntity, (ushort)stateIndex, duration, blendPosition);
+            em.SetupStatePreview(targetEntity, (ushort)stateIndex, duration, speed, blendPosition);
             em.ActivateTimelineControl(targetEntity, startPaused: true); // Start paused - user must click play
         }
         
@@ -100,8 +102,6 @@ namespace DMotion.Editor
             float2 fromBlendPosition = default,
             float2 toBlendPosition = default)
         {
-            Debug.Log($"[TimelineControlHelper] SetupTransitionPreview: from={fromState?.name}, to={toState?.name}");
-            
             if (!ValidateState())
             {
                 Debug.LogWarning("[TimelineControlHelper] ValidateState failed");
@@ -110,8 +110,6 @@ namespace DMotion.Editor
             
             int fromIndex = fromState != null ? GetStateIndex(fromState) : -1;
             int toIndex = GetStateIndex(toState);
-            
-            Debug.Log($"[TimelineControlHelper] fromIndex={fromIndex}, toIndex={toIndex}");
             
             if (toIndex < 0)
             {
@@ -125,98 +123,50 @@ namespace DMotion.Editor
             ushort fromIdx = fromIndex >= 0 ? (ushort)fromIndex : (ushort)toIndex;
             if (!em.SetupTransitionStatesForPreview(targetEntity, fromIdx, (ushort)toIndex))
             {
-                Debug.LogWarning($"[TimelineControlHelper] Failed to set up animation states for transition preview");
+                Debug.LogWarning("[TimelineControlHelper] Failed to set up animation states for transition preview");
                 return;
             }
             
-            // Extract timing from transition asset
-            float requestedTransitionDuration = transition?.TransitionDuration ?? 0.25f;
-            float requestedExitTime = transition?.EndTime ?? 0f;
-            bool hasExitTime = transition?.HasEndTime ?? false;
+            // Calculate timing using shared utility
+            var timingInput = TransitionTimingInput.FromStates(
+                fromState, toState,
+                new Vector2(fromBlendPosition.x, fromBlendPosition.y),
+                new Vector2(toBlendPosition.x, toBlendPosition.y),
+                transition?.EndTime ?? 0f,
+                transition?.TransitionDuration ?? 0.25f);
             
-            // Calculate state durations
-            float fromStateDuration = fromState != null ? GetStateDuration(fromState, fromBlendPosition) : 0f;
-            float toStateDuration = GetStateDuration(toState, toBlendPosition);
+            var timing = TransitionTimingCalculator.Calculate(timingInput);
             
-            Debug.Log($"[TimelineControlHelper] Timing: reqTransDur={requestedTransitionDuration:F3}, reqExitTime={requestedExitTime:F3}, hasExitTime={hasExitTime}");
-            Debug.Log($"[TimelineControlHelper] Durations: fromStateDur={fromStateDuration:F3}, toStateDur={toStateDuration:F3}");
+            // Get speeds for animation playback
+            float fromSpeed = fromState != null ? GetStateSpeed(fromState, fromBlendPosition) : 1f;
+            float toSpeed = GetStateSpeed(toState, toBlendPosition);
             
-            // Clamp values for logic (matching TransitionTimeline)
-            float minExitTime = Mathf.Max(0f, fromStateDuration - toStateDuration);
-            float exitTime = Mathf.Clamp(requestedExitTime, minExitTime, fromStateDuration);
-            float transitionDuration = Mathf.Clamp(requestedTransitionDuration, 0.01f, toStateDuration);
-            
-            Debug.Log($"[TimelineControlHelper] Clamped: minExitTime={minExitTime:F3}, exitTime={exitTime:F3}, transitionDuration={transitionDuration:F3}");
-            
-            // Calculate FROM visual cycles (ghost bars LEFT of from-bar)
-            // For ECS runtime, only create ghost when FROM animation actually loops
-            // (requestedExitTime exceeds fromStateDuration)
-            // The "context ghost at exitTime==0" is only for visual TransitionTimeline UI
-            int fromVisualCycles = 1;
-            if (fromStateDuration > 0.001f && requestedExitTime > fromStateDuration)
+            // Build config struct for cleaner ECS call
+            var config = new TransitionPreviewConfig
             {
-                fromVisualCycles = Mathf.CeilToInt(requestedExitTime / fromStateDuration);
-            }
-            fromVisualCycles = Mathf.Clamp(fromVisualCycles, 1, 4);
+                FromState = StateNode.Create(
+                    fromIndex >= 0 ? (ushort)fromIndex : (ushort)0,
+                    timingInput.FromStateDuration,
+                    fromSpeed,
+                    fromBlendPosition),
+                ToState = StateNode.Create(
+                    (ushort)toIndex,
+                    timingInput.ToStateDuration,
+                    toSpeed,
+                    toBlendPosition),
+                Sections = new TransitionSectionDurations
+                {
+                    GhostFromDuration = timing.GhostFromDuration,
+                    FromBarDuration = timing.FromBarDuration,
+                    TransitionDuration = timing.TransitionDuration,
+                    ToBarDuration = timing.ToBarDuration,
+                    GhostToDuration = timing.GhostToDuration
+                },
+                Transition = TransitionInfo.Create(transitionIndex, curveSource)
+            };
             
-            // Calculate TO visual cycles (ghost bars RIGHT of to-bar)
-            // For ECS runtime, only create ghost when TO animation actually loops
-            // (transitionDuration exceeds toStateDuration)
-            // The "bars end together" context ghost is only for visual TransitionTimeline UI
-            int toVisualCycles = 1;
-            if (toStateDuration > 0.001f && requestedTransitionDuration > toStateDuration)
-            {
-                toVisualCycles = Mathf.CeilToInt(requestedTransitionDuration / toStateDuration);
-            }
-            toVisualCycles = Mathf.Clamp(toVisualCycles, 1, 4);
-            
-            // Calculate section durations
-            // For blend states: exit time adapts to duration (keeps transition duration consistent)
-            //   exitTime = max(0, fromDuration - transitionDuration)
-            // For single clip states: use explicit exit time from transition asset
-            bool fromIsBlendState = fromState != null && IsBlendState(fromState);
-            bool toIsBlendState = toState != null && IsBlendState(toState);
-            
-            Debug.Log($"[TimelineControlHelper] BlendStateCheck: fromIsBlend={fromIsBlendState}, toIsBlend={toIsBlendState}, fromType={fromState?.GetType().Name}, toType={toState?.GetType().Name}");
-            
-            float fromBarDuration;
-            if (fromIsBlendState || toIsBlendState)
-            {
-                // Blend state: maintain transition duration, let exit time adapt
-                fromBarDuration = Mathf.Max(0f, fromStateDuration - transitionDuration);
-                Debug.Log($"[TimelineControlHelper] Using blend calculation: fromBarDuration = {fromStateDuration:F3} - {transitionDuration:F3} = {fromBarDuration:F3}");
-            }
-            else
-            {
-                // Single clip: use explicit exit time
-                fromBarDuration = exitTime;
-                Debug.Log($"[TimelineControlHelper] Using exitTime: fromBarDuration = {exitTime:F3}");
-            }
-            float toBarDuration = Mathf.Max(0f, toStateDuration - transitionDuration);
-            float ghostFromDuration = (fromVisualCycles > 1) ? (fromVisualCycles - 1) * fromStateDuration : 0f;
-            float ghostToDuration = (toVisualCycles > 1) ? (toVisualCycles - 1) * toStateDuration : 0f;
-            
-            Debug.Log($"[TimelineControlHelper] Cycles: fromVisualCycles={fromVisualCycles}, toVisualCycles={toVisualCycles}");
-            Debug.Log($"[TimelineControlHelper] Sections: ghostFrom={ghostFromDuration:F3}, fromBar={fromBarDuration:F3}, trans={transitionDuration:F3}, toBar={toBarDuration:F3}, ghostTo={ghostToDuration:F3}");
-            
-            em.SetupTransitionPreview(
-                targetEntity,
-                fromIndex >= 0 ? (ushort)fromIndex : (ushort)0,
-                (ushort)toIndex,
-                fromStateDuration,
-                toStateDuration,
-                transitionDuration,
-                transitionIndex,
-                curveSource,
-                fromBlendPosition,
-                toBlendPosition,
-                fromBarDuration,
-                toBarDuration,
-                ghostFromDuration,
-                ghostToDuration);
-            
+            em.SetupTransitionPreview(targetEntity, in config);
             em.ActivateTimelineControl(targetEntity, startPaused: true);
-            Debug.Log("[TimelineControlHelper] SetupTransitionPreview complete");
         }
         
         /// <summary>
@@ -271,31 +221,20 @@ namespace DMotion.Editor
         
         /// <summary>
         /// Updates blend position for state preview.
-        /// Directly updates the TimelineSection's blend position without rebuilding.
+        /// Rebuilds sections since blend position affects duration and speed.
         /// </summary>
         public void UpdateBlendPosition(AnimationStateAsset state, float2 blendPosition)
         {
             if (!ValidateState()) return;
             
-            var em = targetWorld.EntityManager;
-            
-            // Directly update the blend position in existing TimelineSection(s)
-            if (em.HasBuffer<TimelineSection>(targetEntity))
-            {
-                var sections = em.GetBuffer<TimelineSection>(targetEntity);
-                for (int i = 0; i < sections.Length; i++)
-                {
-                    var section = sections[i];
-                    section.BlendPosition = blendPosition;
-                    sections[i] = section;
-                }
-            }
+            // Rebuild - state asset accessors handle duration/speed correctly for all state types
+            SetupStatePreview(state, blendPosition);
         }
         
         /// <summary>
         /// Updates blend positions for transition preview.
-        /// For blend states, this rebuilds the timeline since blend position affects duration.
-        /// For single clip states, just updates the blend positions on existing sections.
+        /// Always rebuilds sections since blend position affects duration and speed
+        /// (handled correctly by state asset's GetEffectiveDuration/GetEffectiveSpeed).
         /// </summary>
         public void UpdateTransitionBlendPositions(
             AnimationStateAsset fromState,
@@ -308,48 +247,8 @@ namespace DMotion.Editor
         {
             if (!ValidateState()) return;
             
-            // For blend states, changing blend position changes duration, so rebuild everything
-            bool fromIsBlendState = fromState != null && IsBlendState(fromState);
-            bool toIsBlendState = toState != null && IsBlendState(toState);
-            
-            if (fromIsBlendState || toIsBlendState)
-            {
-                // Rebuild the entire timeline with new blend positions
-                SetupTransitionPreview(fromState, toState, transition, transitionIndex, curveSource, fromBlendPosition, toBlendPosition);
-                return;
-            }
-            
-            // For single clip states, just update blend positions without rebuilding
-            var em = targetWorld.EntityManager;
-            if (em.HasBuffer<TimelineSection>(targetEntity))
-            {
-                var sections = em.GetBuffer<TimelineSection>(targetEntity);
-                for (int i = 0; i < sections.Length; i++)
-                {
-                    var section = sections[i];
-                    
-                    switch (section.Type)
-                    {
-                        case TimelineSectionType.GhostFrom:
-                        case TimelineSectionType.State:
-                        case TimelineSectionType.FromBar:
-                            section.BlendPosition = fromBlendPosition;
-                            break;
-                            
-                        case TimelineSectionType.GhostTo:
-                        case TimelineSectionType.ToBar:
-                            section.BlendPosition = toBlendPosition;
-                            break;
-                            
-                        case TimelineSectionType.Transition:
-                            section.BlendPosition = fromBlendPosition;
-                            section.ToBlendPosition = toBlendPosition;
-                            break;
-                    }
-                    
-                    sections[i] = section;
-                }
-            }
+            // Always rebuild - state asset accessors handle all state types correctly
+            SetupTransitionPreview(fromState, toState, transition, transitionIndex, curveSource, fromBlendPosition, toBlendPosition);
         }
         
         /// <summary>
@@ -468,103 +367,14 @@ namespace DMotion.Editor
             return -1;
         }
         
-        private float GetStateDuration(AnimationStateAsset state, float2 blendPosition)
+        private static float GetStateDuration(AnimationStateAsset state, float2 blendPosition)
         {
-            if (state == null) return 1f;
-            
-            // Get duration based on state type
-            if (state is SingleClipStateAsset singleClip)
-            {
-                return singleClip.Clip?.Clip?.length ?? 1f;
-            }
-            else if (state is LinearBlendStateAsset linearBlend)
-            {
-                // Get weighted duration based on blend position (similar logic to GetEffectiveSpeed)
-                return GetLinearBlendDuration(linearBlend, blendPosition.x);
-            }
-            else if (state is Directional2DBlendStateAsset blend2D)
-            {
-                // For 2D blend, get average of contributing clips
-                return GetDirectional2DBlendDuration(blend2D, blendPosition);
-            }
-            
-            return 1f;
+            return AnimationStateUtils.GetEffectiveDuration(state, new Vector2(blendPosition.x, blendPosition.y));
         }
         
-        private static float GetLinearBlendDuration(LinearBlendStateAsset linearBlend, float blendValue)
+        private static float GetStateSpeed(AnimationStateAsset state, float2 blendPosition)
         {
-            if (linearBlend.BlendClips == null || linearBlend.BlendClips.Length == 0)
-                return 1f;
-            
-            // Find the two clips we're blending between
-            int lowerIndex = -1, upperIndex = -1;
-            
-            for (int i = 0; i < linearBlend.BlendClips.Length; i++)
-            {
-                float threshold = linearBlend.BlendClips[i].Threshold;
-                if (threshold <= blendValue)
-                    lowerIndex = i;
-                if (threshold >= blendValue && upperIndex == -1)
-                    upperIndex = i;
-            }
-            
-            // Handle edge cases
-            if (lowerIndex == -1) lowerIndex = 0;
-            if (upperIndex == -1) upperIndex = linearBlend.BlendClips.Length - 1;
-            
-            float lowerDuration = linearBlend.BlendClips[lowerIndex].Clip?.Clip?.length ?? 1f;
-            
-            if (lowerIndex == upperIndex)
-            {
-                return lowerDuration;
-            }
-            
-            float upperDuration = linearBlend.BlendClips[upperIndex].Clip?.Clip?.length ?? 1f;
-            
-            float lowerThreshold = linearBlend.BlendClips[lowerIndex].Threshold;
-            float upperThreshold = linearBlend.BlendClips[upperIndex].Threshold;
-            float range = upperThreshold - lowerThreshold;
-            
-            if (range > 0.0001f)
-            {
-                float t = (blendValue - lowerThreshold) / range;
-                return Mathf.Lerp(lowerDuration, upperDuration, t);
-            }
-            
-            return lowerDuration;
-        }
-        
-        private static float GetDirectional2DBlendDuration(Directional2DBlendStateAsset blend2D, float2 blendPosition)
-        {
-            if (blend2D.BlendClips == null || blend2D.BlendClips.Length == 0)
-                return 1f;
-            
-            // Simple approach: return duration of the nearest clip
-            float minDistance = float.MaxValue;
-            float nearestDuration = 1f;
-            
-            foreach (var clip in blend2D.BlendClips)
-            {
-                var clipPos = new float2(clip.Position.x, clip.Position.y);
-                float distance = math.length(blendPosition - clipPos);
-                if (distance < minDistance)
-                {
-                    minDistance = distance;
-                    nearestDuration = clip.Clip?.Clip?.length ?? 1f;
-                }
-            }
-            
-            return nearestDuration;
-        }
-        
-        /// <summary>
-        /// Checks if a state is a blend state (LinearBlend or Directional2D).
-        /// Blend states have dynamic duration based on blend position, so exit time
-        /// adapts to maintain consistent transition duration.
-        /// </summary>
-        private static bool IsBlendState(AnimationStateAsset state)
-        {
-            return state is LinearBlendStateAsset or Directional2DBlendStateAsset;
+            return AnimationStateUtils.GetEffectiveSpeed(state, new Vector2(blendPosition.x, blendPosition.y));
         }
         
         #endregion

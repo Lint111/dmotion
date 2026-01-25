@@ -320,16 +320,6 @@ namespace DMotion.Editor
         /// </remarks>
         internal static void ClearAllSubscriptions()
         {
-            // Log if there were active subscriptions (helps debug subscription leaks)
-            var hadSubscriptions = OnPreviewTimeChanged != null || OnPlayStateChanged != null ||
-                                   OnBlendPosition1DChanged != null || OnBlendPosition2DChanged != null ||
-                                   OnPreviewCreated != null || OnPreviewDisposed != null;
-            
-            if (hadSubscriptions)
-            {
-                UnityEngine.Debug.Log("[AnimationPreviewEvents] Clearing all subscriptions on window close.");
-            }
-            
             // Preview time events
             OnPreviewTimeChanged = null;
             OnPlayStateChanged = null;

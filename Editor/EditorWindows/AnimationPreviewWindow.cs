@@ -290,6 +290,7 @@ namespace DMotion.Editor
             transitionInspectorBuilder.OnTimeChanged += OnTransitionTimelineTimeChanged;
             transitionInspectorBuilder.OnRepaintRequested += Repaint;
             transitionInspectorBuilder.OnPlayStateChanged += OnTimelinePlayStateChanged;
+            transitionInspectorBuilder.OnTransitionPropertiesChanged += OnTransitionPropertiesChanged;
         }
         
         private void OnTransitionTimelineTimeChanged(float time)
@@ -1038,6 +1039,21 @@ namespace DMotion.Editor
             transitionInspectorBuilder?.Timeline?.UpdateDurationsForBlendPosition(fromBlendPos, blendPosition);
             
             Repaint();
+        }
+        
+        private void OnTransitionPropertiesChanged()
+        {
+            // Transition duration or exit time changed - rebuild ECS timeline
+            if (currentSelectionType != SelectionType.Transition && currentSelectionType != SelectionType.AnyStateTransition)
+                return;
+            
+            // Get current blend positions and trigger rebuild
+            var fromBlendPos = PreviewSettings.GetBlendPosition(selectedTransitionFrom);
+            var toBlendPos = PreviewSettings.GetBlendPosition(selectedTransitionTo);
+            
+            previewSession?.RebuildTransitionTimeline(
+                new Unity.Mathematics.float2(fromBlendPos.x, fromBlendPos.y),
+                new Unity.Mathematics.float2(toBlendPos.x, toBlendPos.y));
         }
         
         private void OnTransitionTimeChanged(AnimationStateAsset fromState, AnimationStateAsset toState, float normalizedTime)
