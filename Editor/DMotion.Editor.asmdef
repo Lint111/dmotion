@@ -10,8 +10,13 @@
         "GUID:c38fb62397af04c51b143415e1db6d90",
         "GUID:734d92eba21c94caba915361bd5ac177",
         "GUID:11912cc675165314485c904ed61b2e92",
-        "Unity.Collections",
-        "Unity.Mathematics"
+        "GUID:d8b63aba1907145bea998dd612889d6b",
+        "GUID:e0cd26848372d4e5c891c569017e11f1",
+        "GUID:2665a8d13d1b3f18800f46e256720795",
+        "GUID:a5baed0c9693541a5bd947d336ec7659",
+        "GUID:8819f35a0fc84499b990e90a4ca1911f",
+        "GUID:5f3cf485eb0554709a8abbeace890c86",
+        "GUID:46fe9b4ef94d76744bc0b97bc2f73d94"
     ],
     "includePlatforms": [
         "Editor"

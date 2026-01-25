@@ -39,6 +39,7 @@ MonoBehaviour:
     HasEndTime: 0
     EndTime: 0
     TransitionDuration: 0
+    Offset: 0
     Conditions: []
     CanTransitionToSelf: 0
     BlendCurve:
@@ -67,13 +68,14 @@ MonoBehaviour:
   m_Name: Locomotion
   m_EditorClassIdentifier: 
   Loop: 1
-  Speed: 3
+  Speed: 1
   SpeedParameter: {fileID: 0}
   OutTransitions:
   - ToState: {fileID: 5953759798062009019}
     HasEndTime: 1
-    EndTime: 0.60635763
-    TransitionDuration: 1.9419689
+    EndTime: 1.0043378
+    TransitionDuration: 2.0117064
+    Offset: 0
     Conditions:
     - Parameter: {fileID: 9102714923962245846}
       ComparisonValue: 1
@@ -113,7 +115,7 @@ MonoBehaviour:
       m_PostInfinity: 2
       m_RotationOrder: 4
   StateEditorData:
-    GraphPosition: {x: 333.08997, y: 200.96748}
+    GraphPosition: {x: 333.00003, y: 202.00003}
     Guid: 039c0298c5d43d943b7bc7b34f1395c0
   BlendClips:
   - Clip: {fileID: 11400000, guid: 2d8b5b7a11d7f3c418b9a6677c0cc292, type: 2}
@@ -148,6 +150,7 @@ MonoBehaviour:
     HasEndTime: 0
     EndTime: 0
     TransitionDuration: 1
+    Offset: 0
     Conditions:
     - Parameter: {fileID: 9102714923962245846}
       ComparisonValue: 0

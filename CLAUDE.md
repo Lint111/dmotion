@@ -71,13 +71,13 @@ IEnumerable<SubStateMachineStateAsset> GetAllGroups()
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| State Machine Blob | `Runtime/Components/StateMachineBlob.cs` | Runtime flat state data |
-| State Flattener | `Runtime/Authoring/Conversion/StateFlattener.cs` | Hierarchy → flat conversion |
-| Blob Converter | `Runtime/Authoring/Conversion/StateMachineBlobConverter.cs` | Builds runtime blob |
-| Conversion Utils | `Runtime/Authoring/Conversion/AnimationStateMachineConversionUtils.cs` | Entity setup, blob creation |
-| Update Job | `Runtime/Systems/UpdateStateMachineJob.cs` | Runtime state machine logic |
-| SubStateMachine Asset | `Runtime/Authoring/AnimationStateMachine/SubStateMachineStateAsset.cs` | Visual hierarchy container |
-| StateMachine Asset | `Runtime/Authoring/AnimationStateMachine/StateMachineAsset.cs` | Root asset + hierarchy APIs |
+| State Machine Blob | `Runtime/Components/Blobs/StateMachineBlob.cs` | Runtime flat state data |
+| State Flattener | `Runtime/Authoring/Baking/StateFlattener.cs` | Hierarchy → flat conversion |
+| Blob Converter | `Runtime/Authoring/Baking/StateMachineBlobConverter.cs` | Builds runtime blob |
+| Conversion Utils | `Runtime/Authoring/Baking/AnimationStateMachineConversionUtils.cs` | Entity setup, blob creation |
+| Update Job | `Runtime/Systems/StateMachine/UpdateStateMachineJob.cs` | Runtime state machine logic |
+| SubStateMachine Asset | `Runtime/Authoring/Assets/States/SubStateMachineStateAsset.cs` | Visual hierarchy container |
+| StateMachine Asset | `Runtime/Authoring/Assets/StateMachine/StateMachineAsset.cs` | Root asset + hierarchy APIs |
 
 ## Assembly Structure
 
@@ -85,6 +85,78 @@ IEnumerable<SubStateMachineStateAsset> GetAllGroups()
 - `DMotion.Editor` - Editor tools and inspectors
 - `DMotion.Tests.Runtime` - PlayMode tests
 - `DMotion.Tests.Editor` - EditMode tests
+
+## Folder Structure
+
+### Runtime
+```
+Runtime/
+├── Components/
+│   ├── Core/           # AnimationState, ClipSampler, etc.
+│   ├── StateMachine/   # StateMachineState, TransitionState, etc.
+│   ├── Blobs/          # StateMachineBlob, ClipBlob, etc.
+│   └── Rendering/      # MaterialProperty components
+├── Systems/
+│   ├── Core/           # Core animation systems
+│   ├── StateMachine/   # UpdateStateMachineJob, transition logic
+│   ├── Sampling/       # Clip sampling systems
+│   ├── StateTypes/     # Single, LinearBlend, BlendSpace handlers
+│   ├── RootMotion/     # Root motion systems
+│   └── Rendering/      # Material property systems
+├── Authoring/
+│   ├── Assets/
+│   │   ├── StateMachine/   # StateMachineAsset
+│   │   ├── States/         # SingleClip, LinearBlend, SubStateMachine assets
+│   │   ├── Parameters/     # Parameter assets
+│   │   ├── Clips/          # Clip reference assets
+│   │   └── Transitions/    # Transition assets
+│   ├── Baking/         # StateFlattener, BlobConverter, ConversionUtils
+│   ├── MonoBehaviours/ # AnimationStateMachineAuthoring
+│   ├── Bootstrap/      # Bootstrap systems
+│   └── Types/          # Shared authoring types
+└── Utils/
+    ├── Animation/      # Animation utilities
+    ├── StateTypes/     # State type utilities
+    ├── Core/           # Core utilities
+    └── Baking/         # Baking utilities
+```
+
+### Editor
+```
+Editor/
+├── StateMachineEditor/
+│   ├── Windows/        # StateMachineEditorWindow
+│   ├── Graph/
+│   │   ├── Nodes/      # StateNode, TransitionNode, etc.
+│   │   ├── Edges/      # TransitionEdge, etc.
+│   │   └── Manipulators/
+│   ├── Inspectors/     # State/transition inspectors
+│   ├── Navigation/     # Breadcrumb, hierarchy navigation
+│   ├── Popups/         # Context menus, search windows
+│   └── Events/         # Editor events
+├── Preview/
+│   ├── Windows/        # AnimationPreviewWindow
+│   ├── Backends/       # AuthoringPreviewBackend, EcsPreviewBackend
+│   ├── EcsWorld/       # ECS world management for preview
+│   ├── Rendering/      # Preview rendering
+│   ├── Timeline/       # AnimationTimelineControl
+│   ├── StateContent/   # State-specific preview content
+│   ├── Inspectors/     # Preview inspectors
+│   ├── State/          # Preview state management
+│   ├── UI/             # Preview UI elements
+│   ├── Events/         # Preview events
+│   └── Curves/         # Curve visualization
+├── BlendSpaceEditor/   # 2D blend space editor
+├── LegacyPreview/      # Legacy preview system (deprecated)
+├── PropertyDrawers/
+│   ├── Drawers/        # Custom property drawers
+│   ├── Selectors/      # Asset selectors
+│   └── Caches/         # Editor caches
+├── Utilities/          # AnimationStateUtils, TransitionTimingCalculator
+├── CustomEditors/      # Custom inspectors, context menus
+├── UIElements/         # Reusable UI elements
+└── Integrations/       # Unity.Entities.Exposed integration
+```
 
 ## State Types
 

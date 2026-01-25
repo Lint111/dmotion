@@ -1,0 +1,50 @@
+using System.Runtime.CompilerServices;
+using Latios.Kinemation;
+using Unity.Assertions;
+using Unity.Entities;
+using Unity.Entities.Exposed;
+
+namespace DMotion
+{
+    public struct SkeletonClipHandle
+    {
+        public BlobAssetReference<SkeletonClipSetBlob> Clips;
+        public ushort ClipIndex;
+        public ref SkeletonClip Clip => ref Clips.Value.clips[ClipIndex];
+
+        public SkeletonClipHandle(BlobAssetReference<SkeletonClipSetBlob> clips, int clipIndex)
+        {
+            Assert.IsTrue(clipIndex >= 0 && clipIndex < clips.Value.clips.Length);
+            Clips = clips;
+            ClipIndex = (ushort) clipIndex;
+        }
+    }
+
+    public struct ClipSampler : IBufferElementData, IElementWithId
+    {
+        public byte Id { get; set; }
+        internal BlobAssetReference<SkeletonClipSetBlob> Clips;
+        internal BlobAssetReference<ClipEventsBlob> ClipEventsBlob;
+        internal ushort ClipIndex;
+        internal float PreviousTime;
+        internal float Time;
+        internal float Weight;
+        
+        /// <summary>
+        /// Layer index this sampler belongs to. Default 0 for single-layer entities.
+        /// Used by multi-layer systems to group samplers by layer for composition.
+        /// </summary>
+        public byte LayerIndex;
+
+        internal ref SkeletonClip Clip => ref Clips.Value.clips[ClipIndex];
+
+        internal float Duration => Clip.duration;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal void LoopToClipTime()
+        {
+            Time = Clip.LoopToClipTime(Time);
+            PreviousTime = Clip.LoopToClipTime(PreviousTime);
+        }
+    }
+}
