@@ -13,7 +13,7 @@ namespace DMotion.Authoring
     /// Results are blended at the pose level based on weight and blend mode.
     /// </summary>
     [CreateAssetMenu(fileName = "NewLayer", menuName = "DMotion/Animation Layer")]
-    public class LayerStateAsset : AnimationStateAsset
+    public class LayerStateAsset : AnimationStateAsset, INestedStateMachineContainer
     {
         [Tooltip("The state machine for this layer")]
         [SerializeField]

@@ -583,6 +583,48 @@ namespace DMotion.Authoring
         {
             return States.OfType<SubStateMachineStateAsset>();
         }
+        
+        /// <summary>
+        /// Gets all nested state machine containers (SubStateMachines and Layers).
+        /// Used by the parameter dependency system.
+        /// </summary>
+        public IEnumerable<INestedStateMachineContainer> GetAllNestedContainers()
+        {
+            // Include direct layers at root level
+            foreach (var state in States)
+            {
+                if (state is INestedStateMachineContainer container)
+                {
+                    yield return container;
+                    
+                    // Recursively collect from nested state machines (for SubStateMachines)
+                    // Layers don't nest further - their internal SubStateMachines are handled separately
+                    if (state is SubStateMachineStateAsset subMachine && subMachine.NestedStateMachine != null)
+                    {
+                        foreach (var nested in subMachine.NestedStateMachine.GetAllNestedContainers())
+                        {
+                            yield return nested;
+                        }
+                    }
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Whether this state machine has any nested containers (SubStateMachines or Layers).
+        /// </summary>
+        public bool HasNestedContainers
+        {
+            get
+            {
+                foreach (var state in States)
+                {
+                    if (state is INestedStateMachineContainer)
+                        return true;
+                }
+                return false;
+            }
+        }
 
         /// <summary>
         /// Gets the group hierarchy as a tree structure.

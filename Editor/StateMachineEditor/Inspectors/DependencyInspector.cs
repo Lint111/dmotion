@@ -11,13 +11,13 @@ namespace DMotion.Editor
     }
 
     /// <summary>
-    /// Inspector for SubMachine parameter dependencies.
-    /// Shows which parameters from nested state machines need to be satisfied by the parent.
+    /// Inspector for nested state machine parameter dependencies.
+    /// Shows which parameters from nested state machines (SubStateMachines and Layers) need to be satisfied by the parent.
     /// </summary>
     internal class DependencyInspector : StateMachineInspector<DependencyInspectorModel>
     {
-        private Dictionary<SubStateMachineStateAsset, bool> _subMachineFoldouts = new();
-        private List<SubMachineDependencyInfo> _subMachineDependencies = new();
+        private Dictionary<INestedStateMachineContainer, bool> _containerFoldouts = new();
+        private List<NestedContainerDependencyInfo> _containerDependencies = new();
         private bool _needsRefresh = true;
 
         private void OnEnable()
@@ -60,8 +60,8 @@ namespace DMotion.Editor
                 _needsRefresh = false;
             }
 
-            // Show panel as long as there are SubMachines (even with no params)
-            if (_subMachineDependencies == null || _subMachineDependencies.Count == 0)
+            // Show panel as long as there are nested containers (even with no params)
+            if (_containerDependencies == null || _containerDependencies.Count == 0)
             {
                 return;
             }
@@ -71,7 +71,7 @@ namespace DMotion.Editor
 
         private void RefreshAnalysis()
         {
-            _subMachineDependencies = AnalyzeAllSubMachines();
+            _containerDependencies = AnalyzeAllNestedContainers();
         }
 
         private void ForceRefresh()
@@ -86,10 +86,10 @@ namespace DMotion.Editor
             // Calculate totals without LINQ
             int totalRequired = 0;
             int totalResolved = 0;
-            for (int i = 0; i < _subMachineDependencies.Count; i++)
+            for (int i = 0; i < _containerDependencies.Count; i++)
             {
-                totalRequired += _subMachineDependencies[i].TotalRequired;
-                totalResolved += _subMachineDependencies[i].ResolvedCount;
+                totalRequired += _containerDependencies[i].TotalRequired;
+                totalResolved += _containerDependencies[i].ResolvedCount;
             }
             var totalMissing = totalRequired - totalResolved;
 
@@ -111,10 +111,10 @@ namespace DMotion.Editor
                 }
             }
 
-            // Draw each SubMachine's dependencies
-            for (int i = 0; i < _subMachineDependencies.Count; i++)
+            // Draw each nested container's dependencies
+            for (int i = 0; i < _containerDependencies.Count; i++)
             {
-                DrawSubMachineDependencies(_subMachineDependencies[i]);
+                DrawContainerDependencies(_containerDependencies[i]);
             }
         }
 
@@ -131,20 +131,20 @@ namespace DMotion.Editor
         private static GUIContent _grayDotIcon;
         private static GUIContent GrayDotIcon => _grayDotIcon ??= EditorGUIUtility.IconContent("d_winbtn_mac_min");
 
-        private void DrawSubMachineDependencies(SubMachineDependencyInfo info)
+        private void DrawContainerDependencies(NestedContainerDependencyInfo info)
         {
             var hasMissing = info.MissingCount > 0;
 
             // Get or create foldout state
-            if (!_subMachineFoldouts.TryGetValue(info.SubMachine, out var isExpanded))
+            if (!_containerFoldouts.TryGetValue(info.Container, out var isExpanded))
             {
                 isExpanded = hasMissing; // Auto-expand if has missing
-                _subMachineFoldouts[info.SubMachine] = isExpanded;
+                _containerFoldouts[info.Container] = isExpanded;
             }
 
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                // SubMachine header row
+                // Container header row
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     GUIContent statusIcon;
@@ -162,10 +162,12 @@ namespace DMotion.Editor
                     }
                     GUILayout.Label(statusIcon, GUILayout.Width(18));
 
-                    var newExpanded = EditorGUILayout.Foldout(isExpanded, info.SubMachine.name, true);
+                    // Show type indicator for layers vs submachines
+                    var displayName = info.Container is LayerStateAsset ? $"[Layer] {info.Container.name}" : info.Container.name;
+                    var newExpanded = EditorGUILayout.Foldout(isExpanded, displayName, true);
                     if (newExpanded != isExpanded)
                     {
-                        _subMachineFoldouts[info.SubMachine] = newExpanded;
+                        _containerFoldouts[info.Container] = newExpanded;
                     }
 
                     GUILayout.FlexibleSpace();
@@ -181,13 +183,13 @@ namespace DMotion.Editor
 
                         if (hasMissing && GUILayout.Button(GUIContentCache.ResolveButton, EditorStyles.miniButton, GUILayout.Width(55)))
                         {
-                            ResolveSubMachineDependencies(info.SubMachine);
+                            ResolveContainerDependencies(info.Container);
                         }
                     }
                 }
 
                 // Expanded content
-                if (_subMachineFoldouts[info.SubMachine])
+                if (_containerFoldouts[info.Container])
                 {
                     EditorGUILayout.Space(4);
 
@@ -203,7 +205,7 @@ namespace DMotion.Editor
                             EditorGUILayout.LabelField(StringBuilderCache.FormatMissingCount(info.MissingRequirements.Count), EditorStyles.boldLabel);
                             for (int i = 0; i < info.MissingRequirements.Count; i++)
                             {
-                                DrawMissingRequirementRow(info.MissingRequirements[i], info.SubMachine);
+                                DrawMissingRequirementRow(info.MissingRequirements[i], info.Container);
                             }
                             EditorGUILayout.Space(4);
                         }
@@ -214,7 +216,7 @@ namespace DMotion.Editor
                             EditorGUILayout.LabelField(StringBuilderCache.FormatResolvedCount(info.ResolvedDependencies.Count), EditorStyles.boldLabel);
                             for (int i = 0; i < info.ResolvedDependencies.Count; i++)
                             {
-                                DrawResolvedDependencyRow(info.ResolvedDependencies[i], info.SubMachine);
+                                DrawResolvedDependencyRow(info.ResolvedDependencies[i], info.Container);
                             }
                         }
                     }
@@ -226,7 +228,7 @@ namespace DMotion.Editor
         private const string DeletedName = "(deleted)";
         private const string UnknownName = "(unknown)";
 
-        private void DrawResolvedDependencyRow(ResolvedDependency resolved, SubStateMachineStateAsset subMachine)
+        private void DrawResolvedDependencyRow(ResolvedDependency resolved, INestedStateMachineContainer container)
         {
             // If source is null (deleted), this dependency is no longer valid - force refresh
             if (resolved.SourceParameter == null)
@@ -234,6 +236,9 @@ namespace DMotion.Editor
                 _needsRefresh = true;
                 return;
             }
+            
+            // Only SubStateMachines support link removal (layers use different parameter handling)
+            var subMachine = container as SubStateMachineStateAsset;
             
             using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
             {
@@ -251,8 +256,8 @@ namespace DMotion.Editor
                 
                 GUILayout.FlexibleSpace();
 
-                // Show X button for ALL resolved links (both explicit and auto-matched)
-                if (GUILayout.Button("X", EditorStyles.miniButton, GUILayout.Width(20)))
+                // Show X button for ALL resolved links (both explicit and auto-matched) - only for SubStateMachines
+                if (subMachine != null && GUILayout.Button("X", EditorStyles.miniButton, GUILayout.Width(20)))
                 {
                     if (resolved.IsExplicitLink)
                     {
@@ -291,42 +296,48 @@ namespace DMotion.Editor
         private string[] _cachedOptions;
         private List<AnimationParameterAsset> _cachedCompatibleParams;
 
-        private void DrawMissingRequirementRow(ParameterRequirement req, SubStateMachineStateAsset subMachine)
+        private void DrawMissingRequirementRow(ParameterRequirement req, INestedStateMachineContainer container)
         {
+            // Only SubStateMachines support parameter linking (layers use different parameter handling)
+            var subMachine = container as SubStateMachineStateAsset;
+            
             var rect = EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
             EditorGUI.DrawRect(rect, MissingRowBgColor);
             
             GUILayout.Label(IconCache.WarnIconWithTooltip(TooltipMissing), GUILayout.Width(18), GUILayout.Height(18));
 
-            // Dropdown to select/create source parameter
-            GetCompatibleParametersNonAlloc(req.Parameter);
-            
-            // Build options array (reuse if possible)
-            int optionsCount = _cachedCompatibleParams.Count + 1;
-            if (_cachedOptions == null || _cachedOptions.Length < optionsCount)
+            if (subMachine != null)
             {
-                _cachedOptions = new string[optionsCount];
-            }
-            _cachedOptions[0] = "(Select or Create)";
-            for (int i = 0; i < _cachedCompatibleParams.Count; i++)
-            {
-                _cachedOptions[i + 1] = _cachedCompatibleParams[i].name;
-            }
+                // Dropdown to select/create source parameter
+                GetCompatibleParametersNonAlloc(req.Parameter);
+                
+                // Build options array (reuse if possible)
+                int optionsCount = _cachedCompatibleParams.Count + 1;
+                if (_cachedOptions == null || _cachedOptions.Length < optionsCount)
+                {
+                    _cachedOptions = new string[optionsCount];
+                }
+                _cachedOptions[0] = "(Select or Create)";
+                for (int i = 0; i < _cachedCompatibleParams.Count; i++)
+                {
+                    _cachedOptions[i + 1] = _cachedCompatibleParams[i].name;
+                }
 
-            var dropdownRect = EditorGUILayout.GetControlRect(GUILayout.MinWidth(80), GUILayout.MaxWidth(120));
-            // Need to pass correctly sized array to Popup
-            if (_cachedOptions.Length > optionsCount)
-            {
-                // Clear extra entries to avoid showing stale data
-                for (int j = optionsCount; j < _cachedOptions.Length; j++)
-                    _cachedOptions[j] = null;
-            }
-            var newIndex = EditorGUI.Popup(dropdownRect, 0, _cachedOptions);
+                var dropdownRect = EditorGUILayout.GetControlRect(GUILayout.MinWidth(80), GUILayout.MaxWidth(120));
+                // Need to pass correctly sized array to Popup
+                if (_cachedOptions.Length > optionsCount)
+                {
+                    // Clear extra entries to avoid showing stale data
+                    for (int j = optionsCount; j < _cachedOptions.Length; j++)
+                        _cachedOptions[j] = null;
+                }
+                var newIndex = EditorGUI.Popup(dropdownRect, 0, _cachedOptions);
 
-            if (newIndex > 0 && newIndex <= _cachedCompatibleParams.Count)
-            {
-                var selectedParam = _cachedCompatibleParams[newIndex - 1];
-                CreateLink(selectedParam, req.Parameter, subMachine);
+                if (newIndex > 0 && newIndex <= _cachedCompatibleParams.Count)
+                {
+                    var selectedParam = _cachedCompatibleParams[newIndex - 1];
+                    CreateLink(selectedParam, req.Parameter, subMachine);
+                }
             }
             
             EditorGUILayout.LabelField(GUIContentCache.Arrow, GUILayout.Width(20));
@@ -335,7 +346,7 @@ namespace DMotion.Editor
             
             GUILayout.FlexibleSpace();
             
-            if (GUILayout.Button(GUIContentCache.PlusButton, EditorStyles.miniButton, GUILayout.Width(20)))
+            if (subMachine != null && GUILayout.Button(GUIContentCache.PlusButton, EditorStyles.miniButton, GUILayout.Width(20)))
             {
                 CreateAndLinkParameter(req, subMachine);
             }
@@ -370,11 +381,11 @@ namespace DMotion.Editor
             
             Undo.RecordObject(model.StateMachine, "Resolve All Parameter Dependencies");
 
-            foreach (var info in _subMachineDependencies)
+            foreach (var info in _containerDependencies)
             {
-                if (info.MissingCount > 0)
+                if (info.MissingCount > 0 && info.Container is SubStateMachineStateAsset subMachine)
                 {
-                    ResolveSubMachineDependenciesInternal(info.SubMachine);
+                    ResolveSubMachineDependenciesInternal(subMachine);
                 }
             }
 
@@ -383,8 +394,11 @@ namespace DMotion.Editor
             ForceRefresh();
         }
 
-        private void ResolveSubMachineDependencies(SubStateMachineStateAsset subMachine)
+        private void ResolveContainerDependencies(INestedStateMachineContainer container)
         {
+            // Only SubStateMachines support parameter resolution
+            if (container is not SubStateMachineStateAsset subMachine) return;
+            
             Undo.SetCurrentGroupName("Resolve Parameter Dependencies");
             var undoGroup = Undo.GetCurrentGroup();
             
@@ -523,18 +537,36 @@ namespace DMotion.Editor
             model.StateMachine.RemoveLink(source, target, subMachine);
         }
 
-        private List<SubMachineDependencyInfo> AnalyzeAllSubMachines()
+        private List<NestedContainerDependencyInfo> AnalyzeAllNestedContainers()
         {
-            var result = new List<SubMachineDependencyInfo>();
+            var result = new List<NestedContainerDependencyInfo>();
             
-            foreach (var subMachine in model.StateMachine.GetAllGroups())
+            foreach (var container in model.StateMachine.GetAllNestedContainers())
             {
-                var requirements = ParameterDependencyAnalyzer.AnalyzeRequiredParameters(subMachine);
+                // For SubStateMachines, analyze parameter requirements
+                // For Layers, show nested state machine parameters
+                var nestedMachine = container.NestedStateMachine;
+                if (nestedMachine == null) continue;
                 
-                // Include SubMachines even if they have no params (show as "no params")
-                var info = new SubMachineDependencyInfo
+                List<ParameterRequirement> requirements;
+                if (container is SubStateMachineStateAsset subMachine)
                 {
-                    SubMachine = subMachine,
+                    requirements = ParameterDependencyAnalyzer.AnalyzeRequiredParameters(subMachine);
+                }
+                else
+                {
+                    // For layers, treat all parameters in the nested machine as requirements
+                    requirements = new List<ParameterRequirement>();
+                    foreach (var param in nestedMachine.Parameters)
+                    {
+                        requirements.Add(new ParameterRequirement { Parameter = param });
+                    }
+                }
+                
+                // Include containers even if they have no params (show as "no params")
+                var info = new NestedContainerDependencyInfo
+                {
+                    Container = container,
                     TotalRequired = requirements.Count,
                     HasNoParams = requirements.Count == 0,
                     MissingRequirements = new List<ParameterRequirement>(),
@@ -546,20 +578,24 @@ namespace DMotion.Editor
                     ParameterLink? explicitLink = null;
                     bool hasExclusion = false;
                     
-                    foreach (var link in model.StateMachine.ParameterLinks)
+                    // Only check links for SubStateMachines
+                    if (container is SubStateMachineStateAsset sm)
                     {
-                        if (link.SubMachine == subMachine && link.TargetParameter == req.Parameter)
+                        foreach (var link in model.StateMachine.ParameterLinks)
                         {
-                            if (link.IsExclusion)
+                            if (link.SubMachine == sm && link.TargetParameter == req.Parameter)
                             {
-                                // Exclusion marker - prevents auto-matching
-                                hasExclusion = true;
+                                if (link.IsExclusion)
+                                {
+                                    // Exclusion marker - prevents auto-matching
+                                    hasExclusion = true;
+                                }
+                                else
+                                {
+                                    explicitLink = link;
+                                }
+                                break;
                             }
-                            else
-                            {
-                                explicitLink = link;
-                            }
-                            break;
                         }
                     }
 
@@ -609,9 +645,9 @@ namespace DMotion.Editor
 
         #region Data Types
 
-        private struct SubMachineDependencyInfo
+        private struct NestedContainerDependencyInfo
         {
-            public SubStateMachineStateAsset SubMachine;
+            public INestedStateMachineContainer Container;
             public int TotalRequired;
             public int ResolvedCount;
             public bool HasNoParams;

@@ -169,6 +169,9 @@ namespace DMotion.Editor
             StateMachineEditorEvents.OnLinkAdded += OnLinkChanged;
             StateMachineEditorEvents.OnLinkRemoved += OnLinkChanged;
             StateMachineEditorEvents.OnDependenciesResolved += OnDependenciesResolved;
+            StateMachineEditorEvents.OnLayerAdded += OnLayerAdded;
+            StateMachineEditorEvents.OnLayerRemoved += OnLayerRemoved;
+            StateMachineEditorEvents.OnConvertedToMultiLayer += OnConvertedToMultiLayer;
         }
 
         public void Unsubscribe()
@@ -178,6 +181,27 @@ namespace DMotion.Editor
             StateMachineEditorEvents.OnLinkAdded -= OnLinkChanged;
             StateMachineEditorEvents.OnLinkRemoved -= OnLinkChanged;
             StateMachineEditorEvents.OnDependenciesResolved -= OnDependenciesResolved;
+            StateMachineEditorEvents.OnLayerAdded -= OnLayerAdded;
+            StateMachineEditorEvents.OnLayerRemoved -= OnLayerRemoved;
+            StateMachineEditorEvents.OnConvertedToMultiLayer -= OnConvertedToMultiLayer;
+        }
+        
+        private void OnLayerAdded(StateMachineAsset machine, LayerStateAsset layer)
+        {
+            if (machine != currentMachine) return;
+            RefreshPanel();
+        }
+        
+        private void OnLayerRemoved(StateMachineAsset machine, LayerStateAsset layer)
+        {
+            if (machine != currentMachine) return;
+            RefreshPanel();
+        }
+        
+        private void OnConvertedToMultiLayer(StateMachineAsset machine)
+        {
+            if (machine != currentMachine) return;
+            RefreshPanel();
         }
 
         public void SetContext(StateMachineAsset machine)
@@ -189,7 +213,7 @@ namespace DMotion.Editor
         private void OnStateAdded(StateMachineAsset machine, AnimationStateAsset state)
         {
             if (machine != currentMachine) return;
-            if (state is SubStateMachineStateAsset)
+            if (state is INestedStateMachineContainer)
             {
                 RefreshPanel();
             }
@@ -198,7 +222,7 @@ namespace DMotion.Editor
         private void OnStateRemoved(StateMachineAsset machine, AnimationStateAsset state)
         {
             if (machine != currentMachine) return;
-            if (state is SubStateMachineStateAsset)
+            if (state is INestedStateMachineContainer)
             {
                 RefreshPanel();
             }
@@ -220,9 +244,9 @@ namespace DMotion.Editor
         {
             if (panelView == null) return;
 
-            var hasSubMachines = HasAnySubStateMachine(currentMachine);
+            var hasNestedContainers = currentMachine != null && currentMachine.HasNestedContainers;
 
-            if (hasSubMachines)
+            if (hasNestedContainers)
             {
                 panelView.style.display = UnityEngine.UIElements.DisplayStyle.Flex;
                 panelView.SetInspector<DependencyInspector, DependencyInspectorModel>(
@@ -236,18 +260,6 @@ namespace DMotion.Editor
                 panelView.style.display = UnityEngine.UIElements.DisplayStyle.None;
                 panelView.Clear();
             }
-        }
-
-        private static bool HasAnySubStateMachine(StateMachineAsset machine)
-        {
-            if (machine == null) return false;
-            var states = machine.States;
-            for (int i = 0; i < states.Count; i++)
-            {
-                if (states[i] is SubStateMachineStateAsset)
-                    return true;
-            }
-            return false;
         }
     }
 

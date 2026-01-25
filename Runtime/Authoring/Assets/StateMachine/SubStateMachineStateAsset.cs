@@ -13,10 +13,13 @@ namespace DMotion.Authoring
     /// Exit behavior: The NestedStateMachine defines its own ExitStates (states that can trigger exit).
     /// When used as a nested machine, those exit states trigger the OutTransitions on this SubStateMachine.
     /// </summary>
-    public class SubStateMachineStateAsset : AnimationStateAsset
+    public class SubStateMachineStateAsset : AnimationStateAsset, INestedStateMachineContainer
     {
         [Tooltip("The nested state machine contained within this state")]
         public StateMachineAsset NestedStateMachine;
+        
+        // Explicit interface implementation to satisfy INestedStateMachineContainer
+        StateMachineAsset INestedStateMachineContainer.NestedStateMachine => NestedStateMachine;
 
         [Tooltip("The entry state to transition to when entering this sub-machine")]
         public AnimationStateAsset EntryState;
