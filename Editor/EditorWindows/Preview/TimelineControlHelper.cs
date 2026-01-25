@@ -171,7 +171,23 @@ namespace DMotion.Editor
             toVisualCycles = Mathf.Clamp(toVisualCycles, 1, 4);
             
             // Calculate section durations
-            float fromBarDuration = exitTime;
+            // For blend states: exit time adapts to duration (keeps transition duration consistent)
+            //   exitTime = max(0, fromDuration - transitionDuration)
+            // For single clip states: use explicit exit time from transition asset
+            bool fromIsBlendState = fromState != null && IsBlendState(fromState);
+            bool toIsBlendState = IsBlendState(toState);
+            
+            float fromBarDuration;
+            if (fromIsBlendState || toIsBlendState)
+            {
+                // Blend state: maintain transition duration, let exit time adapt
+                fromBarDuration = Mathf.Max(0f, fromStateDuration - transitionDuration);
+            }
+            else
+            {
+                // Single clip: use explicit exit time
+                fromBarDuration = exitTime;
+            }
             float toBarDuration = Mathf.Max(0f, toStateDuration - transitionDuration);
             float ghostFromDuration = (fromVisualCycles > 1) ? (fromVisualCycles - 1) * fromStateDuration : 0f;
             float ghostToDuration = (toVisualCycles > 1) ? (toVisualCycles - 1) * toStateDuration : 0f;
@@ -524,6 +540,16 @@ namespace DMotion.Editor
             }
             
             return nearestDuration;
+        }
+        
+        /// <summary>
+        /// Checks if a state is a blend state (LinearBlend or Directional2D).
+        /// Blend states have dynamic duration based on blend position, so exit time
+        /// adapts to maintain consistent transition duration.
+        /// </summary>
+        private static bool IsBlendState(AnimationStateAsset state)
+        {
+            return state is LinearBlendStateAsset or Directional2DBlendStateAsset;
         }
         
         #endregion
