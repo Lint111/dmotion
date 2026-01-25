@@ -79,6 +79,42 @@ namespace DMotion.Editor
             sceneManager = EcsPreviewSceneManager.Instance;
             worldService = new EcsPreviewWorldService();
             timelineHelper = new TimelineControlHelper();
+            
+            // Listen for Play mode changes to re-trigger setup
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+        }
+        
+        private void OnPlayModeStateChanged(PlayModeStateChange state)
+        {
+            Debug.Log($"[EcsPreviewBackend] PlayModeStateChanged: {state}");
+            
+            if (state == PlayModeStateChange.EnteredPlayMode)
+            {
+                // World was recreated - need to re-setup
+                isInitialized = false;
+                timelineHelper?.Dispose();
+                timelineHelper = new TimelineControlHelper();
+                entityBrowser?.Dispose();
+                entityBrowser = new EcsEntityBrowser();
+                
+                // Re-trigger setup with cached state/transition
+                if (transitionToState != null)
+                {
+                    Debug.Log($"[EcsPreviewBackend] Re-triggering transition setup: {transitionFromState?.name} -> {transitionToState?.name}");
+                    StartSetupCoroutine(PendingSetupType.Transition);
+                }
+                else if (currentState != null)
+                {
+                    Debug.Log($"[EcsPreviewBackend] Re-triggering state setup: {currentState?.name}");
+                    StartSetupCoroutine(PendingSetupType.State);
+                }
+            }
+            else if (state == PlayModeStateChange.ExitingPlayMode)
+            {
+                // About to exit - stop any pending setup
+                StopSetupCoroutine();
+                isInitialized = false;
+            }
         }
         
         #endregion
@@ -879,6 +915,7 @@ namespace DMotion.Editor
         
         public void Dispose()
         {
+            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
             Clear();
             timelineHelper?.Dispose();
             entityBrowser?.Dispose();
