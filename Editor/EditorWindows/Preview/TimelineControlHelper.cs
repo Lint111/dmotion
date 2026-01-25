@@ -177,16 +177,20 @@ namespace DMotion.Editor
             bool fromIsBlendState = fromState != null && IsBlendState(fromState);
             bool toIsBlendState = toState != null && IsBlendState(toState);
             
+            Debug.Log($"[TimelineControlHelper] BlendStateCheck: fromIsBlend={fromIsBlendState}, toIsBlend={toIsBlendState}, fromType={fromState?.GetType().Name}, toType={toState?.GetType().Name}");
+            
             float fromBarDuration;
             if (fromIsBlendState || toIsBlendState)
             {
                 // Blend state: maintain transition duration, let exit time adapt
                 fromBarDuration = Mathf.Max(0f, fromStateDuration - transitionDuration);
+                Debug.Log($"[TimelineControlHelper] Using blend calculation: fromBarDuration = {fromStateDuration:F3} - {transitionDuration:F3} = {fromBarDuration:F3}");
             }
             else
             {
                 // Single clip: use explicit exit time
                 fromBarDuration = exitTime;
+                Debug.Log($"[TimelineControlHelper] Using exitTime: fromBarDuration = {exitTime:F3}");
             }
             float toBarDuration = Mathf.Max(0f, toStateDuration - transitionDuration);
             float ghostFromDuration = (fromVisualCycles > 1) ? (fromVisualCycles - 1) * fromStateDuration : 0f;

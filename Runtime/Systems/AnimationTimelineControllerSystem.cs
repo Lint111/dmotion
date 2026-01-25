@@ -519,6 +519,7 @@ namespace DMotion
             {
                 float fromBarAnimStart = fromAnimTime;
                 float fromBarAnimEnd = fromAnimTime + (fromBarDuration / fromStateDuration);
+                UnityEngine.Debug.Log($"[SetupTransitionPreview] FromBar: duration={fromBarDuration:F3}, stateDur={fromStateDuration:F3}, animStart={fromBarAnimStart:F3}, animEnd={fromBarAnimEnd:F3}");
                 sections.Add(TimelineSection.FromBar(fromStateIndex, fromBarDuration, time, fromBlendPosition, fromBarAnimStart, fromBarAnimEnd));
                 time += fromBarDuration;
                 fromAnimTime = fromBarAnimEnd;
@@ -531,6 +532,8 @@ namespace DMotion
                 float transFromAnimEnd = fromStateDuration > 0 ? fromAnimTime + (transitionDuration / fromStateDuration) : fromAnimTime;
                 float transToAnimStart = toAnimTime;
                 float transToAnimEnd = toStateDuration > 0 ? toAnimTime + (transitionDuration / toStateDuration) : toAnimTime;
+                
+                UnityEngine.Debug.Log($"[SetupTransitionPreview] Transition: duration={transitionDuration:F3}, fromAnim={transFromAnimStart:F3}→{transFromAnimEnd:F3}, toAnim={transToAnimStart:F3}→{transToAnimEnd:F3}");
                 
                 sections.Add(TimelineSection.Transition(
                     fromStateIndex, toStateIndex,
