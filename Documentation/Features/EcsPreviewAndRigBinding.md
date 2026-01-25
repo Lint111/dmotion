@@ -1,5 +1,25 @@
 # Feature Plan: ECS Preview World + Rig Binding
 
+## Status: ✅ COMPLETE (DMotion Scope)
+
+**Completed:** 7/8 phases (Phase 4 deferred, Phase 8 in Mechination repo)
+
+| Phase | Status | Description |
+|-------|--------|-------------|
+| 0 | ✅ | Boot-Time Cleanup |
+| 1 | ✅ | Rig Binding Data Model |
+| 2 | ✅ | Preview Session Abstraction |
+| 3 | ✅ | Rig-Aware Preview |
+| 4 | ⏸️ | Asset Creation Workflow (deferred - low priority) |
+| 5 | ✅ | ECS Preview World Service |
+| 6 | ✅ | ECS Preview Rendering |
+| 7 | ✅ | Mode Toggle UI |
+| 8 | ⏸️ | Mechination Integration (out of scope - mechination repo) |
+
+**See also:** [PreviewModes_GUIDE.md](../../Docs/PreviewModes_GUIDE.md) for user documentation.
+
+---
+
 ## Relationship to AnimationPreviewWindow
 
 This feature plan **builds on top of** the existing AnimationPreviewWindow work. See [AnimationPreviewWindow.md](./AnimationPreviewWindow.md) for the authoring preview implementation.
@@ -215,7 +235,7 @@ Resolution order in preview window:
 - BoundArmatureData visible in inspector under "Rig Binding" header
 - Status/Source/Fingerprint hidden in inspector (for programmatic use)
 
-### Phase 2: Preview Session Abstraction
+### Phase 2: Preview Session Abstraction ✅ COMPLETE
 
 **Goal:** Unified API for preview backends
 
@@ -230,16 +250,23 @@ Resolution order in preview window:
 - `TimeDirty`
 - `RigDirty`
 
-**Files to add:**
+**Files added:**
 - `Editor/EditorWindows/Preview/PreviewSession.cs`
 - `Editor/EditorWindows/Preview/IPreviewBackend.cs`
 - `Editor/EditorWindows/Preview/PlayableGraphBackend.cs`
+- `Editor/EditorWindows/Preview/PreviewBackendBase.cs` (shared base class)
 
 **Acceptance Criteria:**
-- [ ] Existing preview behavior unchanged
-- [ ] Code path routes through session abstraction
+- [x] Existing preview behavior unchanged
+- [x] Code path routes through session abstraction
 
-### Phase 3: Rig-Aware Preview
+**Implementation Notes:**
+- `PreviewSession` manages backend lifecycle and dirty flag tracking
+- `IPreviewBackend` defines unified interface for both Authoring and ECS modes
+- `PlayableGraphBackend` wraps existing PlayableGraph-based preview
+- `PreviewBackendBase` provides shared camera state management
+
+### Phase 3: Rig-Aware Preview ✅ COMPLETE
 
 **Goal:** Preview uses BoundArmatureData deterministically
 
@@ -249,16 +276,22 @@ Resolution order in preview window:
 - If not bound: show appropriate UI based on status
 - Add "Assign Rig" button when unresolved
 
-**Files to modify:**
+**Files modified:**
 - `Editor/EditorWindows/AnimationPreviewWindow.cs`
 - `Editor/EditorWindows/Preview/PreviewRenderer.cs`
 
 **Acceptance Criteria:**
-- [ ] Bound rig used without heuristics
-- [ ] Unbound asset shows clear UI
-- [ ] User can assign rig from preview window
+- [x] Bound rig used without heuristics
+- [x] Unbound asset shows clear UI
+- [x] User can assign rig from preview window
 
-### Phase 4: Asset Creation Workflow
+**Implementation Notes:**
+- Preview model selection persists per-asset via EditorPrefs (`DMotion.AnimationPreview.PreviewModel.{guid}`)
+- ObjectField in toolbar allows direct model assignment
+- Model extracted from clips when no explicit selection
+- Camera state preserved across model/mode changes
+
+### Phase 4: Asset Creation Workflow ⏸️ DEFERRED (Low Priority)
 
 **Goal:** "Create DMotion Controller from Rig" context menu
 
@@ -278,7 +311,12 @@ Resolution order in preview window:
 - [ ] Created asset has correct binding
 - [ ] Preview works immediately without prompts
 
-### Phase 5: ECS Preview World Service
+**Deferral Reason:**
+- Nice-to-have workflow enhancement
+- Current workflow (create asset, assign model in preview) is functional
+- Can be added later if requested
+
+### Phase 5: ECS Preview World Service ✅ COMPLETE
 
 **Goal:** Isolated ECS world, only when preview window open
 
@@ -301,43 +339,62 @@ Resolution order in preview window:
 - Paused: `UpdateWhilePaused()` checks dirty flags, updates only if changed
 - Always: `CompleteJobs()` before rendering/snapshot
 
-**Files to add:**
+**Files added:**
 - `Editor/EditorWindows/Preview/EcsPreviewWorldService.cs`
-- `Editor/EditorWindows/Preview/PreviewSnapshot.cs`
 - `Editor/EditorWindows/Preview/EcsPreviewBackend.cs`
+- `Editor/EditorWindows/Preview/EcsPreviewSceneManager.cs`
+- `Editor/EditorWindows/Preview/EcsEntityBrowser.cs`
+- `Editor/EditorWindows/Preview/TimelineControlHelper.cs`
 
 **Acceptance Criteria:**
-- [ ] World created on window open, destroyed on close
-- [ ] No world exists when window closed
-- [ ] Jobs complete before rendering (no TempAlloc warnings)
-- [ ] Snapshot data matches runtime behavior
+- [x] World created on window open, destroyed on close
+- [x] No world exists when window closed
+- [x] Jobs complete before rendering (no TempAlloc warnings)
+- [x] Snapshot data matches runtime behavior
 
-### Phase 6: ECS Preview Rendering
+**Implementation Notes:**
+- `EcsPreviewWorldService` creates isolated LatiosWorld with Kinemation systems
+- `EcsEntityBrowser` provides live entity selection from Play Mode world
+- `EcsPreviewSceneManager` handles automatic SubScene setup for ECS preview
+- `TimelineControlHelper` bridges editor UI to ECS timeline control components
+- Supports both isolated world (editor-only) and live world (Play Mode) modes
+
+### Phase 6: ECS Preview Rendering ✅ COMPLETE
 
 **Goal:** Full pose rendering driven by ECS
 
 **Approach (phased):**
 
-**6A: Pose correctness (internal validation)**
+**6A: Pose correctness (internal validation)** ✅
 - Verify ECS-evaluated pose is correct in memory
 - Debug snapshot shows expected state/time/blend values
 
-**6B: Render via PreviewRenderUtility (lower risk)**
+**6B: Render via PreviewRenderUtility (lower risk)** ✅
 - Extract pose from ECS world
 - Apply to preview skeleton instance
 - Bake mesh and draw via existing PreviewRenderUtility path
 - Avoids BRG draw command systems
 
-**6C: Optional Entities Graphics/BRG (higher risk, later)**
+**6C: Optional Entities Graphics/BRG (higher risk, later)** ⏸️ DEFERRED
 - Only if true runtime render parity is required
 - Requires careful system selection to avoid allocation issues
 
-**Acceptance Criteria:**
-- [ ] ECS preview shows animated character
-- [ ] Pose matches Play Mode output for equivalent setup
-- [ ] No JobTempAlloc warnings during preview
+**Files added:**
+- `Editor/EditorWindows/Preview/EcsHybridRenderer.cs`
+- `Editor/EditorWindows/Preview/TransitionTimeline.cs`
 
-### Phase 7: Mode Toggle UI
+**Acceptance Criteria:**
+- [x] ECS preview shows animated character
+- [x] Pose matches Play Mode output for equivalent setup
+- [x] No JobTempAlloc warnings during preview
+
+**Implementation Notes:**
+- `EcsHybridRenderer` uses PlayableGraph for pose sampling with ECS-driven state/timing
+- Hybrid approach: ECS drives state machine logic, PlayableGraph samples poses
+- `TransitionTimeline` provides visual timeline UI with ghost bars for transition visualization
+- Camera state, zoom, orbit controls integrated with PreviewRenderUtility
+
+### Phase 7: Mode Toggle UI ✅ COMPLETE
 
 **Goal:** User can switch between Authoring and ECS preview
 
@@ -348,15 +405,21 @@ Resolution order in preview window:
 - Mode persists in EditorPrefs per asset (or globally)
 - Switching modes preserves selection/time
 
-**Files to modify:**
+**Files modified:**
 - `Editor/EditorWindows/AnimationPreviewWindow.cs`
 
 **Acceptance Criteria:**
-- [ ] Mode switch is visible and functional
-- [ ] Both modes produce correct output
-- [ ] No data loss on mode switch
+- [x] Mode switch is visible and functional
+- [x] Both modes produce correct output
+- [x] No data loss on mode switch
 
-### Phase 8: Mechination Integration
+**Implementation Notes:**
+- Mode toggle in toolbar dropdown menu (Authoring / ECS Runtime)
+- Mode persists globally via EditorPrefs (`DMotion.AnimationPreview.PreviewMode`)
+- Camera state preserved across mode switches via `PreviewSession`
+- State/transition selection preserved when switching modes
+
+### Phase 8: Mechination Integration ⏸️ OUT OF SCOPE (Mechination Repo)
 
 **Goal:** Mechination sets rig binding during conversion
 
@@ -375,6 +438,9 @@ Resolution order in preview window:
 - [ ] Unresolved assets prompt user
 - [ ] Opted-out assets don't re-prompt unless state changes
 - [ ] Fingerprint detects new bindings correctly
+
+**Note:** This phase is implemented in the Mechination repository, not DMotion.
+The DMotion-side API (rig binding fields, enums) is complete in Phase 1.
 
 ---
 
