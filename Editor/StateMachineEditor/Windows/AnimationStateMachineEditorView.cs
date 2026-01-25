@@ -72,9 +72,18 @@ namespace DMotion.Editor
         // Exit transitions from SubStateMachines
         private Dictionary<TransitionPair, TransitionEdge> exitTransitionEdges =
             new Dictionary<TransitionPair, TransitionEdge>();
+        
+        // Layer nodes (multi-layer mode only)
+        private Dictionary<LayerStateAsset, LayerStateNodeView> layerToView =
+            new Dictionary<LayerStateAsset, LayerStateNodeView>();
 
         // Search window for creating new states (opened with Space)
         private StateSearchWindowProvider searchWindowProvider;
+        
+        /// <summary>
+        /// Whether current view is showing multi-layer root (layer nodes only, no states).
+        /// </summary>
+        internal bool IsMultiLayerRoot => model.StateMachineAsset?.IsMultiLayer == true;
 
         internal StateMachineAsset StateMachine => model.StateMachineAsset;
         internal VisualTreeAsset StateNodeXml => model.StateNodeXml;

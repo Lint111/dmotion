@@ -148,17 +148,24 @@ namespace DMotion
         internal bool Loop;
         internal byte StartSamplerId;
         internal byte ClipCount;
+        
+        /// <summary>
+        /// Layer index this animation state belongs to. Default 0 for single-layer entities.
+        /// Used by multi-layer systems to group states by layer for composition.
+        /// </summary>
+        public byte LayerIndex;
 
         internal static int New(
             ref DynamicBuffer<AnimationState> animationStates,
             ref DynamicBuffer<ClipSampler> samplers,
             ClipSampler singleClipSampler,
             float speed, bool loop,
-            float initialTime = 0f)
+            float initialTime = 0f,
+            byte layerIndex = 0)
         {
             var newSamplers = new NativeArray<ClipSampler>(1, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
             newSamplers[0] = singleClipSampler;
-            return AnimationState.New(ref animationStates, ref samplers, newSamplers, speed, loop, initialTime);
+            return AnimationState.New(ref animationStates, ref samplers, newSamplers, speed, loop, initialTime, layerIndex);
         }
 
         internal static int New(
@@ -166,7 +173,8 @@ namespace DMotion
             ref DynamicBuffer<ClipSampler> samplers,
             NativeArray<ClipSampler> newSamplers,
             float speed, bool loop,
-            float initialTime = 0f)
+            float initialTime = 0f,
+            byte layerIndex = 0)
         {
             Assert.IsTrue(newSamplers.IsCreated, "Trying to create animationState with Null sampler array");
             Assert.IsTrue(newSamplers.Length > 0, "Trying to create animationState with no samplers");
@@ -189,7 +197,8 @@ namespace DMotion
                 Loop = loop,
                 ClipCount = clipCount,
                 StartSamplerId = samplerId,
-                Time = initialTime
+                Time = initialTime,
+                LayerIndex = layerIndex
             }, out _, out var animationStateIndex);
 
             // Add samplers to buffer - must handle insertion in middle properly
@@ -212,6 +221,7 @@ namespace DMotion
             {
                 var sampler = newSamplers[i];
                 sampler.Id = (byte)(samplerId + i);
+                sampler.LayerIndex = layerIndex;
                 samplers[insertIndex + i] = sampler;
             }
 

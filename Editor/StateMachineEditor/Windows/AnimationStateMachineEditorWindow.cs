@@ -31,6 +31,9 @@ namespace DMotion.Editor
         [SerializeField] private StateMachineAsset lastEditedStateMachine;
         [SerializeField] private string lastEditedAssetGuid;
         
+        // Root machine for multi-layer support (may differ from lastEditedStateMachine when inside a layer)
+        [SerializeField] private StateMachineAsset rootStateMachine;
+        
         // Preference keys
         private const string AutoOpenPreviewPrefKey = "DMotion.StateMachineEditor.AutoOpenPreview";
         
@@ -46,12 +49,14 @@ namespace DMotion.Editor
         private AnimationStateMachineEditorView stateMachineEditorView;
         private StateMachineInspectorView inspectorView;
         private StateMachineInspectorView parametersInspectorView;
+        private StateMachineInspectorView layersInspectorView;
         private StateMachineInspectorView dependenciesInspectorView;
         private BreadcrumbBar breadcrumbBar;
         
         // Event-driven panel controllers
         private InspectorController inspectorController;
         private ParametersPanelController parametersPanelController;
+        private LayersPanelController layersPanelController;
         private DependenciesPanelController dependenciesPanelController;
         private BreadcrumbController breadcrumbController;
         
@@ -80,6 +85,53 @@ namespace DMotion.Editor
             wnd.OnSelectionChange();
         }
 
+        /// <summary>
+        /// Opens the state machine editor with a specific asset.
+        /// If the asset is already open in a window, focuses that window.
+        /// Otherwise opens in the main window or creates a new one.
+        /// </summary>
+        /// <param name="asset">The state machine to edit</param>
+        /// <param name="forceNewWindow">If true, always creates a new window instance</param>
+        public static void OpenWindow(StateMachineAsset asset, bool forceNewWindow = false)
+        {
+            if (asset == null) return;
+            
+            // Try to find existing window with this asset
+            if (!forceNewWindow)
+            {
+                var existingWindows = Resources.FindObjectsOfTypeAll<AnimationStateMachineEditorWindow>();
+                foreach (var window in existingWindows)
+                {
+                    if (window.CurrentAsset == asset)
+                    {
+                        window.Focus();
+                        return;
+                    }
+                }
+            }
+            
+            // Get or create window
+            AnimationStateMachineEditorWindow wnd;
+            if (forceNewWindow)
+            {
+                wnd = CreateInstance<AnimationStateMachineEditorWindow>();
+                wnd.Show();
+            }
+            else
+            {
+                wnd = GetWindow<AnimationStateMachineEditorWindow>();
+            }
+            
+            wnd.titleContent = new GUIContent($"State Machine: {asset.name}");
+            wnd.LoadStateMachine(asset);
+            wnd.Focus();
+        }
+        
+        /// <summary>
+        /// The currently loaded state machine asset.
+        /// </summary>
+        public StateMachineAsset CurrentAsset => lastEditedStateMachine;
+
         
         [MenuItem(ToolMenuConstants.DMotionPath + "/Auto-Open Animation Preview")]
         private static void ToggleAutoOpenPreview()
@@ -106,6 +158,7 @@ namespace DMotion.Editor
             // Unsubscribe all panel controllers
             inspectorController?.Unsubscribe();
             parametersPanelController?.Unsubscribe();
+            layersPanelController?.Unsubscribe();
             dependenciesPanelController?.Unsubscribe();
             breadcrumbController?.Unsubscribe();
             
@@ -140,6 +193,7 @@ namespace DMotion.Editor
                 stateMachineEditorView = root.Q<AnimationStateMachineEditorView>();
                 inspectorView = root.Q<StateMachineInspectorView>("inspector");
                 parametersInspectorView = root.Q<StateMachineInspectorView>("parameters-inspector");
+                layersInspectorView = root.Q<StateMachineInspectorView>("layers-inspector");
                 dependenciesInspectorView = root.Q<StateMachineInspectorView>("dependencies-inspector");
                 breadcrumbBar = root.Q<BreadcrumbBar>("breadcrumb-bar");
                 
@@ -156,6 +210,13 @@ namespace DMotion.Editor
                     {
                         parametersPanelController = new ParametersPanelController(parametersInspectorView);
                         parametersPanelController.Subscribe();
+                    }
+                    
+                    if (layersInspectorView != null)
+                    {
+                        layersPanelController = new LayersPanelController(layersInspectorView);
+                        layersPanelController.OnEditLayerRequested = OnEditLayerRequested;
+                        layersPanelController.Subscribe();
                     }
                     
                     if (dependenciesInspectorView != null)
@@ -184,6 +245,19 @@ namespace DMotion.Editor
         {
             if (targetMachine == null) return;
             LoadStateMachineInternal(targetMachine, updateBreadcrumb: false);
+        }
+        
+        /// <summary>
+        /// Called when user requests to edit a layer's state machine.
+        /// Navigates into the layer via breadcrumb.
+        /// </summary>
+        private void OnEditLayerRequested(LayerStateAsset layer)
+        {
+            if (layer?.NestedStateMachine == null) return;
+            
+            // Push to breadcrumb and navigate
+            breadcrumbController?.Push(layer.NestedStateMachine);
+            LoadStateMachineInternal(layer.NestedStateMachine, updateBreadcrumb: false);
         }
         
         private void OnEnable()
@@ -278,6 +352,9 @@ namespace DMotion.Editor
         {
             if (stateMachineAsset == null) return;
             
+            // This is a new root machine
+            rootStateMachine = stateMachineAsset;
+            
             // Reset breadcrumb to new root via controller
             breadcrumbController?.SetRoot(stateMachineAsset);
             
@@ -309,6 +386,7 @@ namespace DMotion.Editor
             // Update all panel controllers with new context
             inspectorController?.SetContext(stateMachineAsset);
             parametersPanelController?.SetContext(stateMachineAsset);
+            layersPanelController?.SetContext(stateMachineAsset, rootStateMachine);
             dependenciesPanelController?.SetContext(stateMachineAsset);
             
             stateMachineEditorView.PopulateView(new StateMachineEditorViewModel

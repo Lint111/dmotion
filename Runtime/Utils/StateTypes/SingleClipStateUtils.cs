@@ -15,7 +15,8 @@ namespace DMotion
             ref DynamicBuffer<AnimationState> animationStates,
             ref DynamicBuffer<ClipSampler> samplers,
             float finalSpeed,
-            float normalizedOffset = 0f)
+            float normalizedOffset = 0f,
+            byte layerIndex = 0)
         {
             ref var state = ref stateMachineBlob.Value.States[stateIndex];
             var singleClipState = stateMachineBlob.Value.SingleClipStates[state.StateIndex];
@@ -25,7 +26,8 @@ namespace DMotion
                 ref singleClips,
                 ref animationStates,
                 ref samplers,
-                normalizedOffset);
+                normalizedOffset,
+                layerIndex);
         }
 
         internal static SingleClipState New(
@@ -37,7 +39,8 @@ namespace DMotion
             ref DynamicBuffer<SingleClipState> singleClips,
             ref DynamicBuffer<AnimationState> animationStates,
             ref DynamicBuffer<ClipSampler> samplers,
-            float normalizedOffset = 0f)
+            float normalizedOffset = 0f,
+            byte layerIndex = 0)
         {
             ref var clip = ref clips.Value.clips[clipIndex];
             
@@ -60,10 +63,11 @@ namespace DMotion
                 ClipEventsBlob = clipEvents,
                 PreviousTime = initialTime,
                 Time = initialTime,
-                Weight = 0
+                Weight = 0,
+                LayerIndex = layerIndex
             };
 
-            var animationStateIndex = AnimationState.New(ref animationStates, ref samplers, newSampler, speed, loop, initialTime);
+            var animationStateIndex = AnimationState.New(ref animationStates, ref samplers, newSampler, speed, loop, initialTime, layerIndex);
             if (animationStateIndex < 0)
             {
                 // Failed to allocate - return invalid state (caller should check IsValid)

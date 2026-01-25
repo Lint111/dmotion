@@ -19,7 +19,8 @@ namespace DMotion
             ref DynamicBuffer<ClipSampler> samplers,
             float finalSpeed,
             in DynamicBuffer<FloatParameter> floatParameters,
-            float normalizedOffset = 0f)
+            float normalizedOffset = 0f,
+            byte layerIndex = 0)
         {
             var directional2DState = new Directional2DBlendStateMachineState
             {
@@ -90,14 +91,16 @@ namespace DMotion
                     ClipEventsBlob = clipEvents,
                     PreviousTime = initialTime,
                     Time = initialTime,
-                    Weight = 0
+                    Weight = 0,
+                    LayerIndex = layerIndex
                 };
             }
 
             var animationStateIndex = AnimationState.New(ref animationStates, ref samplers, newSamplers,
                 finalSpeed,
                 directional2DState.StateBlob.Loop,
-                initialTime);
+                initialTime,
+                layerIndex);
 
             if (animationStateIndex < 0)
             {

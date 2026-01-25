@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using Latios.Kinemation;
 using Unity.Assertions;
 using Unity.Entities;
@@ -29,6 +29,12 @@ namespace DMotion
         internal float PreviousTime;
         internal float Time;
         internal float Weight;
+        
+        /// <summary>
+        /// Layer index this sampler belongs to. Default 0 for single-layer entities.
+        /// Used by multi-layer systems to group samplers by layer for composition.
+        /// </summary>
+        public byte LayerIndex;
 
         internal ref SkeletonClip Clip => ref Clips.Value.clips[ClipIndex];
 

@@ -13,6 +13,11 @@ namespace DMotion
         Single = 0,
         LinearBlend = 1,
         Directional2DBlend = 2,
+        /// <summary>
+        /// Layer container - holds an entire state machine for multi-layer blending.
+        /// Not used in runtime blob (layers have separate blobs), only for authoring.
+        /// </summary>
+        Layer = 255,
     }
     
     /// <summary>

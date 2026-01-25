@@ -21,7 +21,8 @@ namespace DMotion
             float finalSpeed,
             in DynamicBuffer<FloatParameter> floatParameters,
             in DynamicBuffer<IntParameter> intParameters,
-            float normalizedOffset = 0f)
+            float normalizedOffset = 0f,
+            byte layerIndex = 0)
         {
             var linearBlendState = new LinearBlendStateMachineState
             {
@@ -100,14 +101,16 @@ namespace DMotion
                     ClipEventsBlob = clipEvents,
                     PreviousTime = initialTime,
                     Time = initialTime,
-                    Weight = 0
+                    Weight = 0,
+                    LayerIndex = layerIndex
                 };
             }
 
             var animationStateIndex = AnimationState.New(ref animationStates, ref samplers, newSamplers,
                 finalSpeed,
                 linearBlendState.StateBlob.Loop,
-                initialTime);
+                initialTime,
+                layerIndex);
 
             if (animationStateIndex < 0)
             {

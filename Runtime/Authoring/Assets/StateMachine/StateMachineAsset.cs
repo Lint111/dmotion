@@ -300,6 +300,205 @@ namespace DMotion.Authoring
         public IEnumerable<AnimationClipAsset> Clips => States.SelectMany(s => s.Clips);
         public int ClipCount => States.Sum(s => s.ClipCount);
 
+        #region Multi-Layer Support
+
+        /// <summary>
+        /// Returns true if this state machine contains layer assets (multi-layer mode).
+        /// Single-layer mode has regular states at root; multi-layer has LayerStateAssets.
+        /// </summary>
+        public bool IsMultiLayer => States.OfType<LayerStateAsset>().Any();
+
+        /// <summary>
+        /// Gets all layer assets in this state machine.
+        /// Returns empty if not in multi-layer mode.
+        /// </summary>
+        public IEnumerable<LayerStateAsset> GetLayers()
+        {
+            return States.OfType<LayerStateAsset>();
+        }
+
+        /// <summary>
+        /// Gets the number of layers. Returns 0 for single-layer state machines.
+        /// </summary>
+        public int LayerCount => States.OfType<LayerStateAsset>().Count();
+
+        /// <summary>
+        /// Gets a layer by index. Returns null if index is out of range or not multi-layer.
+        /// </summary>
+        public LayerStateAsset GetLayer(int index)
+        {
+            var layers = States.OfType<LayerStateAsset>().ToList();
+            if (index < 0 || index >= layers.Count)
+                return null;
+            return layers[index];
+        }
+
+        #if UNITY_EDITOR
+        /// <summary>
+        /// Converts this single-layer state machine to multi-layer by:
+        /// 1. Creating a new LayerStateAsset ("Base Layer")
+        /// 2. Moving all existing states into the layer's nested state machine
+        /// 3. Clearing root states and adding only the layer
+        /// 
+        /// Call this before adding additional layers.
+        /// </summary>
+        public LayerStateAsset ConvertToMultiLayer()
+        {
+            if (IsMultiLayer)
+            {
+                Debug.LogWarning($"[{name}] Already in multi-layer mode.", this);
+                return GetLayers().FirstOrDefault();
+            }
+
+            // Create the base layer asset
+            var baseLayer = ScriptableObject.CreateInstance<LayerStateAsset>();
+            baseLayer.name = "Base Layer";
+            baseLayer.Weight = 1f;
+            baseLayer.BlendMode = LayerBlendMode.Override;
+
+            // Create nested state machine for the layer
+            var nestedMachine = ScriptableObject.CreateInstance<StateMachineAsset>();
+            nestedMachine.name = $"{name}_BaseLayer";
+
+            // Move all existing states to the nested machine
+            nestedMachine.States = new List<AnimationStateAsset>(States);
+            nestedMachine.DefaultState = DefaultState;
+            nestedMachine.Parameters = new List<AnimationParameterAsset>(Parameters);
+            nestedMachine.AnyStateTransitions = new List<StateOutTransition>(AnyStateTransitions);
+            nestedMachine.ExitStates = new List<AnimationStateAsset>(ExitStates);
+
+            // Copy rig binding
+            nestedMachine._boundArmatureData = _boundArmatureData;
+            nestedMachine._rigBindingStatus = _rigBindingStatus;
+            nestedMachine._rigBindingSource = _rigBindingSource;
+            nestedMachine._rigBindingFingerprint = _rigBindingFingerprint;
+
+            // Assign nested machine to layer
+            baseLayer.NestedStateMachine = nestedMachine;
+
+            // Add as sub-assets
+            var path = UnityEditor.AssetDatabase.GetAssetPath(this);
+            if (!string.IsNullOrEmpty(path))
+            {
+                UnityEditor.AssetDatabase.AddObjectToAsset(baseLayer, this);
+                UnityEditor.AssetDatabase.AddObjectToAsset(nestedMachine, this);
+            }
+
+            // Clear root and add only the layer
+            States.Clear();
+            States.Add(baseLayer);
+            DefaultState = null; // Layers don't have a default state at root
+            AnyStateTransitions.Clear(); // Any State is per-layer
+            ExitStates.Clear();
+
+            UnityEditor.EditorUtility.SetDirty(this);
+            if (!string.IsNullOrEmpty(path))
+            {
+                UnityEditor.AssetDatabase.SaveAssets();
+            }
+
+            Debug.Log($"[{name}] Converted to multi-layer mode. Existing states moved to 'Base Layer'.", this);
+            return baseLayer;
+        }
+
+        /// <summary>
+        /// Adds a new layer to a multi-layer state machine.
+        /// If not already multi-layer, converts first.
+        /// </summary>
+        /// <param name="layerName">Name for the new layer</param>
+        /// <returns>The created layer asset</returns>
+        public LayerStateAsset AddLayer(string layerName = null)
+        {
+            // Convert to multi-layer if needed
+            if (!IsMultiLayer)
+            {
+                ConvertToMultiLayer();
+            }
+
+            var layerIndex = LayerCount;
+            var actualLayerName = layerName ?? $"Layer {layerIndex}";
+
+            // Create the layer asset
+            var layer = ScriptableObject.CreateInstance<LayerStateAsset>();
+            layer.name = actualLayerName;
+            layer.Weight = 1f;
+            layer.BlendMode = LayerBlendMode.Override;
+
+            // Create nested state machine
+            var nestedMachine = ScriptableObject.CreateInstance<StateMachineAsset>();
+            nestedMachine.name = $"{this.name}_{actualLayerName.Replace(" ", "")}";
+
+            // Copy rig binding from root
+            nestedMachine._boundArmatureData = _boundArmatureData;
+            nestedMachine._rigBindingStatus = _rigBindingStatus;
+            nestedMachine._rigBindingSource = _rigBindingSource;
+            nestedMachine._rigBindingFingerprint = _rigBindingFingerprint;
+
+            layer.NestedStateMachine = nestedMachine;
+
+            // Add as sub-assets
+            var path = UnityEditor.AssetDatabase.GetAssetPath(this);
+            if (!string.IsNullOrEmpty(path))
+            {
+                UnityEditor.AssetDatabase.AddObjectToAsset(layer, this);
+                UnityEditor.AssetDatabase.AddObjectToAsset(nestedMachine, this);
+            }
+
+            States.Add(layer);
+
+            UnityEditor.EditorUtility.SetDirty(this);
+            if (!string.IsNullOrEmpty(path))
+            {
+                UnityEditor.AssetDatabase.SaveAssets();
+            }
+
+            return layer;
+        }
+
+        /// <summary>
+        /// Removes a layer from the state machine.
+        /// Cannot remove the last layer - use single-layer mode instead.
+        /// </summary>
+        public bool RemoveLayer(LayerStateAsset layer)
+        {
+            if (layer == null || !States.Contains(layer))
+                return false;
+
+            if (LayerCount <= 1)
+            {
+                Debug.LogWarning($"[{name}] Cannot remove the last layer. Convert back to single-layer mode instead.", this);
+                return false;
+            }
+
+            States.Remove(layer);
+
+            // Remove sub-assets
+            var path = UnityEditor.AssetDatabase.GetAssetPath(this);
+            if (!string.IsNullOrEmpty(path))
+            {
+                if (layer.NestedStateMachine != null)
+                {
+                    UnityEditor.AssetDatabase.RemoveObjectFromAsset(layer.NestedStateMachine);
+                }
+                UnityEditor.AssetDatabase.RemoveObjectFromAsset(layer);
+                UnityEditor.AssetDatabase.SaveAssets();
+            }
+            else
+            {
+                if (layer.NestedStateMachine != null)
+                {
+                    DestroyImmediate(layer.NestedStateMachine);
+                }
+                DestroyImmediate(layer);
+            }
+
+            UnityEditor.EditorUtility.SetDirty(this);
+            return true;
+        }
+        #endif
+
+        #endregion
+
         #region Hierarchy Query APIs
 
         /// <summary>

@@ -201,6 +201,36 @@ namespace DMotion.Editor
 
         #endregion
 
+        #region Layer Events
+
+        /// <summary>
+        /// Fired when a layer is added to a multi-layer state machine.
+        /// </summary>
+        public static event Action<StateMachineAsset, LayerStateAsset> OnLayerAdded;
+
+        /// <summary>
+        /// Fired when a layer is removed from a multi-layer state machine.
+        /// </summary>
+        public static event Action<StateMachineAsset, LayerStateAsset> OnLayerRemoved;
+
+        /// <summary>
+        /// Fired when a layer's properties change (weight, blend mode).
+        /// </summary>
+        public static event Action<StateMachineAsset, LayerStateAsset> OnLayerChanged;
+
+        /// <summary>
+        /// Fired when user enters a layer for editing (navigation).
+        /// Args: (rootMachine, layer, layerStateMachine)
+        /// </summary>
+        public static event Action<StateMachineAsset, LayerStateAsset, StateMachineAsset> OnLayerEntered;
+
+        /// <summary>
+        /// Fired when the state machine is converted to multi-layer mode.
+        /// </summary>
+        public static event Action<StateMachineAsset> OnConvertedToMultiLayer;
+
+        #endregion
+
         #region General Events
 
         /// <summary>
@@ -443,6 +473,43 @@ namespace DMotion.Editor
 
         #endregion
 
+        #region Raise Methods - Layers
+
+        /// <summary>Raises <see cref="OnLayerAdded"/> and <see cref="OnStateMachineChanged"/>.</summary>
+        public static void RaiseLayerAdded(StateMachineAsset machine, LayerStateAsset layer)
+        {
+            OnLayerAdded?.Invoke(machine, layer);
+            OnStateMachineChanged?.Invoke(machine);
+        }
+
+        /// <summary>Raises <see cref="OnLayerRemoved"/> and <see cref="OnStateMachineChanged"/>.</summary>
+        public static void RaiseLayerRemoved(StateMachineAsset machine, LayerStateAsset layer)
+        {
+            OnLayerRemoved?.Invoke(machine, layer);
+            OnStateMachineChanged?.Invoke(machine);
+        }
+
+        /// <summary>Raises <see cref="OnLayerChanged"/>.</summary>
+        public static void RaiseLayerChanged(StateMachineAsset machine, LayerStateAsset layer)
+        {
+            OnLayerChanged?.Invoke(machine, layer);
+        }
+
+        /// <summary>Raises <see cref="OnLayerEntered"/>.</summary>
+        public static void RaiseLayerEntered(StateMachineAsset rootMachine, LayerStateAsset layer, StateMachineAsset layerMachine)
+        {
+            OnLayerEntered?.Invoke(rootMachine, layer, layerMachine);
+        }
+
+        /// <summary>Raises <see cref="OnConvertedToMultiLayer"/> and <see cref="OnStateMachineChanged"/>.</summary>
+        public static void RaiseConvertedToMultiLayer(StateMachineAsset machine)
+        {
+            OnConvertedToMultiLayer?.Invoke(machine);
+            OnStateMachineChanged?.Invoke(machine);
+        }
+
+        #endregion
+
         #region Utility
 
         /// <summary>
@@ -477,6 +544,11 @@ namespace DMotion.Editor
             OnSubStateMachineEntered = null;
             OnSubStateMachineExited = null;
             OnBreadcrumbNavigationRequested = null;
+            OnLayerAdded = null;
+            OnLayerRemoved = null;
+            OnLayerChanged = null;
+            OnLayerEntered = null;
+            OnConvertedToMultiLayer = null;
         }
 
         #endregion

@@ -1,5 +1,7 @@
 using System;
+using System.Linq;
 using DMotion.Authoring;
+using UnityEngine.UIElements;
 
 namespace DMotion.Editor
 {
@@ -28,6 +30,7 @@ namespace DMotion.Editor
         {
             StateMachineEditorEvents.OnSubStateMachineEntered += OnSubStateMachineEntered;
             StateMachineEditorEvents.OnSubStateMachineExited += OnSubStateMachineExited;
+            StateMachineEditorEvents.OnLayerEntered += OnLayerEntered;
             
             // Wire up breadcrumb's internal navigation to raise events
             if (breadcrumbBar != null)
@@ -40,6 +43,7 @@ namespace DMotion.Editor
         {
             StateMachineEditorEvents.OnSubStateMachineEntered -= OnSubStateMachineEntered;
             StateMachineEditorEvents.OnSubStateMachineExited -= OnSubStateMachineExited;
+            StateMachineEditorEvents.OnLayerEntered -= OnLayerEntered;
             
             if (breadcrumbBar != null)
             {
@@ -52,11 +56,28 @@ namespace DMotion.Editor
             rootMachine = machine;
             breadcrumbBar?.SetRoot(machine);
         }
+        
+        /// <summary>
+        /// Pushes a state machine onto the breadcrumb stack.
+        /// Used for layer navigation where the event is handled externally.
+        /// </summary>
+        public void Push(StateMachineAsset machine)
+        {
+            breadcrumbBar?.Push(machine);
+        }
 
         private void OnSubStateMachineEntered(StateMachineAsset parent, StateMachineAsset entered)
         {
             breadcrumbBar?.Push(entered);
             OnNavigationRequested?.Invoke(entered);
+        }
+        
+        private void OnLayerEntered(StateMachineAsset rootMachine, LayerStateAsset layer, StateMachineAsset layerMachine)
+        {
+            // Layer navigation is handled via OnEditLayerRequested callback in the window,
+            // which calls Push() directly. This handler is for other listeners that may
+            // want to respond to layer navigation events.
+            // The breadcrumb push is already done by the window's OnEditLayerRequested.
         }
 
         private void OnSubStateMachineExited(StateMachineAsset returnedTo)
@@ -228,5 +249,108 @@ namespace DMotion.Editor
             }
             return false;
         }
+    }
+
+    /// <summary>
+    /// Manages the layers panel visibility and content for multi-layer state machines.
+    /// Shows when the root state machine is in multi-layer mode.
+    /// </summary>
+    internal class LayersPanelController
+    {
+        private readonly StateMachineInspectorView panelView;
+        private StateMachineAsset currentMachine;
+        private StateMachineAsset rootMachine;
+
+        /// <summary>
+        /// Fired when user requests to edit a layer's state machine.
+        /// </summary>
+        internal Action<LayerStateAsset> OnEditLayerRequested;
+
+        public LayersPanelController(StateMachineInspectorView panelView)
+        {
+            this.panelView = panelView;
+        }
+
+        public void Subscribe()
+        {
+            StateMachineEditorEvents.OnLayerAdded += OnLayerAdded;
+            StateMachineEditorEvents.OnLayerRemoved += OnLayerRemoved;
+            StateMachineEditorEvents.OnLayerChanged += OnLayerChanged;
+            StateMachineEditorEvents.OnConvertedToMultiLayer += OnConvertedToMultiLayer;
+        }
+
+        public void Unsubscribe()
+        {
+            StateMachineEditorEvents.OnLayerAdded -= OnLayerAdded;
+            StateMachineEditorEvents.OnLayerRemoved -= OnLayerRemoved;
+            StateMachineEditorEvents.OnLayerChanged -= OnLayerChanged;
+            StateMachineEditorEvents.OnConvertedToMultiLayer -= OnConvertedToMultiLayer;
+        }
+
+        public void SetContext(StateMachineAsset machine, StateMachineAsset root = null)
+        {
+            currentMachine = machine;
+            rootMachine = root ?? machine;
+            RefreshPanel();
+        }
+
+        private void OnLayerAdded(StateMachineAsset machine, LayerStateAsset layer)
+        {
+            if (machine != rootMachine) return;
+            RefreshPanel();
+        }
+
+        private void OnLayerRemoved(StateMachineAsset machine, LayerStateAsset layer)
+        {
+            if (machine != rootMachine) return;
+            RefreshPanel();
+        }
+
+        private void OnLayerChanged(StateMachineAsset machine, LayerStateAsset layer)
+        {
+            if (machine != rootMachine) return;
+            RefreshPanel();
+        }
+
+        private void OnConvertedToMultiLayer(StateMachineAsset machine)
+        {
+            if (machine != rootMachine) return;
+            RefreshPanel();
+        }
+
+        private void RefreshPanel()
+        {
+            if (panelView == null) return;
+
+            // Show panel when viewing root machine (allows convert to multi-layer)
+            // Hide when navigated into a layer's nested state machine
+            bool isAtRoot = rootMachine != null && currentMachine == rootMachine;
+
+            if (isAtRoot)
+            {
+                panelView.style.display = DisplayStyle.Flex;
+                panelView.SetInspector<LayersInspector, LayersInspectorModel>(
+                    rootMachine, new LayersInspectorModel
+                    {
+                        StateMachine = rootMachine,
+                        OnEditLayer = OnEditLayerRequested
+                    });
+            }
+            else
+            {
+                // Hide when inside a layer's state machine
+                panelView.style.display = DisplayStyle.None;
+                panelView.Clear();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Model for the layers inspector.
+    /// </summary>
+    internal struct LayersInspectorModel
+    {
+        public StateMachineAsset StateMachine;
+        public Action<LayerStateAsset> OnEditLayer;
     }
 }
