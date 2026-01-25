@@ -74,10 +74,10 @@ namespace DMotion.Editor
         
         private void OnLayerEntered(StateMachineAsset rootMachine, LayerStateAsset layer, StateMachineAsset layerMachine)
         {
-            // Layer navigation is handled via OnEditLayerRequested callback in the window,
-            // which calls Push() directly. This handler is for other listeners that may
-            // want to respond to layer navigation events.
-            // The breadcrumb push is already done by the window's OnEditLayerRequested.
+            // Handle layer navigation from graph node double-click
+            // Push to breadcrumb and request navigation (same as SubStateMachine)
+            breadcrumbBar?.Push(layerMachine);
+            OnNavigationRequested?.Invoke(layerMachine);
         }
 
         private void OnSubStateMachineExited(StateMachineAsset returnedTo)

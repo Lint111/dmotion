@@ -216,11 +216,25 @@ namespace DMotion.Editor
 
         public override void BuildContextualMenu(ContextualMenuPopulateEvent evt)
         {
-            if (model.StateMachineAsset != null)
+            if (model.StateMachineAsset == null)
             {
-                var status = Application.isPlaying
-                    ? DropdownMenuAction.Status.Disabled
-                    : DropdownMenuAction.Status.Normal;
+                evt.StopPropagation();
+                return;
+            }
+            
+            var status = Application.isPlaying
+                ? DropdownMenuAction.Status.Disabled
+                : DropdownMenuAction.Status.Normal;
+
+            // Context-aware menu based on whether we're at multi-layer root or inside a layer
+            if (IsMultiLayerRoot)
+            {
+                // Multi-layer root: only allow adding layers
+                evt.menu.AppendAction("Add Layer", a => CreateLayer(a), status);
+            }
+            else
+            {
+                // Inside layer or single-layer: normal state creation options
                 evt.menu.AppendAction("New State", a => CreateState(a, typeof(SingleClipStateAsset)), status);
                 evt.menu.AppendAction("New Blend Tree 1D", a => CreateState(a, typeof(LinearBlendStateAsset)), status);
                 evt.menu.AppendAction("New Blend Tree 2D", a => CreateState(a, typeof(Directional2DBlendStateAsset)), status);
@@ -228,6 +242,36 @@ namespace DMotion.Editor
             }
 
             evt.StopPropagation();
+        }
+        
+        /// <summary>
+        /// Creates a new layer at the context menu position (multi-layer root only).
+        /// </summary>
+        private void CreateLayer(DropdownMenuAction action)
+        {
+            var graphPos = contentViewContainer.WorldToLocal(action.eventInfo.mousePosition);
+            
+            Undo.RecordObject(model.StateMachineAsset, "Add Layer");
+            var layer = model.StateMachineAsset.AddLayer();
+            
+            // Set position for the new layer
+            layer.StateEditorData.GraphPosition = graphPos;
+            EditorUtility.SetDirty(layer);
+            
+            // Raise event to refresh view
+            StateMachineEditorEvents.RaiseLayerAdded(model.StateMachineAsset, layer);
+            
+            // Refresh the graph view
+            RefreshAfterLayerChange();
+        }
+        
+        /// <summary>
+        /// Refreshes the graph view after a layer is added or removed.
+        /// </summary>
+        internal void RefreshAfterLayerChange()
+        {
+            // Re-populate the view to show the new layer
+            PopulateView(model);
         }
 
         private GraphViewChange OnGraphViewChanged(GraphViewChange graphviewchange)
@@ -462,14 +506,22 @@ namespace DMotion.Editor
 
         internal void UpdateView()
         {
+            // Update state views
             foreach (var stateView in stateToView.Values)
             {
                 stateView.UpdateView();
             }
 
+            // Update transition views
             foreach (var transitions in transitionToEdgeView.Values)
             {
                 transitions.UpdateView();
+            }
+            
+            // Update layer views (multi-layer root)
+            foreach (var layerView in layerToView.Values)
+            {
+                layerView.UpdateView();
             }
         }
 
@@ -480,6 +532,7 @@ namespace DMotion.Editor
             transitionToEdgeView.Clear();
             anyStateTransitionEdges.Clear();
             exitTransitionEdges.Clear();
+            layerToView.Clear();
             anyStateExitEdge = null;
 
             graphViewChanged -= OnGraphViewChanged;
@@ -493,7 +546,41 @@ namespace DMotion.Editor
             ListPool<GraphElement>.Return(elementsToDelete);
             graphViewChanged += OnGraphViewChanged;
 
-            // Create Any State node (always present)
+            // Multi-layer root: show only layer nodes, no Any State, no Exit, no transitions
+            if (IsMultiLayerRoot)
+            {
+                PopulateMultiLayerRoot();
+                return;
+            }
+
+            // Single-layer or inside a layer: normal state machine view
+            PopulateSingleLayerView();
+        }
+        
+        /// <summary>
+        /// Populates the view for multi-layer root - shows layer nodes only.
+        /// No Any State, no Exit, no transitions between layers.
+        /// </summary>
+        private void PopulateMultiLayerRoot()
+        {
+            foreach (var state in model.StateMachineAsset.States)
+            {
+                if (state is LayerStateAsset layer)
+                {
+                    InstantiateLayerView(layer);
+                }
+            }
+            
+            // No transitions at multi-layer root - layers run in parallel
+        }
+        
+        /// <summary>
+        /// Populates the view for single-layer or inside a layer's state machine.
+        /// Shows Any State, Exit, states, and transitions.
+        /// </summary>
+        private void PopulateSingleLayerView()
+        {
+            // Create Any State node (always present in single-layer/layer content)
             InstantiateAnyStateNode();
             
             // Create Exit node (always present - for nested state machine support)
@@ -501,11 +588,14 @@ namespace DMotion.Editor
 
             foreach (var s in model.StateMachineAsset.States)
             {
+                // Skip LayerStateAsset in single-layer view (shouldn't happen, but defensive)
+                if (s is LayerStateAsset) continue;
                 InstantiateStateView(s);
             }
 
             foreach (var t in model.StateMachineAsset.States)
             {
+                if (t is LayerStateAsset) continue;
                 for (var i = 0; i < t.OutTransitions.Count; i++)
                 {
                     InstantiateTransitionEdge(t, i);
@@ -538,8 +628,16 @@ namespace DMotion.Editor
             {
                 InstantiateExitStateEdge(exitState);
             }
-            
-            // Panel controllers handle Parameters and Dependencies panels via events
+        }
+        
+        /// <summary>
+        /// Creates a visual node for a layer asset.
+        /// </summary>
+        private void InstantiateLayerView(LayerStateAsset layer)
+        {
+            var layerView = LayerStateNodeView.Create(layer, this);
+            AddElement(layerView);
+            layerToView.Add(layer, layerView);
         }
 
         internal StateNodeView GetViewForState(AnimationStateAsset state)

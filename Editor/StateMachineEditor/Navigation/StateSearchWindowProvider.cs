@@ -9,14 +9,15 @@ using UnityEngine.UIElements;
 namespace DMotion.Editor
 {
     /// <summary>
-    /// Provides a searchable popup window for creating new state nodes.
-    /// Similar to Unity Shader Graph's node creation experience.
-    /// Press Space to open, then type to filter or click to select.
+    /// Provides a context-aware searchable popup window for graph operations.
+    /// At multi-layer root: shows "Add Layer" only.
+    /// Inside layer/single-layer: shows state types (Single Clip, Blend Trees, SubStateMachine).
     /// </summary>
     internal class StateSearchWindowProvider : ScriptableObject, ISearchWindowProvider
     {
         private AnimationStateMachineEditorView graphView;
         private Vector2 creationPosition;
+        private IGraphContextProvider contextProvider;
 
         internal void Initialize(AnimationStateMachineEditorView view)
         {
@@ -26,57 +27,21 @@ namespace DMotion.Editor
         internal void SetCreationPosition(Vector2 graphPosition)
         {
             creationPosition = graphPosition;
+            // Update context provider each time position is set (context may have changed)
+            contextProvider = GraphContextProviderFactory.GetProvider(graphView);
         }
 
         public List<SearchTreeEntry> CreateSearchTree(SearchWindowContext context)
         {
-            var tree = new List<SearchTreeEntry>
-            {
-                // Root group header
-                new SearchTreeGroupEntry(new GUIContent("Create State"), 0),
-                
-                // Basic States category
-                new SearchTreeGroupEntry(new GUIContent("States"), 1),
-                new SearchTreeEntry(new GUIContent("Single Clip", EditorGUIUtility.IconContent("AnimationClip Icon").image))
-                {
-                    level = 2,
-                    userData = typeof(SingleClipStateAsset)
-                },
-                
-                // Blend Trees category
-                new SearchTreeGroupEntry(new GUIContent("Blend Trees"), 1),
-                new SearchTreeEntry(new GUIContent("Blend Tree 1D", EditorGUIUtility.IconContent("BlendTree Icon").image))
-                {
-                    level = 2,
-                    userData = typeof(LinearBlendStateAsset)
-                },
-                new SearchTreeEntry(new GUIContent("Blend Tree 2D (Simple Directional)", EditorGUIUtility.IconContent("BlendTree Icon").image))
-                {
-                    level = 2,
-                    userData = typeof(Directional2DBlendStateAsset)
-                },
-                
-                // Organization category
-                new SearchTreeGroupEntry(new GUIContent("Organization"), 1),
-                new SearchTreeEntry(new GUIContent("Sub-State Machine", EditorGUIUtility.IconContent("AnimatorController Icon").image))
-                {
-                    level = 2,
-                    userData = typeof(SubStateMachineStateAsset)
-                }
-            };
-
-            return tree;
+            // Use context-aware provider
+            contextProvider ??= GraphContextProviderFactory.GetProvider(graphView);
+            return contextProvider.CreateSearchTree();
         }
 
         public bool OnSelectEntry(SearchTreeEntry entry, SearchWindowContext context)
         {
-            if (entry.userData is Type stateType)
-            {
-                // Use the position captured when Space was pressed
-                graphView.CreateStateAtPosition(stateType, creationPosition);
-                return true;
-            }
-            return false;
+            contextProvider ??= GraphContextProviderFactory.GetProvider(graphView);
+            return contextProvider.OnSelectEntry(entry, graphView, creationPosition);
         }
     }
 }
