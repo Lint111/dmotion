@@ -14,6 +14,11 @@ namespace DMotion.Editor
     {
         private DockablePanelSection layersSection;
         private bool _needsRefresh = true;
+        
+        // Cached to avoid allocations in OnGUI
+        private List<LayerStateAsset> _cachedLayers;
+        private static GUIStyle _indexStyleNormal;
+        private static GUIStyle _indexStyleBold;
 
         private void OnEnable()
         {
@@ -87,18 +92,25 @@ namespace DMotion.Editor
             // Header with Add button
             if (!layersSection.DrawHeader(() => DrawLayersToolbar(), showDockButton: false)) return; 
 
-            var layers = model.StateMachine.GetLayers().ToList();
+            // Cache layers to avoid allocation every frame
+            if (_cachedLayers == null)
+                _cachedLayers = new List<LayerStateAsset>(8);
+            else
+                _cachedLayers.Clear();
+            
+            foreach (var layer in model.StateMachine.GetLayers())
+                _cachedLayers.Add(layer);
 
-            if (layers.Count == 0)
+            if (_cachedLayers.Count == 0)
             {
                 EditorGUILayout.HelpBox("No layers defined. This shouldn't happen in multi-layer mode.", MessageType.Warning);
                 return;
             }
 
             // Draw each layer
-            for (int i = 0; i < layers.Count; i++)
+            for (int i = 0; i < _cachedLayers.Count; i++)
             {
-                DrawLayerElement(i, layers[i]);
+                DrawLayerElement(i, _cachedLayers[i]);
             }
 
             serializedObject.ApplyModifiedProperties();
@@ -124,13 +136,13 @@ namespace DMotion.Editor
             // Header row: index, name, buttons
             EditorGUILayout.BeginHorizontal();
 
-            // Index badge
-            var indexStyle = new GUIStyle(EditorStyles.miniLabel)
+            // Index badge (use cached styles to avoid allocation)
+            if (_indexStyleNormal == null)
             {
-                alignment = TextAnchor.MiddleCenter,
-                fontStyle = isBaseLayer ? FontStyle.Bold : FontStyle.Normal
-            };
-            GUILayout.Label(index.ToString(), indexStyle, GUILayout.Width(20));
+                _indexStyleNormal = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleCenter };
+                _indexStyleBold = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
+            }
+            GUILayout.Label(index.ToString(), isBaseLayer ? _indexStyleBold : _indexStyleNormal, GUILayout.Width(20));
 
             // Layer name
             EditorGUI.BeginChangeCheck();
