@@ -58,7 +58,22 @@ namespace DMotion.Editor
             // Masking Section
             EditorGUILayout.LabelField("Bone Masking", EditorStyles.boldLabel);
             
+            EditorGUILayout.BeginHorizontal();
             EditorGUILayout.PropertyField(avatarMaskProp, new GUIContent("Avatar Mask", "Defines which bones this layer affects"));
+            
+            // Quick-create button
+            if (GUILayout.Button(new GUIContent("+", "Create new Avatar Mask"), GUILayout.Width(20)))
+            {
+                var createdMask = AvatarMaskCreator.CreateMaskForAsset(layer, $"{layer.name}_Mask");
+                if (createdMask != null)
+                {
+                    Undo.RecordObject(layer, "Create Avatar Mask");
+                    layer.AvatarMask = createdMask;
+                    EditorUtility.SetDirty(layer);
+                    serializedObject.Update(); // Refresh the serialized property
+                }
+            }
+            EditorGUILayout.EndHorizontal();
             
             if (layer.AvatarMask == null)
             {

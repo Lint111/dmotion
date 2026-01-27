@@ -228,6 +228,7 @@ namespace DMotion.Editor
             
             // Avatar Mask (disabled for base layer - base should be full body)
             EditorGUI.BeginDisabledGroup(isBaseLayer);
+            EditorGUILayout.BeginHorizontal();
             EditorGUI.BeginChangeCheck();
             var newMask = (AvatarMask)EditorGUILayout.ObjectField(
                 "Avatar Mask", 
@@ -240,6 +241,19 @@ namespace DMotion.Editor
                 layer.AvatarMask = newMask;
                 EditorUtility.SetDirty(layer);
             }
+            
+            // Quick-create button
+            if (GUILayout.Button(new GUIContent("+", "Create new Avatar Mask"), GUILayout.Width(20)))
+            {
+                var createdMask = AvatarMaskCreator.CreateMaskForAsset(layer, $"{layer.name}_Mask");
+                if (createdMask != null)
+                {
+                    Undo.RecordObject(layer, "Create Avatar Mask");
+                    layer.AvatarMask = createdMask;
+                    EditorUtility.SetDirty(layer);
+                }
+            }
+            EditorGUILayout.EndHorizontal();
             EditorGUI.EndDisabledGroup();
             
             if (isBaseLayer)
@@ -248,7 +262,7 @@ namespace DMotion.Editor
             }
             else if (layer.AvatarMask == null)
             {
-                EditorGUILayout.LabelField("No mask = full body", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("No mask = full body (click + to create)", EditorStyles.miniLabel);
             }
             
             // State count info
