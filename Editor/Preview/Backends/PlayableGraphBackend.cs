@@ -8,18 +8,21 @@ namespace DMotion.Editor
     /// <summary>
     /// Preview backend using Unity's PlayableGraph (Authoring mode).
     /// Wraps the existing PreviewRenderer for backward compatibility.
+    /// Supports multi-layer preview via LayerCompositionPreview.
     /// </summary>
     internal class PlayableGraphBackend : IPreviewBackend
     {
         #region State
         
         private readonly PreviewRenderer renderer;
+        private LayerCompositionPreview layerCompositionPreview;
         private AnimationStateAsset currentState;
         private AnimationStateAsset transitionFromState;
         private AnimationStateAsset transitionToState;
         private float transitionProgress;
         private float normalizedTime;
         private float2 blendPosition;
+        private GameObject previewModel;
         
         #endregion
         
@@ -36,9 +39,9 @@ namespace DMotion.Editor
         
         public PreviewMode Mode => PreviewMode.Authoring;
         
-        public bool IsInitialized => renderer.IsInitialized;
+        public bool IsInitialized => layerCompositionPreview?.IsInitialized ?? renderer.IsInitialized;
         
-        public string ErrorMessage => renderer.ErrorMessage;
+        public string ErrorMessage => layerCompositionPreview?.ErrorMessage ?? renderer.ErrorMessage;
         
         public AnimationStateAsset CurrentState => currentState;
         
@@ -46,15 +49,21 @@ namespace DMotion.Editor
         
         public PlayableGraphPreview.CameraState CameraState
         {
-            get => renderer.CameraState;
-            set => renderer.CameraState = value;
+            get => layerCompositionPreview?.CameraState ?? renderer.CameraState;
+            set
+            {
+                if (layerCompositionPreview != null)
+                    layerCompositionPreview.CameraState = value;
+                else
+                    renderer.CameraState = value;
+            }
         }
         
         /// <summary>
-        /// Layer composition preview interface. Returns null - not yet implemented.
-        /// TODO: Implement using AnimationLayerMixerPlayable.
+        /// Layer composition preview interface for multi-layer state machines.
+        /// Returns null for single-layer state machines.
         /// </summary>
-        public ILayerCompositionPreview LayerComposition => null;
+        public ILayerCompositionPreview LayerComposition => layerCompositionPreview;
         
         #endregion
         
@@ -62,6 +71,9 @@ namespace DMotion.Editor
         
         public void CreatePreviewForState(AnimationStateAsset state)
         {
+            // Clear layer composition if switching to state preview
+            DisposeLayerComposition();
+            
             currentState = state;
             transitionFromState = null;
             transitionToState = null;
@@ -71,6 +83,9 @@ namespace DMotion.Editor
         
         public void CreateTransitionPreview(AnimationStateAsset fromState, AnimationStateAsset toState, float transitionDuration)
         {
+            // Clear layer composition if switching to transition preview
+            DisposeLayerComposition();
+            
             currentState = null;
             transitionFromState = fromState;
             transitionToState = toState;
@@ -78,9 +93,39 @@ namespace DMotion.Editor
             renderer.CreateTransitionPreview(fromState, toState, transitionDuration);
         }
         
+        /// <summary>
+        /// Creates a multi-layer composition preview for the given state machine.
+        /// The state machine must be in multi-layer mode (IsMultiLayer == true).
+        /// </summary>
+        /// <param name="stateMachine">The multi-layer state machine to preview.</param>
+        public void CreateLayerCompositionPreview(StateMachineAsset stateMachine)
+        {
+            // Clear single-state preview
+            renderer.Clear();
+            currentState = null;
+            transitionFromState = null;
+            transitionToState = null;
+            
+            // Create or reuse layer composition preview
+            if (layerCompositionPreview == null)
+            {
+                layerCompositionPreview = new LayerCompositionPreview();
+            }
+            
+            // Set model if we have one
+            if (previewModel != null)
+            {
+                layerCompositionPreview.SetPreviewModel(previewModel);
+            }
+            
+            layerCompositionPreview.Initialize(stateMachine);
+        }
+        
         public void SetPreviewModel(GameObject model)
         {
+            previewModel = model;
             renderer.PreviewModel = model;
+            layerCompositionPreview?.SetPreviewModel(model);
         }
         
         public void Clear()
@@ -90,6 +135,7 @@ namespace DMotion.Editor
             transitionToState = null;
             
             renderer.Clear();
+            layerCompositionPreview?.Clear();
         }
         
         public void SetMessage(string message)
@@ -98,7 +144,14 @@ namespace DMotion.Editor
             transitionFromState = null;
             transitionToState = null;
             
+            DisposeLayerComposition();
             renderer.SetMessage(message);
+        }
+        
+        private void DisposeLayerComposition()
+        {
+            layerCompositionPreview?.Dispose();
+            layerCompositionPreview = null;
         }
         
         #endregion
@@ -198,22 +251,44 @@ namespace DMotion.Editor
         
         public bool Tick(float deltaTime)
         {
+            if (layerCompositionPreview != null)
+            {
+                return layerCompositionPreview.Tick(deltaTime);
+            }
             return renderer.Tick(deltaTime);
         }
         
         public void Draw(Rect rect)
         {
-            renderer.Draw(rect);
+            if (layerCompositionPreview != null)
+            {
+                layerCompositionPreview.Draw(rect);
+            }
+            else
+            {
+                renderer.Draw(rect);
+            }
         }
         
         public bool HandleInput(Rect rect)
         {
+            if (layerCompositionPreview != null)
+            {
+                return layerCompositionPreview.HandleInput(rect);
+            }
             return renderer.HandleInput(rect);
         }
         
         public void ResetCameraView()
         {
-            renderer.ResetCameraView();
+            if (layerCompositionPreview != null)
+            {
+                layerCompositionPreview.ResetCameraView();
+            }
+            else
+            {
+                renderer.ResetCameraView();
+            }
         }
         
         public StatePreviewSnapshot GetSnapshot()
@@ -228,6 +303,11 @@ namespace DMotion.Editor
             };
         }
         
+        /// <summary>
+        /// Whether the backend is currently in layer composition mode.
+        /// </summary>
+        public bool IsLayerCompositionMode => layerCompositionPreview != null && layerCompositionPreview.IsInitialized;
+        
         #endregion
         
         #region IDisposable
@@ -235,6 +315,7 @@ namespace DMotion.Editor
         public void Dispose()
         {
             renderer.Dispose();
+            DisposeLayerComposition();
         }
         
         #endregion
