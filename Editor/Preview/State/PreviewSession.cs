@@ -430,10 +430,25 @@ namespace DMotion.Editor
         /// </summary>
         public PreviewSnapshot GetSnapshot()
         {
-            return activeBackend?.GetSnapshot() ?? new PreviewSnapshot
+            if (activeBackend == null)
             {
-                ErrorMessage = "No preview backend active",
-                IsInitialized = false
+                return new PreviewSnapshot
+                {
+                    ErrorMessage = "No preview backend active",
+                    IsInitialized = false
+                };
+            }
+            
+            var stateSnapshot = activeBackend.GetSnapshot();
+            return new PreviewSnapshot
+            {
+                NormalizedTime = stateSnapshot.NormalizedTime,
+                BlendPosition = stateSnapshot.BlendPosition,
+                BlendWeights = stateSnapshot.BlendWeights,
+                TransitionProgress = stateSnapshot.TransitionProgress,
+                IsPlaying = stateSnapshot.IsPlaying,
+                ErrorMessage = activeBackend.ErrorMessage,
+                IsInitialized = activeBackend.IsInitialized
             };
         }
         

@@ -230,8 +230,8 @@ namespace DMotion.Editor
                     return false;
             }
             
-            var currentPos = contentViewContainer.transform.position;
-            UpdateViewTransform(currentPos + offset, contentViewContainer.transform.scale);
+            var currentPos = viewTransform.position;
+            UpdateViewTransform(currentPos + offset, viewTransform.scale);
             return true;
         }
         
@@ -255,14 +255,14 @@ namespace DMotion.Editor
             }
             
             // Calculate new scale, clamped
-            var currentScale = contentViewContainer.transform.scale.x;
+            var currentScale = viewTransform.scale.x;
             var newScale = Mathf.Clamp(currentScale + zoomDelta, MinZoom, MaxZoom);
             
             // Zoom towards center of view
             var center = new Vector2(layout.width / 2, layout.height / 2);
             var worldCenter = contentViewContainer.WorldToLocal(this.LocalToWorld(center));
             
-            var currentPos = contentViewContainer.transform.position;
+            var currentPos = viewTransform.position;
             UpdateViewTransform(currentPos, new Vector3(newScale, newScale, 1f));
             
             // Adjust position to keep center stable
@@ -283,7 +283,7 @@ namespace DMotion.Editor
             else
             {
                 // Reset to default view - center on origin
-                var currentScale = contentViewContainer.transform.scale;
+                var currentScale = viewTransform.scale;
                 UpdateViewTransform(new Vector3(layout.width / 2, layout.height / 2, 0), currentScale);
             }
         }
