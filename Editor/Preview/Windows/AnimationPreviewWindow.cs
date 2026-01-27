@@ -1007,8 +1007,8 @@ namespace DMotion.Editor
                 return;
             }
 
-            // Create layer controls panel
-            var layerControls = new LayerControlsPanel();
+            // Create layer composition inspector
+            var layerInspector = new LayerCompositionInspector();
             
             // Get the layer composition preview from the backend
             var backend = previewSession?.Backend as PlayableGraphBackend;
@@ -1016,37 +1016,44 @@ namespace DMotion.Editor
             
             if (layerPreview != null)
             {
-                layerControls.Bind(layerPreview, layerCompositionState.RootStateMachine);
+                layerInspector.Bind(layerPreview, layerCompositionState.RootStateMachine, layerCompositionState);
                 
-                // Subscribe to layer control events
-                layerControls.OnLayerWeightChanged += (layerIndex, weight) =>
+                // Subscribe to layer inspector events
+                layerInspector.OnNavigateToLayer += (layerIndex, layerAsset) =>
+                {
+                    // TODO: Navigate to layer's state machine in the graph editor
+                    Debug.Log($"Navigate to layer {layerIndex}: {layerAsset.name}");
+                };
+                
+                layerInspector.OnLayerWeightChanged += (layerIndex, weight) =>
                 {
                     layerCompositionState.SetLayerWeight(layerIndex, weight);
                 };
                 
-                layerControls.OnLayerEnabledChanged += (layerIndex, enabled) =>
+                layerInspector.OnLayerEnabledChanged += (layerIndex, enabled) =>
                 {
                     layerCompositionState.SetLayerEnabled(layerIndex, enabled);
                 };
                 
-                layerControls.OnLayerStateChanged += (layerIndex, state) =>
-                {
-                    layerCompositionState.SetLayerState(layerIndex, state);
-                };
-                
-                layerControls.OnGlobalTimeChanged += (normalizedTime) =>
+                layerInspector.OnGlobalTimeChanged += (normalizedTime) =>
                 {
                     layerCompositionState.SetMasterTime(normalizedTime);
+                };
+                
+                layerInspector.OnPlaybackStateChanged += (isPlaying) =>
+                {
+                    layerCompositionState.SetPlaying(isPlaying);
                 };
             }
             else
             {
                 var message = new Label("Layer composition preview not available.\nEnsure the state machine is multi-layer.");
                 message.AddToClassList("no-selection-message");
-                layerControls.Add(message);
+                inspectorContent.Add(message);
+                return;
             }
             
-            inspectorContent.Add(layerControls);
+            inspectorContent.Add(layerInspector);
         }
 
         private void CreateTransitionPreviewForSelection()
