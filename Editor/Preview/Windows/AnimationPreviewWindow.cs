@@ -166,10 +166,8 @@ namespace DMotion.Editor
             StateMachineEditorEvents.OnSelectionCleared -= OnGraphSelectionCleared;
             StateMachineEditorEvents.OnStateMachineChanged -= OnStateMachineChanged;
             
-            // Unsubscribe from layer-aware events
-            StateMachineEditorEvents.OnLayerStateSelected -= OnLayerStateSelected;
-            StateMachineEditorEvents.OnLayerTransitionSelected -= OnLayerTransitionSelected;
-            StateMachineEditorEvents.OnLayerSelectionCleared -= OnLayerSelectionCleared;
+            // Unsubscribe from preview events
+            PreviewEventSystem.PropertyChanged -= OnPreviewPropertyChanged;
             
             // Unsubscribe from blend position events
             AnimationPreviewEvents.OnBlendPosition1DChanged -= OnBlendPosition1DChanged;
@@ -544,10 +542,8 @@ namespace DMotion.Editor
             {
                 layerCompositionState = new LayerCompositionState();
                 
-                // Subscribe to layer-aware selection events
-                StateMachineEditorEvents.OnLayerStateSelected += OnLayerStateSelected;
-                StateMachineEditorEvents.OnLayerTransitionSelected += OnLayerTransitionSelected;
-                StateMachineEditorEvents.OnLayerSelectionCleared += OnLayerSelectionCleared;
+                // Subscribe to consolidated preview events
+                PreviewEventSystem.PropertyChanged += OnPreviewPropertyChanged;
             }
             
             // Initialize for current state machine
@@ -583,39 +579,128 @@ namespace DMotion.Editor
         
         #endregion
         
-        #region Layer Composition Events
+        #region Preview Event Handling
         
-        private void OnLayerStateSelected(StateMachineAsset rootMachine, LayerStateAsset layer, StateMachineAsset layerMachine, AnimationStateAsset state)
+        private void OnPreviewPropertyChanged(object sender, PreviewPropertyChangedEventArgs e)
+        {
+            // Only handle events for our current state machine
+            if (e.Context.RootStateMachine != currentStateMachine) return;
+            
+            switch (e.PropertyName)
+            {
+                case PreviewEventSystem.PropertyNames.SelectedState:
+                    HandleLayerStateSelected(e);
+                    break;
+                    
+                case PreviewEventSystem.PropertyNames.SelectedTransition:
+                    HandleLayerTransitionSelected(e);
+                    break;
+                    
+                case PreviewEventSystem.PropertyNames.SelectionCleared:
+                    HandleLayerSelectionCleared(e);
+                    break;
+                    
+                case PreviewEventSystem.PropertyNames.LayerWeight:
+                case PreviewEventSystem.PropertyNames.LayerEnabled:
+                    HandleLayerPropertyChanged(e);
+                    break;
+                    
+                case PreviewEventSystem.PropertyNames.NormalizedTime:
+                    HandleTimeChanged(e);
+                    break;
+                    
+                case PreviewEventSystem.PropertyNames.IsPlaying:
+                    HandlePlaybackStateChanged(e);
+                    break;
+                    
+                case PreviewEventSystem.PropertyNames.BlendPosition1D:
+                case PreviewEventSystem.PropertyNames.BlendPosition2D:
+                case PreviewEventSystem.PropertyNames.TransitionProgress:
+                    HandleBlendPropertyChanged(e);
+                    break;
+                    
+                case PreviewEventSystem.PropertyNames.NavigationRequested:
+                    HandleNavigationRequested(e);
+                    break;
+            }
+        }
+        
+        private void HandleLayerStateSelected(PreviewPropertyChangedEventArgs e)
         {
             if (currentPreviewType != PreviewType.LayerComposition) return;
-            if (rootMachine != currentStateMachine) return;
             
-            layerCompositionState?.HandleLayerStateSelected(layer, layerMachine, state);
-            
-            // Update preview if we're in layer composition mode
+            var state = e.NewValue as AnimationStateAsset;
+            layerCompositionState?.HandleLayerStateSelected(e.Context.Layer, e.Context.LayerStateMachine, state);
             UpdateLayerCompositionPreview();
         }
         
-        private void OnLayerTransitionSelected(StateMachineAsset rootMachine, LayerStateAsset layer, StateMachineAsset layerMachine, AnimationStateAsset fromState, AnimationStateAsset toState)
+        private void HandleLayerTransitionSelected(PreviewPropertyChangedEventArgs e)
         {
             if (currentPreviewType != PreviewType.LayerComposition) return;
-            if (rootMachine != currentStateMachine) return;
             
-            layerCompositionState?.HandleLayerTransitionSelected(layer, layerMachine, fromState, toState);
+            var transition = e.NewValue as TransitionSelection;
+            if (transition != null)
+            {
+                layerCompositionState?.HandleLayerTransitionSelected(e.Context.Layer, e.Context.LayerStateMachine, transition.FromState, transition.ToState);
+                UpdateLayerCompositionPreview();
+            }
+        }
+        
+        private void HandleLayerSelectionCleared(PreviewPropertyChangedEventArgs e)
+        {
+            if (currentPreviewType != PreviewType.LayerComposition) return;
             
-            // Update preview if we're in layer composition mode
+            layerCompositionState?.HandleLayerSelectionCleared(e.Context.Layer);
             UpdateLayerCompositionPreview();
         }
         
-        private void OnLayerSelectionCleared(StateMachineAsset rootMachine, LayerStateAsset layer, StateMachineAsset layerMachine)
+        private void HandleLayerPropertyChanged(PreviewPropertyChangedEventArgs e)
         {
-            if (currentPreviewType != PreviewType.LayerComposition) return;
-            if (rootMachine != currentStateMachine) return;
-            
-            layerCompositionState?.HandleLayerSelectionCleared(layer);
-            
-            // Update preview if we're in layer composition mode
-            UpdateLayerCompositionPreview();
+            // Layer properties changed - refresh the preview
+            if (currentPreviewType == PreviewType.LayerComposition)
+            {
+                UpdateLayerCompositionPreview();
+            }
+        }
+        
+        private void HandleTimeChanged(PreviewPropertyChangedEventArgs e)
+        {
+            // Time changed - update preview time
+            if (e.NewValue is float newTime)
+            {
+                previewSession?.SetNormalizedTime(newTime);
+            }
+            Repaint();
+        }
+        
+        private void HandlePlaybackStateChanged(PreviewPropertyChangedEventArgs e)
+        {
+            // Playback state changed - update preview
+            if (e.NewValue is bool isPlaying)
+            {
+                previewSession?.SetPlaying(isPlaying);
+            }
+            Repaint();
+        }
+        
+        private void HandleBlendPropertyChanged(PreviewPropertyChangedEventArgs e)
+        {
+            // Blend properties changed - update preview
+            if (currentPreviewType == PreviewType.LayerComposition)
+            {
+                UpdateLayerCompositionPreview();
+            }
+            Repaint();
+        }
+        
+        private void HandleNavigationRequested(PreviewPropertyChangedEventArgs e)
+        {
+            // Navigation requested - delegate to state machine editor
+            if (e.NewValue is NavigationTarget target)
+            {
+                // TODO: Navigate to layer in state machine editor
+                Debug.Log($"Navigate to layer {target.LayerIndex}: {target.Layer.name}");
+            }
         }
         
         private void UpdateLayerCompositionPreview()

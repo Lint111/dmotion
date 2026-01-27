@@ -43,23 +43,8 @@ namespace DMotion.Editor
         
         #region Events
         
-        /// <summary>
-        /// Fired when any layer's configuration changes.
-        /// Parameters: layerIndex
-        /// </summary>
-        public event Action<int> OnLayerChanged;
-        
-        /// <summary>
-        /// Fired when the master time changes.
-        /// Parameters: normalizedTime
-        /// </summary>
-        public event Action<float> OnMasterTimeChanged;
-        
-        /// <summary>
-        /// Fired when playback state changes.
-        /// Parameters: isPlaying
-        /// </summary>
-        public event Action<bool> OnPlaybackStateChanged;
+        // Events are now handled through PreviewEventSystem.PropertyChanged
+        // This class raises property change events instead of custom events
         
         #endregion
         
@@ -155,13 +140,15 @@ namespace DMotion.Editor
             var layer = GetLayer(layerIndex);
             if (layer == null) return;
             
+            var oldState = layer.SelectedState;
             layer.SelectedState = state;
             layer.SelectedTransition = null; // Clear transition when selecting state
             layer.TransitionFrom = null;
             layer.TransitionTo = null;
             layer.TransitionProgress = 0f;
             
-            OnLayerChanged?.Invoke(layerIndex);
+            // Raise property changed event
+            PreviewEventSystem.RaiseStateSelected(RootStateMachine, layer.LayerAsset, layerIndex, null, state);
         }
         
         /// <summary>
@@ -178,7 +165,8 @@ namespace DMotion.Editor
             layer.TransitionTo = toState;
             layer.TransitionProgress = 0f;
             
-            OnLayerChanged?.Invoke(layerIndex);
+            // Raise property changed event
+            PreviewEventSystem.RaiseTransitionSelected(RootStateMachine, layer.LayerAsset, layerIndex, null, fromState, toState);
         }
         
         /// <summary>
@@ -189,8 +177,12 @@ namespace DMotion.Editor
             var layer = GetLayer(layerIndex);
             if (layer == null) return;
             
-            layer.Weight = Mathf.Clamp01(weight);
-            OnLayerChanged?.Invoke(layerIndex);
+            var oldWeight = layer.Weight;
+            var newWeight = Mathf.Clamp01(weight);
+            layer.Weight = newWeight;
+            
+            // Raise property changed event
+            PreviewEventSystem.RaiseLayerWeightChanged(RootStateMachine, layer.LayerAsset, layerIndex, oldWeight, newWeight);
         }
         
         /// <summary>
@@ -201,8 +193,11 @@ namespace DMotion.Editor
             var layer = GetLayer(layerIndex);
             if (layer == null) return;
             
+            var oldEnabled = layer.IsEnabled;
             layer.IsEnabled = enabled;
-            OnLayerChanged?.Invoke(layerIndex);
+            
+            // Raise property changed event
+            PreviewEventSystem.RaiseLayerEnabledChanged(RootStateMachine, layer.LayerAsset, layerIndex, oldEnabled, enabled);
         }
         
         /// <summary>
@@ -213,8 +208,20 @@ namespace DMotion.Editor
             var layer = GetLayer(layerIndex);
             if (layer == null) return;
             
+            var oldPosition = layer.BlendPosition;
             layer.BlendPosition = position;
-            OnLayerChanged?.Invoke(layerIndex);
+            
+            // Raise appropriate blend position event based on dimensionality
+            if (position.y == 0 && oldPosition.y == 0)
+            {
+                // 1D blend
+                PreviewEventSystem.RaiseBlendPosition1DChanged(RootStateMachine, layer.LayerAsset, layerIndex, layer.GetEffectiveTarget(), oldPosition.x, position.x);
+            }
+            else
+            {
+                // 2D blend
+                PreviewEventSystem.RaiseBlendPosition2DChanged(RootStateMachine, layer.LayerAsset, layerIndex, layer.GetEffectiveTarget(), oldPosition, position);
+            }
         }
         
         /// <summary>
@@ -225,8 +232,12 @@ namespace DMotion.Editor
             var layer = GetLayer(layerIndex);
             if (layer == null) return;
             
-            layer.TransitionProgress = Mathf.Clamp01(progress);
-            OnLayerChanged?.Invoke(layerIndex);
+            var oldProgress = layer.TransitionProgress;
+            var newProgress = Mathf.Clamp01(progress);
+            layer.TransitionProgress = newProgress;
+            
+            // Raise property changed event
+            PreviewEventSystem.RaiseTransitionProgressChanged(RootStateMachine, layer.LayerAsset, layerIndex, layer.TransitionFrom, layer.TransitionTo, oldProgress, newProgress);
         }
         
         #endregion
@@ -238,8 +249,12 @@ namespace DMotion.Editor
         /// </summary>
         public void SetMasterTime(float normalizedTime)
         {
-            MasterTime = Mathf.Clamp01(normalizedTime);
-            OnMasterTimeChanged?.Invoke(MasterTime);
+            var oldTime = MasterTime;
+            var newTime = Mathf.Clamp01(normalizedTime);
+            MasterTime = newTime;
+            
+            // Raise property changed event
+            PreviewEventSystem.RaiseNormalizedTimeChanged(RootStateMachine, oldTime, newTime);
         }
         
         /// <summary>
@@ -249,8 +264,11 @@ namespace DMotion.Editor
         {
             if (IsPlaying != playing)
             {
+                var oldPlaying = IsPlaying;
                 IsPlaying = playing;
-                OnPlaybackStateChanged?.Invoke(IsPlaying);
+                
+                // Raise property changed event
+                PreviewEventSystem.RaisePlaybackStateChanged(RootStateMachine, oldPlaying, IsPlaying);
             }
         }
         

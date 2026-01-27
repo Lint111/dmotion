@@ -123,13 +123,8 @@ namespace DMotion.Editor
             
             RebuildLayerSections();
             
-            // Subscribe to composition state changes
-            if (compositionState != null)
-            {
-                compositionState.OnLayerChanged += OnLayerStateChanged;
-                compositionState.OnMasterTimeChanged += OnMasterTimeChanged;
-                compositionState.OnPlaybackStateChanged += OnPlaybackStateChanged;
-            }
+            // Subscribe to preview events
+            PreviewEventSystem.PropertyChanged += OnPreviewPropertyChanged;
         }
         
         /// <summary>
@@ -137,12 +132,8 @@ namespace DMotion.Editor
         /// </summary>
         public void Unbind()
         {
-            if (compositionState != null)
-            {
-                compositionState.OnLayerChanged -= OnLayerStateChanged;
-                compositionState.OnMasterTimeChanged -= OnMasterTimeChanged;
-                compositionState.OnPlaybackStateChanged -= OnPlaybackStateChanged;
-            }
+            // Unsubscribe from preview events
+            PreviewEventSystem.PropertyChanged -= OnPreviewPropertyChanged;
             
             preview = null;
             stateMachine = null;
@@ -618,22 +609,62 @@ namespace DMotion.Editor
             Debug.Log($"Trigger transition for layer {section.LayerIndex}");
         }
         
-        private void OnLayerStateChanged(int layerIndex)
+        private void OnPreviewPropertyChanged(object sender, PreviewPropertyChangedEventArgs e)
         {
-            if (layerIndex >= 0 && layerIndex < layerSections.Count)
+            // Only handle events for our current state machine
+            if (e.Context.RootStateMachine != stateMachine) return;
+            
+            switch (e.PropertyName)
             {
-                RefreshLayerSection(layerSections[layerIndex]);
+                case PreviewEventSystem.PropertyNames.SelectedState:
+                case PreviewEventSystem.PropertyNames.SelectedTransition:
+                case PreviewEventSystem.PropertyNames.LayerWeight:
+                case PreviewEventSystem.PropertyNames.LayerEnabled:
+                case PreviewEventSystem.PropertyNames.BlendPosition1D:
+                case PreviewEventSystem.PropertyNames.BlendPosition2D:
+                case PreviewEventSystem.PropertyNames.TransitionProgress:
+                    HandleLayerPropertyChanged(e);
+                    break;
+                    
+                case PreviewEventSystem.PropertyNames.NormalizedTime:
+                    HandleTimeChanged(e);
+                    break;
+                    
+                case PreviewEventSystem.PropertyNames.IsPlaying:
+                    HandlePlaybackStateChanged(e);
+                    break;
             }
         }
         
-        private void OnMasterTimeChanged(float normalizedTime)
+        private void HandleLayerPropertyChanged(PreviewPropertyChangedEventArgs e)
         {
-            globalTimeSlider?.SetValueWithoutNotify(normalizedTime);
+            // Refresh the specific layer section if we have a layer index
+            if (e.Context.LayerIndex.HasValue)
+            {
+                int layerIndex = e.Context.LayerIndex.Value;
+                if (layerIndex >= 0 && layerIndex < layerSections.Count)
+                {
+                    RefreshLayerSection(layerSections[layerIndex]);
+                }
+            }
+            else
+            {
+                // Refresh all sections
+                Refresh();
+            }
         }
         
-        private void OnPlaybackStateChanged(bool isPlaying)
+        private void HandleTimeChanged(PreviewPropertyChangedEventArgs e)
         {
-            if (playButton != null)
+            if (e.NewValue is float normalizedTime)
+            {
+                globalTimeSlider?.SetValueWithoutNotify(normalizedTime);
+            }
+        }
+        
+        private void HandlePlaybackStateChanged(PreviewPropertyChangedEventArgs e)
+        {
+            if (e.NewValue is bool isPlaying && playButton != null)
             {
                 playButton.text = isPlaying ? "⏸ Pause" : "▶ Play";
             }
