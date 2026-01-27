@@ -93,14 +93,19 @@ namespace DMotion.Editor
             // Header with Add button
             if (!layersSection.DrawHeader(() => DrawLayersToolbar(), showDockButton: false)) return; 
 
-            // Cache layers to avoid allocation every frame
-            if (_cachedLayers == null)
-                _cachedLayers = new List<LayerStateAsset>(8);
-            else
-                _cachedLayers.Clear();
-            
-            foreach (var layer in model.StateMachine.GetLayers())
-                _cachedLayers.Add(layer);
+            // Refresh cached layers only when needed (or first time)
+            if (_needsRefresh || _cachedLayers == null)
+            {
+                if (_cachedLayers == null)
+                    _cachedLayers = new List<LayerStateAsset>(8);
+                else
+                    _cachedLayers.Clear();
+                
+                foreach (var layer in model.StateMachine.GetLayers())
+                    _cachedLayers.Add(layer);
+                    
+                _needsRefresh = false;
+            }
 
             if (_cachedLayers.Count == 0)
             {

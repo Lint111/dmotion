@@ -230,7 +230,8 @@ namespace DMotion.Editor
                     return false;
             }
             
-            viewTransform.position += offset;
+            var currentPos = contentViewContainer.transform.position;
+            UpdateViewTransform(currentPos + offset, contentViewContainer.transform.scale);
             return true;
         }
         
@@ -254,19 +255,20 @@ namespace DMotion.Editor
             }
             
             // Calculate new scale, clamped
-            var currentScale = viewTransform.scale.x;
+            var currentScale = contentViewContainer.transform.scale.x;
             var newScale = Mathf.Clamp(currentScale + zoomDelta, MinZoom, MaxZoom);
             
             // Zoom towards center of view
             var center = new Vector2(layout.width / 2, layout.height / 2);
             var worldCenter = contentViewContainer.WorldToLocal(this.LocalToWorld(center));
             
-            viewTransform.scale = new Vector3(newScale, newScale, 1f);
+            var currentPos = contentViewContainer.transform.position;
+            UpdateViewTransform(currentPos, new Vector3(newScale, newScale, 1f));
             
             // Adjust position to keep center stable
             var newWorldCenter = contentViewContainer.WorldToLocal(this.LocalToWorld(center));
             var delta = (newWorldCenter - worldCenter) * newScale;
-            viewTransform.position += new Vector3(delta.x, delta.y, 0);
+            UpdateViewTransform(currentPos + new Vector3(delta.x, delta.y, 0), new Vector3(newScale, newScale, 1f));
             
             return true;
         }
@@ -281,7 +283,8 @@ namespace DMotion.Editor
             else
             {
                 // Reset to default view - center on origin
-                viewTransform.position = new Vector3(layout.width / 2, layout.height / 2, 0);
+                var currentScale = contentViewContainer.transform.scale;
+                UpdateViewTransform(new Vector3(layout.width / 2, layout.height / 2, 0), currentScale);
             }
         }
         

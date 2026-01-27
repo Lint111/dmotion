@@ -13,7 +13,7 @@ namespace DMotion.Editor
     /// </summary>
     internal class LayerStateNodeView : Node
     {
-        private LayerStateAsset layer;
+        private new LayerStateAsset layer;  // 'new' to hide GraphElement.layer
         private AnimationStateMachineEditorView graphView;
         
         private Label weightLabel;
@@ -23,7 +23,7 @@ namespace DMotion.Editor
         
         // Rename support
         private Label titleLabel;
-        private VisualElement titleContainer;
+        private new VisualElement titleContainer;  // 'new' to hide Node.titleContainer
         private TextField renameField;
         private bool isRenaming;
 

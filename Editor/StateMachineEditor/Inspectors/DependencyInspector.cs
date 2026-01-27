@@ -137,7 +137,9 @@ namespace DMotion.Editor
         // Cached label
         private static readonly GUIContent NoParamsLabel = new GUIContent("(no params)");
         private static GUIContent _grayDotIcon;
-        private static GUIContent GrayDotIcon => _grayDotIcon ??= EditorGUIUtility.IconContent("d_winbtn_mac_min");
+        private static GUIContent GrayDotIcon => _grayDotIcon ??= EditorGUIUtility.IconContent("d_GrayEmpty") 
+            ?? EditorGUIUtility.IconContent("d_ol_minus") 
+            ?? new GUIContent("○");
 
         private void DrawContainerDependencies(NestedContainerDependencyInfo info)
         {
