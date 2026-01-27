@@ -157,6 +157,12 @@ namespace DMotion.Editor
             }
         }
         
+        // Navigation constants
+        private const float PanStep = 50f;
+        private const float ZoomStep = 0.1f;
+        private const float MinZoom = 0.1f;
+        private const float MaxZoom = 2f;
+        
         private void OnKeyDown(KeyDownEvent evt)
         {
             if (Application.isPlaying) return;
@@ -169,26 +175,132 @@ namespace DMotion.Editor
                 return;
             }
             
+            // Shift+Arrow keys to pan
+            if (evt.shiftKey && HandlePanKeys(evt.keyCode))
+            {
+                evt.StopImmediatePropagation();
+                return;
+            }
+            
+            // Shift+=/- to zoom
+            if (evt.shiftKey && HandleZoomKeys(evt.keyCode))
+            {
+                evt.StopImmediatePropagation();
+                return;
+            }
+            
+            // Shift+F to focus selection or reset view
+            if (evt.shiftKey && evt.keyCode == KeyCode.F)
+            {
+                FocusSelectionOrReset();
+                evt.StopImmediatePropagation();
+                return;
+            }
+            
             // F2 or Ctrl+R to rename selected node
             bool isRenameShortcut = evt.keyCode == KeyCode.F2 || 
                                     (evt.keyCode == KeyCode.R && evt.ctrlKey);
             
             if (isRenameShortcut)
             {
-                // Find the selected state node and trigger rename
-                StateNodeView selectedNode = null;
-                foreach (var item in selection)
+                HandleRenameShortcut();
+                evt.StopImmediatePropagation();
+            }
+        }
+        
+        private bool HandlePanKeys(KeyCode keyCode)
+        {
+            Vector3 offset = Vector3.zero;
+            
+            switch (keyCode)
+            {
+                case KeyCode.LeftArrow:
+                    offset = new Vector3(PanStep, 0, 0);
+                    break;
+                case KeyCode.RightArrow:
+                    offset = new Vector3(-PanStep, 0, 0);
+                    break;
+                case KeyCode.UpArrow:
+                    offset = new Vector3(0, PanStep, 0);
+                    break;
+                case KeyCode.DownArrow:
+                    offset = new Vector3(0, -PanStep, 0);
+                    break;
+                default:
+                    return false;
+            }
+            
+            viewTransform.position += offset;
+            return true;
+        }
+        
+        private bool HandleZoomKeys(KeyCode keyCode)
+        {
+            float zoomDelta = 0f;
+            
+            switch (keyCode)
+            {
+                case KeyCode.Equals: // + key (=/+)
+                case KeyCode.Plus:
+                case KeyCode.KeypadPlus:
+                    zoomDelta = ZoomStep;
+                    break;
+                case KeyCode.Minus:
+                case KeyCode.KeypadMinus:
+                    zoomDelta = -ZoomStep;
+                    break;
+                default:
+                    return false;
+            }
+            
+            // Calculate new scale, clamped
+            var currentScale = viewTransform.scale.x;
+            var newScale = Mathf.Clamp(currentScale + zoomDelta, MinZoom, MaxZoom);
+            
+            // Zoom towards center of view
+            var center = new Vector2(layout.width / 2, layout.height / 2);
+            var worldCenter = contentViewContainer.WorldToLocal(this.LocalToWorld(center));
+            
+            viewTransform.scale = new Vector3(newScale, newScale, 1f);
+            
+            // Adjust position to keep center stable
+            var newWorldCenter = contentViewContainer.WorldToLocal(this.LocalToWorld(center));
+            var delta = (newWorldCenter - worldCenter) * newScale;
+            viewTransform.position += new Vector3(delta.x, delta.y, 0);
+            
+            return true;
+        }
+        
+        private void FocusSelectionOrReset()
+        {
+            if (selection.Count > 0)
+            {
+                // Focus on selected elements
+                FrameSelection();
+            }
+            else
+            {
+                // Reset to default view - center on origin
+                viewTransform.position = new Vector3(layout.width / 2, layout.height / 2, 0);
+            }
+        }
+        
+        private void HandleRenameShortcut()
+        {
+            foreach (var item in selection)
+            {
+                // State nodes
+                if (item is StateNodeView stateNode)
                 {
-                    if (item is StateNodeView stateNode)
-                    {
-                        selectedNode = stateNode;
-                        break;
-                    }
+                    stateNode.StartRename();
+                    return;
                 }
-                if (selectedNode != null)
+                
+                // Layer nodes
+                if (item is LayerStateNodeView layerNode)
                 {
-                    selectedNode.StartRename();
-                    evt.StopImmediatePropagation();
+                    layerNode.StartRename();
+                    return;
                 }
             }
         }

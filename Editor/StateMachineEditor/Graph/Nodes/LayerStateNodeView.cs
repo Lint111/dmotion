@@ -20,6 +20,12 @@ namespace DMotion.Editor
         private Label blendModeLabel;
         private Label stateCountLabel;
         private Button enterButton;
+        
+        // Rename support
+        private Label titleLabel;
+        private VisualElement titleContainer;
+        private TextField renameField;
+        private bool isRenaming;
 
         public LayerStateAsset Layer => layer;
 
@@ -50,8 +56,11 @@ namespace DMotion.Editor
             // Style the node
             style.minWidth = 180;
             
+            // Cache title elements for rename support
+            titleContainer = this.Q("title");
+            titleLabel = this.Q<Label>("title-label");
+            
             // Add layer-specific styling
-            var titleContainer = this.Q("title");
             if (titleContainer != null)
             {
                 titleContainer.style.backgroundColor = new Color(0.3f, 0.4f, 0.5f, 1f);
@@ -171,31 +180,143 @@ namespace DMotion.Editor
             evt.menu.AppendAction("Rename", _ => StartRename(), DropdownMenuAction.Status.Normal);
         }
 
-        private void StartRename()
+        /// <summary>
+        /// Starts inline rename mode. Called by keyboard shortcut (F2) or context menu.
+        /// </summary>
+        public void StartRename()
         {
-            // TODO: Implement inline rename similar to StateNodeView
-            // For now, use a simple dialog
-            var newName = EditorInputDialog.Show("Rename Layer", "Enter new name:", layer.name);
+            if (isRenaming) return;
+            if (Application.isPlaying) return;
+            
+            isRenaming = true;
+            
+            // Create text field for editing
+            renameField = new TextField();
+            renameField.value = layer.name;
+            
+            // Match the label's styling
+            renameField.style.flexGrow = 1;
+            renameField.style.marginLeft = 0;
+            renameField.style.marginRight = 0;
+            renameField.style.marginTop = 0;
+            renameField.style.marginBottom = 0;
+            renameField.style.paddingLeft = 0;
+            renameField.style.paddingRight = 0;
+            
+            // Style the text input element inside TextField
+            var textInput = renameField.Q("unity-text-input");
+            if (textInput != null)
+            {
+                textInput.style.fontSize = 12;
+                textInput.style.unityTextAlign = TextAnchor.MiddleCenter;
+                textInput.style.paddingLeft = 4;
+                textInput.style.paddingRight = 4;
+                textInput.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f, 1f);
+                textInput.style.color = Color.white;
+            }
+            
+            // Hide the title label and insert text field
+            if (titleLabel != null)
+            {
+                titleLabel.style.display = DisplayStyle.None;
+            }
+            
+            if (titleContainer != null)
+            {
+                titleContainer.Insert(0, renameField);
+            }
+            else
+            {
+                Add(renameField);
+            }
+            
+            // Select all text and focus after a frame
+            renameField.schedule.Execute(() =>
+            {
+                renameField.Focus();
+                renameField.SelectAll();
+            });
+            
+            // Handle completion
+            renameField.RegisterCallback<FocusOutEvent>(OnRenameFocusOut);
+            renameField.RegisterCallback<KeyDownEvent>(OnRenameKeyDown);
+        }
+        
+        private void OnRenameFocusOut(FocusOutEvent evt)
+        {
+            if (isRenaming)
+            {
+                CommitRename();
+            }
+        }
+        
+        private void OnRenameKeyDown(KeyDownEvent evt)
+        {
+            if (evt.keyCode == KeyCode.Return || evt.keyCode == KeyCode.KeypadEnter)
+            {
+                CommitRename();
+                evt.StopImmediatePropagation();
+            }
+            else if (evt.keyCode == KeyCode.Escape)
+            {
+                CancelRename();
+                evt.StopImmediatePropagation();
+            }
+        }
+        
+        private void CommitRename()
+        {
+            if (!isRenaming) return;
+            
+            string newName = renameField?.value?.Trim();
+            
             if (!string.IsNullOrEmpty(newName) && newName != layer.name)
             {
                 Undo.RecordObject(layer, "Rename Layer");
                 layer.name = newName;
                 title = newName;
                 EditorUtility.SetDirty(layer);
+                
+                // Mark parent asset dirty too
+                string assetPath = AssetDatabase.GetAssetPath(layer);
+                if (!string.IsNullOrEmpty(assetPath))
+                {
+                    var mainAsset = AssetDatabase.LoadMainAssetAtPath(assetPath);
+                    if (mainAsset != null && mainAsset != layer)
+                    {
+                        EditorUtility.SetDirty(mainAsset);
+                    }
+                }
             }
+            
+            EndRename();
         }
-    }
-
-    /// <summary>
-    /// Simple input dialog for renaming.
-    /// </summary>
-    internal static class EditorInputDialog
-    {
-        internal static string Show(string title, string message, string defaultValue)
+        
+        private void CancelRename()
         {
-            // Unity doesn't have a built-in input dialog, so we use a workaround
-            // In a full implementation, this would be a custom EditorWindow
-            return defaultValue; // Placeholder - rename via inspector for now
+            isRenaming = false;
+            EndRenameUI();
+        }
+        
+        private void EndRename()
+        {
+            if (!isRenaming) return;
+            isRenaming = false;
+            EndRenameUI();
+        }
+        
+        private void EndRenameUI()
+        {
+            if (renameField != null)
+            {
+                renameField.RemoveFromHierarchy();
+                renameField = null;
+            }
+            
+            if (titleLabel != null)
+            {
+                titleLabel.style.display = DisplayStyle.Flex;
+            }
         }
     }
 }
