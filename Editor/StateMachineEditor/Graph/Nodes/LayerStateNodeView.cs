@@ -120,17 +120,41 @@ namespace DMotion.Editor
             extensionContainer.Add(content);
             RefreshExpandedState();
             
-            // Double-click to enter
+            // Double-click handling
             RegisterCallback<MouseDownEvent>(OnMouseDown);
         }
 
         private void OnMouseDown(MouseDownEvent evt)
         {
-            if (evt.clickCount == 2 && evt.button == 0)
+            if (evt.clickCount != 2 || evt.button != 0) return;
+            
+            // Check if click is on title label
+            bool isOnTitle = false;
+            if (titleLabel != null && titleLabel.worldBound.Contains(evt.mousePosition))
             {
-                OnEnterClicked();
-                evt.StopImmediatePropagation();
+                isOnTitle = true;
             }
+            else if (titleContainer != null && titleContainer.worldBound.Contains(evt.mousePosition))
+            {
+                // Also check title container (the whole title bar area)
+                // But exclude the enter button
+                if (enterButton == null || !enterButton.worldBound.Contains(evt.mousePosition))
+                {
+                    isOnTitle = true;
+                }
+            }
+            
+            if (isOnTitle)
+            {
+                // Double-click on title = rename
+                StartRename();
+            }
+            else
+            {
+                // Double-click on body = enter layer
+                OnEnterClicked();
+            }
+            evt.StopImmediatePropagation();
         }
 
         private void OnEnterClicked()
