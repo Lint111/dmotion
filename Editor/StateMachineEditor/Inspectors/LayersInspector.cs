@@ -18,8 +18,6 @@ namespace DMotion.Editor
         
         // Cached to avoid allocations in OnGUI
         private List<LayerStateAsset> _cachedLayers;
-        private static GUIStyle _indexStyleNormal;
-        private static GUIStyle _indexStyleBold;
 
         private void OnEnable()
         {
@@ -142,13 +140,9 @@ namespace DMotion.Editor
             // Header row: index, name, buttons
             EditorGUILayout.BeginHorizontal();
 
-            // Index badge (use cached styles to avoid allocation)
-            if (_indexStyleNormal == null)
-            {
-                _indexStyleNormal = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleCenter };
-                _indexStyleBold = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
-            }
-            GUILayout.Label(index.ToString(), isBaseLayer ? _indexStyleBold : _indexStyleNormal, GUILayout.Width(20));
+            // Index badge (use centralized style cache)
+            var indexStyle = isBaseLayer ? EditorStyleCache.IndexBold : EditorStyleCache.IndexNormal;
+            GUILayout.Label(index.ToString(), indexStyle, GUILayout.Width(20));
 
             // Layer name
             EditorGUI.BeginChangeCheck();

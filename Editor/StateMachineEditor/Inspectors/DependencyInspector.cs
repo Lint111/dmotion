@@ -134,15 +134,8 @@ namespace DMotion.Editor
         private const string TooltipAutoMatched = "Auto-matched by name";
         private const string TooltipMissing = "Missing - no matching parameter in parent";
 
-        // Cached label and styles
+        // Cached label
         private static readonly GUIContent NoParamsLabel = new GUIContent("(no params)");
-        private static GUIStyle _centeredIconStyle;
-        private static GUIStyle CenteredIconStyle => _centeredIconStyle ??= new GUIStyle(GUI.skin.label)
-        {
-            alignment = TextAnchor.MiddleCenter,
-            padding = new RectOffset(0, 0, 0, 0),
-            margin = new RectOffset(0, 0, 0, 0)
-        };
         
         private static Texture2D _grayDotTexture;
         private static Texture2D GrayDotTexture
@@ -206,7 +199,7 @@ namespace DMotion.Editor
                     {
                         statusIcon = IconCache.TempIcon(IconCache.CheckmarkTexture, TooltipAllResolved);
                     }
-                    GUILayout.Label(statusIcon, CenteredIconStyle, GUILayout.Width(18), GUILayout.Height(18));
+                    GUILayout.Label(statusIcon, EditorStyleCache.CenteredIcon, GUILayout.Width(18), GUILayout.Height(18));
 
                     // Show type indicator for layers vs submachines
                     var displayName = info.Container is LayerStateAsset ? $"[Layer] {info.Container.name}" : info.Container.name;
