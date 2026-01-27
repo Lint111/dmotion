@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using DMotion;
 using DMotion.Authoring;
 using Unity.Mathematics;
 using UnityEditor;
@@ -79,6 +80,19 @@ namespace DMotion.Editor
         
         public bool IsInitialized => isInitialized;
         public string ErrorMessage => errorMessage;
+
+        public void SetPlaying(bool playing)
+        {
+            // Layer composition uses external time control via SetGlobalNormalizedTime
+            // or individual layer control via SetLayerNormalizedTime.
+            // This method is required by IAnimationPreview but not directly used for
+            // internal playback state in this implementation.
+        }
+
+        public void StepFrames(int frames, float frameRate)
+        {
+            // Frame stepping is handled by the higher-level controller which calls SetGlobalNormalizedTime
+        }
         
         public PlayableGraphPreview.CameraState CameraState
         {

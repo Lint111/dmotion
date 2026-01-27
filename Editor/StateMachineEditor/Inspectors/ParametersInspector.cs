@@ -35,21 +35,24 @@ namespace DMotion.Editor
 
         private void OnEnable()
         {
-            StateMachineEditorEvents.OnStateMachineChanged += OnStateMachineChanged;
+            EditorState.Instance.StructureChanged += OnStructureChanged;
             parametersSection = new DockablePanelSection("Parameters", "DMotion_Params", true);
         }
 
         private void OnDisable()
         {
-            StateMachineEditorEvents.OnStateMachineChanged -= OnStateMachineChanged;
+            EditorState.Instance.StructureChanged -= OnStructureChanged;
         }
 
-        private void OnStateMachineChanged(StateMachineAsset machine)
+        private void OnStructureChanged(object sender, StructureChangedEventArgs e)
         {
-            if (machine == model.StateMachine)
+            if (e.ChangeType == StructureChangeType.GeneralChange)
             {
-                _needsRefresh = true;
-                Repaint();
+                if (EditorState.Instance.RootStateMachine == model.StateMachine)
+                {
+                    _needsRefresh = true;
+                    Repaint();
+                }
             }
         }
 
@@ -71,6 +74,13 @@ namespace DMotion.Editor
 
         private void RefreshAnalysis()
         {
+            // Early return if state machine is null or destroyed
+            if (model.StateMachine == null || !model.StateMachine)
+            {
+                _orphanedParameters = new List<AnimationParameterAsset>();
+                return;
+            }
+            
             try
             {
                 _orphanedParameters = ParameterDependencyAnalyzer.FindOrphanedParameters(model.StateMachine);
@@ -263,7 +273,7 @@ namespace DMotion.Editor
         private void CreateParameter<T>() where T : AnimationParameterAsset
         {
             var param = model.StateMachine.CreateParameter<T>();
-            StateMachineEditorEvents.RaiseParameterAdded(model.StateMachine, param);
+            EditorState.Instance.NotifyParameterAdded(param);
             serializedObject.ApplyAndUpdate();
         }
 
@@ -281,7 +291,7 @@ namespace DMotion.Editor
                 model.StateMachine.DeleteParameter(param); // Now recursive by default
             }
             
-            StateMachineEditorEvents.RaiseParameterRemoved(model.StateMachine, param);
+            EditorState.Instance.NotifyParameterRemoved(param);
             
             // Force full refresh to update orphan analysis and UI
             ForceRefresh();

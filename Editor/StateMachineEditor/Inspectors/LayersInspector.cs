@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using DMotion.Authoring;
 using UnityEditor;
 using UnityEngine;
@@ -21,33 +20,29 @@ namespace DMotion.Editor
 
         private void OnEnable()
         {
-            StateMachineEditorEvents.OnStateMachineChanged += OnStateMachineChanged;
-            StateMachineEditorEvents.OnLayerAdded += OnLayerChanged;
-            StateMachineEditorEvents.OnLayerRemoved += OnLayerChanged;
+            EditorState.Instance.StructureChanged += OnStructureChanged;
             layersSection = new DockablePanelSection("Layers", "DMotion_Layers", true);
         }
 
         private void OnDisable()
         {
-            StateMachineEditorEvents.OnStateMachineChanged -= OnStateMachineChanged;
-            StateMachineEditorEvents.OnLayerAdded -= OnLayerChanged;
-            StateMachineEditorEvents.OnLayerRemoved -= OnLayerChanged;
+            EditorState.Instance.StructureChanged -= OnStructureChanged;
         }
 
-        private void OnStateMachineChanged(StateMachineAsset machine)
+        private void OnStructureChanged(object sender, StructureChangedEventArgs e)
         {
-            if (machine != model.StateMachine) return; 
+            if (EditorState.Instance.RootStateMachine != model.StateMachine) return;
             
-            _needsRefresh = true;
-            Repaint();
-        }
-
-        private void OnLayerChanged(StateMachineAsset machine, LayerStateAsset layer)
-        {
-            if (machine != model.StateMachine) return; 
-            
-            _needsRefresh = true;
-            Repaint();
+            // Refresh on relevant structure changes
+            if (e.ChangeType == StructureChangeType.LayerAdded ||
+                e.ChangeType == StructureChangeType.LayerRemoved ||
+                e.ChangeType == StructureChangeType.LayerChanged ||
+                e.ChangeType == StructureChangeType.ConvertedToMultiLayer ||
+                e.ChangeType == StructureChangeType.GeneralChange)
+            {
+                _needsRefresh = true;
+                Repaint();
+            }
         }
 
         public override void OnInspectorGUI()
@@ -79,8 +74,7 @@ namespace DMotion.Editor
             {
                 Undo.RecordObject(model.StateMachine, "Convert to Multi-Layer");
                 model.StateMachine.ConvertToMultiLayer();
-                StateMachineEditorEvents.RaiseConvertedToMultiLayer(model.StateMachine);
-
+                EditorState.Instance.NotifyConvertedToMultiLayer();
             }
         }
 
@@ -178,7 +172,7 @@ namespace DMotion.Editor
                 Undo.RecordObject(layer, "Change Layer Weight");
                 layer.Weight = newWeight;
                 EditorUtility.SetDirty(layer);
-                StateMachineEditorEvents.RaiseLayerChanged(model.StateMachine, layer);
+                EditorState.Instance.NotifyStateMachineChanged();
             }
 
             // Base layer: show info messages instead of disabled controls
@@ -197,7 +191,7 @@ namespace DMotion.Editor
                     Undo.RecordObject(layer, "Change Layer Blend Mode");
                     layer.BlendMode = newBlendMode;
                     EditorUtility.SetDirty(layer);
-                    StateMachineEditorEvents.RaiseLayerChanged(model.StateMachine, layer);
+                    EditorState.Instance.NotifyStateMachineChanged();
                 }
                 
                 // Avatar Mask with quick-create button
@@ -213,7 +207,7 @@ namespace DMotion.Editor
                     Undo.RecordObject(layer, "Change Layer Avatar Mask");
                     layer.AvatarMask = newMask;
                     EditorUtility.SetDirty(layer);
-                    StateMachineEditorEvents.RaiseLayerChanged(model.StateMachine, layer);
+                    EditorState.Instance.NotifyStateMachineChanged();
                 }
                 
                 // Quick-create button
@@ -225,7 +219,7 @@ namespace DMotion.Editor
                         Undo.RecordObject(layer, "Create Avatar Mask");
                         layer.AvatarMask = createdMask;
                         EditorUtility.SetDirty(layer);
-                        StateMachineEditorEvents.RaiseLayerChanged(model.StateMachine, layer);
+                        EditorState.Instance.NotifyStateMachineChanged();
                     }
                 }
                 EditorGUILayout.EndHorizontal();
@@ -248,7 +242,7 @@ namespace DMotion.Editor
         {
             Undo.RecordObject(model.StateMachine, "Add Layer");
             var layer = model.StateMachine.AddLayer();
-            StateMachineEditorEvents.RaiseLayerAdded(model.StateMachine, layer);
+            EditorState.Instance.NotifyLayerAdded(layer);
         }
 
         private void RemoveLayer(LayerStateAsset layer)
@@ -260,7 +254,7 @@ namespace DMotion.Editor
             {
                 Undo.RecordObject(model.StateMachine, "Remove Layer");
                 model.StateMachine.RemoveLayer(layer);
-                StateMachineEditorEvents.RaiseLayerRemoved(model.StateMachine, layer);
+                EditorState.Instance.NotifyLayerRemoved(layer);
             }
         }
 
@@ -271,8 +265,14 @@ namespace DMotion.Editor
             // Notify via callback if available
             model.OnEditLayer?.Invoke(layer);
 
-            // Also raise event for breadcrumb/navigation
-            StateMachineEditorEvents.RaiseLayerEntered(model.StateMachine, layer, layer.NestedStateMachine);
+            // Navigate into layer - find index without allocation
+            int layerIndex = 0;
+            foreach (var l in model.StateMachine.GetLayers())
+            {
+                if (l == layer) break;
+                layerIndex++;
+            }
+            EditorState.Instance.EnterLayer(layer, layerIndex);
         }
     }
 }

@@ -22,31 +22,24 @@ namespace DMotion.Editor
 
         private void OnEnable()
         {
-            StateMachineEditorEvents.OnStateMachineChanged += OnStateMachineChanged;
-            StateMachineEditorEvents.OnParameterRemoved += OnParameterRemoved;
+            EditorState.Instance.StructureChanged += OnStructureChanged;
         }
 
         private void OnDisable()
         {
-            StateMachineEditorEvents.OnStateMachineChanged -= OnStateMachineChanged;
-            StateMachineEditorEvents.OnParameterRemoved -= OnParameterRemoved;
+            EditorState.Instance.StructureChanged -= OnStructureChanged;
         }
 
-        private void OnStateMachineChanged(StateMachineAsset machine)
+        private void OnStructureChanged(object sender, StructureChangedEventArgs e)
         {
-            if (machine == model.StateMachine)
+            if (e.ChangeType == StructureChangeType.GeneralChange ||
+                e.ChangeType == StructureChangeType.ParameterRemoved)
             {
-                _needsRefresh = true;
-                Repaint();
-            }
-        }
-
-        private void OnParameterRemoved(StateMachineAsset machine, AnimationParameterAsset param)
-        {
-            if (machine == model.StateMachine)
-            {
-                _needsRefresh = true;
-                Repaint();
+                if (EditorState.Instance.RootStateMachine == model.StateMachine)
+                {
+                    _needsRefresh = true;
+                    Repaint();
+                }
             }
         }
 
@@ -71,6 +64,13 @@ namespace DMotion.Editor
 
         private void RefreshAnalysis()
         {
+            // Early return if state machine is null or destroyed
+            if (model.StateMachine == null || !model.StateMachine)
+            {
+                _containerDependencies = new List<NestedContainerDependencyInfo>();
+                return;
+            }
+            
             try
             {
                 _containerDependencies = AnalyzeAllNestedContainers();
@@ -317,7 +317,7 @@ namespace DMotion.Editor
             }
             
             EditorUtility.SetDirty(model.StateMachine);
-            StateMachineEditorEvents.RaiseStateMachineChanged(model.StateMachine);
+            EditorState.Instance.NotifyStateMachineChanged();
             ForceRefresh();
         }
 
@@ -449,7 +449,8 @@ namespace DMotion.Editor
                 foreach (var link in result.ParameterLinks)
                 {
                     model.StateMachine.AddLink(link);
-                    StateMachineEditorEvents.RaiseLinkAdded(model.StateMachine, link);
+                    // Links are structure changes - notify via EditorState
+                    EditorState.Instance.NotifyStateMachineChanged();
                 }
             }
 
@@ -462,7 +463,7 @@ namespace DMotion.Editor
 
                 for (int i = 0; i < created.Count; i++)
                 {
-                    StateMachineEditorEvents.RaiseParameterAdded(model.StateMachine, created[i]);
+                    EditorState.Instance.NotifyParameterAdded(created[i]);
                 }
             }
         }
@@ -488,7 +489,7 @@ namespace DMotion.Editor
             EditorUtility.SetDirty(model.StateMachine);
             EditorUtility.SetDirty(source);
             
-            StateMachineEditorEvents.RaiseLinkAdded(model.StateMachine, link);
+            EditorState.Instance.NotifyStateMachineChanged();
             ForceRefresh();
         }
 
@@ -521,8 +522,8 @@ namespace DMotion.Editor
             if (created.Count > 0)
             {
                 EditorUtility.SetDirty(model.StateMachine);
-                StateMachineEditorEvents.RaiseParameterAdded(model.StateMachine, created[0]);
-                StateMachineEditorEvents.RaiseLinkAdded(model.StateMachine, link);
+                EditorState.Instance.NotifyParameterAdded(created[0]);
+                EditorState.Instance.NotifyStateMachineChanged();
             }
         }
 
@@ -550,7 +551,7 @@ namespace DMotion.Editor
             }
             
             EditorUtility.SetDirty(model.StateMachine);
-            StateMachineEditorEvents.RaiseLinkRemoved(model.StateMachine, link);
+            EditorState.Instance.NotifyStateMachineChanged();
             ForceRefresh();
         }
 
@@ -558,12 +559,21 @@ namespace DMotion.Editor
         {
             var result = new List<NestedContainerDependencyInfo>();
             
+            // Check for null/destroyed state machine
+            if (model.StateMachine == null || !model.StateMachine)
+                return result;
+            
             foreach (var container in model.StateMachine.GetAllNestedContainers())
             {
+                // Check for null/destroyed container (Unity object check)
+                if (container == null) continue;
+                if (container is UnityEngine.Object unityObj && !unityObj) continue;
+                
                 // For SubStateMachines, analyze parameter requirements
                 // For Layers, show nested state machine parameters
                 var nestedMachine = container.NestedStateMachine;
-                if (nestedMachine == null) continue;
+                // Use explicit Unity null check for destroyed objects
+                if (nestedMachine == null || !nestedMachine) continue;
                 
                 List<ParameterRequirement> requirements;
                 if (container is SubStateMachineStateAsset subMachine)
@@ -574,10 +584,14 @@ namespace DMotion.Editor
                 {
                     // For layers, treat all parameters in the nested machine as requirements
                     requirements = new List<ParameterRequirement>();
-                    foreach (var param in nestedMachine.Parameters)
+                    if (nestedMachine.Parameters != null)
                     {
-                        if (param == null) continue; // Skip destroyed parameters
-                        requirements.Add(new ParameterRequirement { Parameter = param });
+                        foreach (var param in nestedMachine.Parameters)
+                        {
+                            // Use explicit Unity null check for destroyed parameters
+                            if (param == null || !param) continue;
+                            requirements.Add(new ParameterRequirement { Parameter = param });
+                        }
                     }
                 }
                 
@@ -593,39 +607,54 @@ namespace DMotion.Editor
 
                 foreach (var req in requirements)
                 {
-                    // Skip if the parameter has been destroyed
-                    if (req.Parameter == null) continue;
+                    // Skip if the parameter has been destroyed (Unity null check)
+                    if (req.Parameter == null || !req.Parameter) continue;
                     
                     ParameterLink? explicitLink = null;
                     bool hasExclusion = false;
                     
                     // Check links for this container
-                    foreach (var link in model.StateMachine.ParameterLinks)
+                    if (model.StateMachine.ParameterLinks != null)
                     {
-                        if (link.NestedContainer == container && link.TargetParameter == req.Parameter)
+                        foreach (var link in model.StateMachine.ParameterLinks)
                         {
-                            if (link.IsExclusion)
+                            // Check for destroyed link targets
+                            if (link.TargetParameter == null || !link.TargetParameter) continue;
+                            
+                            if (link.NestedContainer == container && link.TargetParameter == req.Parameter)
                             {
-                                // Exclusion marker - prevents auto-matching
-                                hasExclusion = true;
+                                if (link.IsExclusion)
+                                {
+                                    // Exclusion marker - prevents auto-matching
+                                    hasExclusion = true;
+                                }
+                                else
+                                {
+                                    explicitLink = link;
+                                }
+                                break;
                             }
-                            else
-                            {
-                                explicitLink = link;
-                            }
-                            break;
                         }
                     }
 
                     if (explicitLink.HasValue && explicitLink.Value.IsValid)
                     {
-                        // Valid explicit link
-                        info.ResolvedDependencies.Add(new ResolvedDependency
+                        // Valid explicit link (with Unity null check on source)
+                        var sourceParam = explicitLink.Value.SourceParameter;
+                        if (sourceParam != null && sourceParam)
                         {
-                            SourceParameter = explicitLink.Value.SourceParameter,
-                            TargetParameter = req.Parameter,
-                            IsExplicitLink = true
-                        });
+                            info.ResolvedDependencies.Add(new ResolvedDependency
+                            {
+                                SourceParameter = sourceParam,
+                                TargetParameter = req.Parameter,
+                                IsExplicitLink = true
+                            });
+                        }
+                        else
+                        {
+                            // Source was destroyed, treat as missing
+                            info.MissingRequirements.Add(req);
+                        }
                     }
                     else if (hasExclusion)
                     {
@@ -636,7 +665,7 @@ namespace DMotion.Editor
                     {
                         // Try auto-matching by name/type
                         var compatibleParam = ParameterDependencyAnalyzer.FindCompatibleParameter(model.StateMachine, req.Parameter);
-                        if (compatibleParam != null)
+                        if (compatibleParam != null && compatibleParam)
                         {
                             info.ResolvedDependencies.Add(new ResolvedDependency
                             {

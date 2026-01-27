@@ -82,8 +82,8 @@ namespace DMotion.Editor
                 layer.StateEditorData.GraphPosition = position;
                 EditorUtility.SetDirty(layer);
                 
-                // Raise event to refresh view
-                StateMachineEditorEvents.RaiseLayerAdded(stateMachine, layer);
+                // Notify EditorState of structure change
+                EditorState.Instance.NotifyLayerAdded(layer);
                 
                 // Refresh the graph view
                 graphView.RefreshAfterLayerChange();

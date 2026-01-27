@@ -70,6 +70,9 @@ namespace DMotion.Editor
         
         // Layer nodes (multi-layer mode only)
         private readonly Dictionary<LayerStateAsset, LayerStateNodeView> layerToView = new();
+        
+        // Cached list for deletion operations (avoids allocation per delete)
+        private readonly List<GraphElement> _deleteElementsCache = new();
 
         // Search window for creating new states (opened with Space)
         private StateSearchWindowProvider searchWindowProvider;
@@ -110,24 +113,24 @@ namespace DMotion.Editor
         private void OnDeleteSelection(string operationName, AskUser askUser)
         {
             // Filter selection to exclude non-deletable special nodes
-            var elementsToDelete = new List<GraphElement>();
+            _deleteElementsCache.Clear();
             foreach (var item in selection)
             {
                 if (item is not GraphElement element) continue;
                 if (element is AnyStateNodeView or ExitNodeView) continue;
 
-                elementsToDelete.Add(element);
+                _deleteElementsCache.Add(element);
 
                 // Also collect edges connected to deleted nodes
                 if (element is Node node)
                 {
-                    CollectConnectedEdges(node, elementsToDelete);
+                    CollectConnectedEdges(node, _deleteElementsCache);
                 }
             }
 
-            if (elementsToDelete.Count > 0)
+            if (_deleteElementsCache.Count > 0)
             {
-                DeleteElements(elementsToDelete);
+                DeleteElements(_deleteElementsCache);
             }
         }
 
@@ -332,7 +335,7 @@ namespace DMotion.Editor
                     // Only clear if nothing is selected after the click
                     if (selection.Count == 0)
                     {
-                        StateMachineEditorEvents.RaiseSelectionCleared(model.StateMachineAsset);
+                        EditorState.Instance.ClearSelection();
                     }
                 });
             }
@@ -406,8 +409,8 @@ namespace DMotion.Editor
             layer.StateEditorData.GraphPosition = graphPos;
             EditorUtility.SetDirty(layer);
             
-            // Raise event to refresh view
-            StateMachineEditorEvents.RaiseLayerAdded(model.StateMachineAsset, layer);
+            // Notify state change
+            EditorState.Instance.NotifyLayerAdded(layer);
             
             // Refresh the graph view
             RefreshAfterLayerChange();
@@ -549,8 +552,8 @@ namespace DMotion.Editor
             // Delete from data model
             model.StateMachineAsset.DeleteState(state);
             
-            // Raise event - DependenciesPanelController handles refresh for SubMachines
-            StateMachineEditorEvents.RaiseStateRemoved(model.StateMachineAsset, state);
+            // Notify state change
+            EditorState.Instance.NotifyStateRemoved(state);
         }
 
         private void DeleteAllOutTransitions(AnimationStateAsset fromState, AnimationStateAsset toState)
@@ -562,7 +565,7 @@ namespace DMotion.Editor
             }
             transitionToEdgeView.Remove(new TransitionPair(fromState, toState));
             
-            StateMachineEditorEvents.RaiseTransitionRemoved(model.StateMachineAsset, fromState, toState);
+            EditorState.Instance.NotifyTransitionRemoved(fromState, toState);
         }
 
         private void CreateState(DropdownMenuAction action, Type stateType)
@@ -580,8 +583,8 @@ namespace DMotion.Editor
             state.StateEditorData.GraphPosition = graphPos;
             InstantiateStateView(state);
             
-            // Raise event for other panels
-            StateMachineEditorEvents.RaiseStateAdded(model.StateMachineAsset, state);
+            // Notify state change
+            EditorState.Instance.NotifyStateAdded(state);
         }
 
         /// <summary>
@@ -600,8 +603,8 @@ namespace DMotion.Editor
             state.StateEditorData.GraphPosition = graphPosition;
             InstantiateStateView(state);
             
-            // Raise event for other panels
-            StateMachineEditorEvents.RaiseStateAdded(model.StateMachineAsset, state);
+            // Notify state change
+            EditorState.Instance.NotifyStateAdded(state);
         }
 
         private void OnSubStateMachineCreated(SubStateMachineStateAsset subState)
@@ -610,8 +613,8 @@ namespace DMotion.Editor
             
             InstantiateStateView(subState);
             
-            // Raise event - DependenciesPanelController handles panel refresh
-            StateMachineEditorEvents.RaiseStateAdded(model.StateMachineAsset, subState);
+            // Notify state change
+            EditorState.Instance.NotifyStateAdded(subState);
         }
 
         private void CreateOutTransition(AnimationStateAsset fromState, AnimationStateAsset toState)
@@ -633,7 +636,7 @@ namespace DMotion.Editor
             CreateOutTransition(fromState, toState);
             EditorUtility.SetDirty(fromState);
             
-            StateMachineEditorEvents.RaiseTransitionAdded(model.StateMachineAsset, fromState, toState);
+            EditorState.Instance.NotifyTransitionAdded(fromState, toState);
         }
 
         // Cached list for GetCompatiblePorts to avoid per-call allocations
@@ -841,14 +844,15 @@ namespace DMotion.Editor
 
         private void OnStateSelected(StateNodeView obj)
         {
-            // Raise event - InspectorController handles the inspector update
-            StateMachineEditorEvents.RaiseStateSelected(model.StateMachineAsset, obj.State);
+            // Note: Don't set RootStateMachine here - it's set when opening the root asset
+            // Setting it here would overwrite the root with nested state machines when navigating layers
+            EditorState.Instance.SelectedState = obj.State;
         }
 
         private void OnTransitionSelected(TransitionEdge obj)
         {
-            // Raise event - InspectorController handles the inspector update
-            StateMachineEditorEvents.RaiseTransitionSelected(model.StateMachineAsset, obj.FromState, obj.ToState);
+            // Note: Don't set RootStateMachine here - it's set when opening the root asset
+            EditorState.Instance.SelectTransition(obj.FromState, obj.ToState);
         }
 
         // NEW: Any State support methods
@@ -873,8 +877,8 @@ namespace DMotion.Editor
 
         private void OnExitNodeSelected(ExitNodeView obj)
         {
-            // Raise event - InspectorController handles the inspector update
-            StateMachineEditorEvents.RaiseExitNodeSelected(model.StateMachineAsset);
+            // Note: Don't set RootStateMachine here - it's set when opening the root asset
+            EditorState.Instance.IsExitNodeSelected = true;
         }
 
         private void InstantiateAnyStateTransitionEdge(StateOutTransition anyTransition)
@@ -918,7 +922,7 @@ namespace DMotion.Editor
             CreateAnyStateTransition(toState);
             EditorUtility.SetDirty(model.StateMachineAsset);
             
-            StateMachineEditorEvents.RaiseAnyStateTransitionAdded(model.StateMachineAsset, toState);
+            EditorState.Instance.NotifyTransitionAdded(null, toState); // null from = Any State
         }
 
         private void DeleteAnyStateTransition(AnimationStateAsset toState)
@@ -931,7 +935,7 @@ namespace DMotion.Editor
             }
             anyStateTransitionEdges.Remove(toState);
             
-            StateMachineEditorEvents.RaiseAnyStateTransitionRemoved(model.StateMachineAsset, toState);
+            EditorState.Instance.NotifyTransitionRemoved(null, toState); // null from = Any State
         }
 
         private void AddExitState(AnimationStateAsset state)
@@ -949,7 +953,7 @@ namespace DMotion.Editor
             // Create visual edge
             InstantiateExitStateEdge(state);
             
-            StateMachineEditorEvents.RaiseExitStateAdded(model.StateMachineAsset, state);
+            EditorState.Instance.NotifyStateMachineChanged();
         }
         
         /// <summary>
@@ -974,7 +978,7 @@ namespace DMotion.Editor
             model.StateMachineAsset.ExitStates.Remove(state);
             EditorUtility.SetDirty(model.StateMachineAsset);
             
-            StateMachineEditorEvents.RaiseExitStateRemoved(model.StateMachineAsset, state);
+            EditorState.Instance.NotifyStateMachineChanged();
         }
 
         private void InstantiateExitStateEdge(AnimationStateAsset state)
@@ -1020,7 +1024,7 @@ namespace DMotion.Editor
             
             InstantiateAnyStateExitEdge();
             
-            StateMachineEditorEvents.RaiseAnyStateExitTransitionChanged(model.StateMachineAsset, true);
+            EditorState.Instance.NotifyStateMachineChanged();
         }
         
         private void RemoveAnyStateExitTransition()
@@ -1030,7 +1034,7 @@ namespace DMotion.Editor
             EditorUtility.SetDirty(model.StateMachineAsset);
             AssetDatabase.SaveAssets();
             
-            StateMachineEditorEvents.RaiseAnyStateExitTransitionChanged(model.StateMachineAsset, false);
+            EditorState.Instance.NotifyStateMachineChanged();
         }
         
         private TransitionEdge anyStateExitEdge;
@@ -1059,21 +1063,20 @@ namespace DMotion.Editor
         
         private void OnAnyStateExitTransitionSelected(TransitionEdge obj)
         {
-            // Raise event - InspectorController handles the inspector update
-            // null toState indicates exit transition
-            StateMachineEditorEvents.RaiseAnyStateTransitionSelected(model.StateMachineAsset, null);
+            // Note: Don't set RootStateMachine here - it's set when opening the root asset
+            EditorState.Instance.SelectTransition(null, null, isAnyState: true); // Any State exit transition
         }
 
         private void OnAnyStateSelected(AnyStateNodeView obj)
         {
-            // Raise event - InspectorController handles the inspector update
-            StateMachineEditorEvents.RaiseAnyStateSelected(model.StateMachineAsset);
+            // Note: Don't set RootStateMachine here - it's set when opening the root asset
+            EditorState.Instance.IsAnyStateSelected = true;
         }
 
         private void OnAnyStateTransitionSelected(TransitionEdge obj)
         {
-            // Raise event - InspectorController handles the inspector update
-            StateMachineEditorEvents.RaiseAnyStateTransitionSelected(model.StateMachineAsset, obj.ToState);
+            // Note: Don't set RootStateMachine here - it's set when opening the root asset
+            EditorState.Instance.SelectTransition(null, obj.ToState, isAnyState: true);
         }
 
         private void InstantiateSubStateMachineExitTransitions(SubStateMachineStateAsset subState)

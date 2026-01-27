@@ -165,11 +165,19 @@ namespace DMotion.Editor
                 return;
             }
 
-            // Get root machine from graph view
+            // Get layer index from graph view - find without allocation
             var rootMachine = graphView?.StateMachine;
             if (rootMachine != null)
             {
-                StateMachineEditorEvents.RaiseLayerEntered(rootMachine, layer, layer.NestedStateMachine);
+                int layerIndex = 0;
+                bool found = false;
+                foreach (var l in rootMachine.GetLayers())
+                {
+                    if (l == layer) { found = true; break; }
+                    layerIndex++;
+                }
+                if (!found) layerIndex = 0; // Fallback
+                EditorState.Instance.EnterLayer(layer, layerIndex);
             }
         }
 

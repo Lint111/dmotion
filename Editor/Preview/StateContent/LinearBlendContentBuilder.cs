@@ -112,8 +112,8 @@ namespace DMotion.Editor
                 blendSpaceElement.PreviewPosition = new Vector2(value, 0);
             }
             
-            // Notify listeners (timeline duration updates via OnBlendStateChanged event)
-            AnimationPreviewEvents.RaiseBlendPosition1DChanged(state, value);
+            // Notify listeners via EditorState
+            EditorState.Instance.PreviewState.BlendPosition = new Unity.Mathematics.float2(value, 0);
             context.RequestRepaint?.Invoke();
         }
         

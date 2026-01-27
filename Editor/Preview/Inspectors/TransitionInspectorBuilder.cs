@@ -313,7 +313,7 @@ namespace DMotion.Editor
                 fromLabel.tooltip = $"Click to preview {fromState.name}";
                 fromLabel.RegisterCallback<MouseDownEvent>(evt =>
                 {
-                    AnimationPreviewEvents.RaiseNavigateToState(fromState);
+                    EditorState.Instance.SelectedState = fromState;
                     evt.StopPropagation();
                 });
                 fromLabel.RegisterCallback<MouseEnterEvent>(_ => fromLabel.EnableInClassList("state-link--hover", true));
@@ -341,7 +341,7 @@ namespace DMotion.Editor
                 toLabel.tooltip = $"Click to preview {toState.name}";
                 toLabel.RegisterCallback<MouseDownEvent>(evt =>
                 {
-                    AnimationPreviewEvents.RaiseNavigateToState(toState);
+                    EditorState.Instance.SelectedState = toState;
                     evt.StopPropagation();
                 });
                 toLabel.RegisterCallback<MouseEnterEvent>(_ => toLabel.EnableInClassList("state-link--hover", true));
@@ -680,20 +680,21 @@ namespace DMotion.Editor
         private void OnTimelineTimeChanged(float time)
         {
             OnTimeChanged?.Invoke(time);
-            AnimationPreviewEvents.RaiseTransitionTimeChanged(transitionFrom, transitionTo, timeline.NormalizedTime);
+            // Update EditorState preview state
+            EditorState.Instance.PreviewState.NormalizedTime = timeline.NormalizedTime;
             OnRepaintRequested?.Invoke();
         }
         
         private void OnTimelinePlayStateChanged(bool isPlaying)
         {
-            AnimationPreviewEvents.RaiseTransitionPlayStateChanged(isPlaying);
+            EditorState.Instance.PreviewState.IsPlaying = isPlaying;
             OnPlayStateChanged?.Invoke(isPlaying);
             OnRepaintRequested?.Invoke();
         }
         
         private void OnTimelineProgressChanged(float progress)
         {
-            AnimationPreviewEvents.RaiseTransitionProgressChanged(transitionFrom, transitionTo, progress);
+            EditorState.Instance.PreviewState.TransitionProgress = progress;
         }
         
         private void OnTimelineExitTimeChanged(float newExitTime)
@@ -966,11 +967,12 @@ namespace DMotion.Editor
             else
                 PreviewSettings.instance.SetBlendValue1D(state, position.x);
             
-            // Raise the appropriate event
+            // Update EditorState preview state
+            var float2Position = new Unity.Mathematics.float2(position.x, position.y);
             if (isFromState)
-                AnimationPreviewEvents.RaiseTransitionFromBlendPositionChanged(state, position);
+                EditorState.Instance.PreviewState.BlendPosition = float2Position;
             else
-                AnimationPreviewEvents.RaiseTransitionToBlendPositionChanged(state, position);
+                EditorState.Instance.PreviewState.ToBlendPosition = float2Position;
         }
         
         private static void CleanupBlendSpaceElement(ref BlendSpaceVisualElement element, Action<Vector2> positionHandler)

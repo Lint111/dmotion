@@ -500,12 +500,11 @@ namespace DMotion.Editor
         private void CreateSingleClipPreview(SingleClipStateAsset state)
         {
             var clipAsset = state.Clip;
-            if (clipAsset == null || clipAsset.Clip == null)
-            {
-                previewErrorMessage = "No animation clip assigned";
-                AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
-                return;
-            }
+                if (clipAsset == null || clipAsset.Clip == null)
+                {
+                    previewErrorMessage = "No animation clip assigned";
+                    return;
+                }
             
             try
             {
@@ -524,7 +523,6 @@ namespace DMotion.Editor
                 {
                     preview.Dispose();
                     previewErrorMessage = "Could not find model\nfor this animation clip.\n\nDrag a model prefab to\nthe Preview Model field.";
-                    AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
                     return;
                 }
                 
@@ -532,14 +530,12 @@ namespace DMotion.Editor
                 blendedPreview = null;
                 previewInitialized = true;
                 RestoreCameraState();
-                AnimationPreviewEvents.RaisePreviewCreated(state);
             }
             catch (Exception e)
             {
                 Debug.LogError($"[PreviewRenderer] Failed to create preview: {e.Message}");
                 DisposePreview();
                 previewErrorMessage = $"Preview error:\n{e.Message}";
-                AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
             }
         }
         
@@ -548,7 +544,6 @@ namespace DMotion.Editor
             if (state.BlendClips == null || state.BlendClips.Length == 0)
             {
                 previewErrorMessage = "No clips assigned to blend state";
-                AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
                 return;
             }
             
@@ -566,7 +561,6 @@ namespace DMotion.Editor
             if (!hasValidClip)
             {
                 previewErrorMessage = "No valid animation clips\nin blend state";
-                AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
                 return;
             }
             
@@ -587,7 +581,6 @@ namespace DMotion.Editor
                 {
                     preview.Dispose();
                     previewErrorMessage = "Could not find model\nfor blend state clips.\n\nDrag a model prefab to\nthe Preview Model field.";
-                    AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
                     return;
                 }
                 
@@ -599,15 +592,12 @@ namespace DMotion.Editor
                 // Set initial blend position from persisted settings
                 var initialBlend = PreviewSettings.instance.GetBlendValue1D(state);
                 blendedPreview.SetBlendPositionImmediate(new Unity.Mathematics.float2(initialBlend, 0));
-                
-                AnimationPreviewEvents.RaisePreviewCreated(state);
             }
             catch (Exception e)
             {
                 Debug.LogError($"[PreviewRenderer] Failed to create blend preview: {e.Message}");
                 DisposePreview();
                 previewErrorMessage = $"Preview error:\n{e.Message}";
-                AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
             }
         }
         
@@ -616,7 +606,6 @@ namespace DMotion.Editor
             if (state.BlendClips == null || state.BlendClips.Length == 0)
             {
                 previewErrorMessage = "No clips assigned to\n2D blend state";
-                AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
                 return;
             }
             
@@ -634,7 +623,6 @@ namespace DMotion.Editor
             if (!hasValidClip)
             {
                 previewErrorMessage = "No valid animation clips\nin 2D blend state";
-                AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
                 return;
             }
             
@@ -655,7 +643,6 @@ namespace DMotion.Editor
                 {
                     preview.Dispose();
                     previewErrorMessage = "Could not find model\nfor 2D blend state clips.\n\nDrag a model prefab to\nthe Preview Model field.";
-                    AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
                     return;
                 }
                 
@@ -667,15 +654,12 @@ namespace DMotion.Editor
                 // Set initial blend position from persisted settings
                 var initialBlend = PreviewSettings.instance.GetBlendValue2D(state);
                 blendedPreview.SetBlendPositionImmediate(new Unity.Mathematics.float2(initialBlend.x, initialBlend.y));
-                
-                AnimationPreviewEvents.RaisePreviewCreated(state);
             }
             catch (Exception e)
             {
                 Debug.LogError($"[PreviewRenderer] Failed to create 2D blend preview: {e.Message}");
                 DisposePreview();
                 previewErrorMessage = $"Preview error:\n{e.Message}";
-                AnimationPreviewEvents.RaisePreviewError(state, previewErrorMessage);
             }
         }
         
@@ -712,7 +696,7 @@ namespace DMotion.Editor
             // Raise disposed event if we had an active preview
             if (wasInitialized && previousState != null)
             {
-                AnimationPreviewEvents.RaisePreviewDisposed(previousState);
+                // No-op: previous external preview lifecycle events removed.
             }
         }
         

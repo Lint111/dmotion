@@ -118,7 +118,7 @@ namespace DMotion.Editor
 
             AssetDatabase.SaveAssets();
             
-            StateMachineEditorEvents.RaiseParameterAdded(stateMachineAsset, parameter);
+            EditorState.Instance.NotifyParameterAdded(parameter);
             
             return parameter;
         }
@@ -304,7 +304,7 @@ namespace DMotion.Editor
             
             if (previousDefault != state)
             {
-                StateMachineEditorEvents.RaiseDefaultStateChanged(stateMachineAsset, state, previousDefault);
+                EditorState.Instance.NotifyDefaultStateChanged(state, previousDefault);
             }
         }
 

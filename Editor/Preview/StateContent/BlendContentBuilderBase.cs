@@ -41,7 +41,6 @@ namespace DMotion.Editor
         protected Action<Vector2> cachedPreviewPositionHandler;
         protected Action<int> cachedClipSelectedHandler;
         protected Action<bool> cachedEditModeHandler;
-        protected Action<AnimationStateAsset, Vector2> cachedBlendStateChangedHandler;
         
         #endregion
         
@@ -145,7 +144,7 @@ namespace DMotion.Editor
             cachedClipSelectedHandler = clipIndex =>
             {
                 selectedClipForPreview = clipIndex;
-                AnimationPreviewEvents.RaiseClipSelectedForPreview(state, clipIndex);
+                EditorState.Instance.PreviewState.SoloClipIndex = clipIndex;
                 context.RequestRepaint?.Invoke();
             };
             blendSpaceElement.OnClipSelectedForPreview += cachedClipSelectedHandler;
@@ -192,17 +191,19 @@ namespace DMotion.Editor
             scrubber.FrameRate = frameRate;
             scrubber.SetEventMarkers(null); // Blend states don't show events from individual clips
             
-            // Subscribe to blend state changes for automatic duration updates
-            cachedBlendStateChangedHandler = OnBlendStateChanged;
-            AnimationPreviewEvents.OnBlendStateChanged += cachedBlendStateChangedHandler;
+            // Subscribe to EditorState preview changes for automatic duration updates
+            EditorState.Instance.PreviewStateChanged += OnPreviewStateChangedForTimeline;
         }
         
-        private void OnBlendStateChanged(AnimationStateAsset changedState, Vector2 blendPos)
+        private void OnPreviewStateChangedForTimeline(object sender, ObservablePropertyChangedEventArgs e)
         {
-            // Only update if the change is for our state
-            if (changedState != state || timelineScrubber == null) return;
+            if (e.PropertyName != nameof(ObservablePreviewState.BlendPosition)) return;
             
-            float effectiveDuration = state.GetEffectiveDuration(blendPos);
+            // Only update if the change is for our state
+            if (EditorState.Instance.PreviewState.SelectedState != state || timelineScrubber == null) return;
+            
+            var blendPos = EditorState.Instance.PreviewState.BlendPosition;
+            float effectiveDuration = state.GetEffectiveDuration(new Vector2(blendPos.x, blendPos.y));
             if (effectiveDuration > 0 && Mathf.Abs(effectiveDuration - timelineScrubber.Duration) > 0.001f)
             {
                 timelineScrubber.Duration = effectiveDuration;
@@ -211,12 +212,8 @@ namespace DMotion.Editor
         
         public void Cleanup()
         {
-            // Unsubscribe from global events
-            if (cachedBlendStateChangedHandler != null)
-            {
-                AnimationPreviewEvents.OnBlendStateChanged -= cachedBlendStateChangedHandler;
-                cachedBlendStateChangedHandler = null;
-            }
+            // Unsubscribe from EditorState events
+            EditorState.Instance.PreviewStateChanged -= OnPreviewStateChangedForTimeline;
             
             if (blendSpaceElement != null)
             {
@@ -305,7 +302,6 @@ namespace DMotion.Editor
                     helpLabel.text = blendSpaceElement.GetHelpText();
                 }
                 
-                AnimationPreviewEvents.RaiseBlendSpaceEditModeChanged(state, isEditMode);
                 context.RequestRepaint?.Invoke();
             };
             blendSpaceElement.OnEditModeChanged += cachedEditModeHandler;

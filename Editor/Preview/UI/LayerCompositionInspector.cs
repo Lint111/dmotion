@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using DMotion.Authoring;
 using UnityEditor;
 using UnityEditor.UIElements;
@@ -62,7 +63,7 @@ namespace DMotion.Editor
         
         private ILayerCompositionPreview preview;
         private StateMachineAsset stateMachine;
-        private LayerCompositionState compositionState;
+        private ObservableCompositionState compositionState;
         private List<LayerSection> layerSections = new();
         
         // Global controls
@@ -115,7 +116,7 @@ namespace DMotion.Editor
         /// <summary>
         /// Binds the inspector to a layer composition preview.
         /// </summary>
-        public void Bind(ILayerCompositionPreview preview, StateMachineAsset stateMachine, LayerCompositionState compositionState)
+        public void Bind(ILayerCompositionPreview preview, StateMachineAsset stateMachine, ObservableCompositionState compositionState)
         {
             this.preview = preview;
             this.stateMachine = stateMachine;
@@ -123,8 +124,12 @@ namespace DMotion.Editor
             
             RebuildLayerSections();
             
-            // Subscribe to preview events
-            PreviewEventSystem.PropertyChanged += OnPreviewPropertyChanged;
+            // Subscribe to composition state changes
+            if (compositionState != null)
+            {
+                compositionState.PropertyChanged += OnCompositionStatePropertyChanged;
+                compositionState.LayerChanged += OnCompositionLayerChanged;
+            }
         }
         
         /// <summary>
@@ -132,8 +137,12 @@ namespace DMotion.Editor
         /// </summary>
         public void Unbind()
         {
-            // Unsubscribe from preview events
-            PreviewEventSystem.PropertyChanged -= OnPreviewPropertyChanged;
+            // Unsubscribe from composition state events
+            if (compositionState != null)
+            {
+                compositionState.PropertyChanged -= OnCompositionStatePropertyChanged;
+                compositionState.LayerChanged -= OnCompositionLayerChanged;
+            }
             
             preview = null;
             stateMachine = null;
@@ -227,7 +236,7 @@ namespace DMotion.Editor
             globalTimeSlider = new Slider(0f, 1f);
             globalTimeSlider.AddToClassList("global-time-slider");
             globalTimeSlider.style.flexGrow = 1;
-            globalTimeSlider.RegisterValueChangedCallback(OnGlobalTimeChanged);
+            globalTimeSlider.RegisterValueChangedCallback(OnGlobalTimeChangedCallback);
             timeRow.Add(globalTimeSlider);
             
             globalSection.Add(timeRow);
@@ -244,10 +253,10 @@ namespace DMotion.Editor
             var layersContainer = this.Q<VisualElement>("layers-container");
             if (layersContainer == null) return;
             
-            for (int i = 0; i < compositionState.Layers.Length; i++)
+            for (int i = 0; i < compositionState.LayerCount; i++)
             {
-                var layerSlot = compositionState.Layers[i];
-                var section = CreateLayerSection(layerSlot);
+                var layerState = compositionState.Layers[i];
+                var section = CreateLayerSection(layerState);
                 layersContainer.Add(section.Foldout);
                 layerSections.Add(section);
             }
@@ -261,12 +270,12 @@ namespace DMotion.Editor
             layersContainer?.Clear();
         }
         
-        private LayerSection CreateLayerSection(LayerPreviewSlot layerSlot)
+        private LayerSection CreateLayerSection(ObservableLayerState layerState)
         {
             var section = new LayerSection
             {
-                LayerIndex = layerSlot.LayerIndex,
-                LayerAsset = layerSlot.LayerAsset
+                LayerIndex = layerState.LayerIndex,
+                LayerAsset = layerState.LayerAsset
             };
             
             // Create foldout with custom header
@@ -275,7 +284,7 @@ namespace DMotion.Editor
             section.Foldout.value = true; // Start expanded
             
             // Custom header with layer info and controls
-            var header = CreateLayerHeader(section, layerSlot);
+            var header = CreateLayerHeader(section, layerState);
             section.Foldout.Q<Toggle>().parent.Insert(1, header);
             section.Foldout.Q<Toggle>().style.display = DisplayStyle.None; // Hide default toggle
             
@@ -283,14 +292,14 @@ namespace DMotion.Editor
             section.Content = new VisualElement();
             section.Content.AddToClassList(LayerContentClassName);
             
-            BuildLayerContent(section, layerSlot);
+            BuildLayerContent(section, layerState);
             
             section.Foldout.Add(section.Content);
             
             return section;
         }
         
-        private VisualElement CreateLayerHeader(LayerSection section, LayerPreviewSlot layerSlot)
+        private VisualElement CreateLayerHeader(LayerSection section, ObservableLayerState layerState)
         {
             var header = new VisualElement();
             header.AddToClassList(LayerHeaderClassName);
@@ -306,7 +315,7 @@ namespace DMotion.Editor
             // Enable toggle
             section.EnableToggle = new Toggle();
             section.EnableToggle.AddToClassList("layer-enable-toggle");
-            section.EnableToggle.value = layerSlot.IsEnabled;
+            section.EnableToggle.value = layerState.IsEnabled;
             section.EnableToggle.RegisterValueChangedCallback(evt => 
                 OnLayerEnabledChanged?.Invoke(section.LayerIndex, evt.newValue));
             header.Add(section.EnableToggle);
@@ -316,11 +325,11 @@ namespace DMotion.Editor
             nameContainer.style.flexGrow = 1;
             nameContainer.style.flexDirection = FlexDirection.Column;
             
-            var nameLabel = new Label($"Layer {layerSlot.LayerIndex}: {layerSlot.LayerAsset.name}");
+            var nameLabel = new Label($"Layer {layerState.LayerIndex}: {layerState.Name}");
             nameLabel.AddToClassList("layer-name");
             nameContainer.Add(nameLabel);
             
-            section.BlendModeLabel = new Label(layerSlot.LayerAsset.BlendMode.ToString());
+            section.BlendModeLabel = new Label(layerState.BlendMode.ToString());
             section.BlendModeLabel.AddToClassList("layer-blend-mode");
             section.BlendModeLabel.style.fontSize = 10;
             nameContainer.Add(section.BlendModeLabel);
@@ -340,12 +349,12 @@ namespace DMotion.Editor
             section.WeightSlider = new Slider(0f, 1f);
             section.WeightSlider.AddToClassList("layer-weight-slider");
             section.WeightSlider.style.flexGrow = 1;
-            section.WeightSlider.value = layerSlot.Weight;
+            section.WeightSlider.value = layerState.Weight;
             section.WeightSlider.RegisterValueChangedCallback(evt => 
                 OnLayerWeightChanged?.Invoke(section.LayerIndex, evt.newValue));
             weightContainer.Add(section.WeightSlider);
             
-            section.WeightLabel = new Label(layerSlot.Weight.ToString("F2"));
+            section.WeightLabel = new Label(layerState.Weight.ToString("F2"));
             section.WeightLabel.style.minWidth = 30;
             weightContainer.Add(section.WeightLabel);
             
@@ -361,7 +370,7 @@ namespace DMotion.Editor
             return header;
         }
         
-        private void BuildLayerContent(LayerSection section, LayerPreviewSlot layerSlot)
+        private void BuildLayerContent(LayerSection section, ObservableLayerState layerState)
         {
             // Current selection display
             var selectionRow = new VisualElement();
@@ -490,37 +499,38 @@ namespace DMotion.Editor
         
         private void RefreshLayerSection(LayerSection section)
         {
-            if (compositionState?.Layers == null || section.LayerIndex >= compositionState.Layers.Length)
+            if (compositionState?.Layers == null || section.LayerIndex >= compositionState.LayerCount)
                 return;
                 
-            var layerSlot = compositionState.Layers[section.LayerIndex];
+            var layerState = compositionState.Layers[section.LayerIndex];
+            var previewState = layerState.PreviewState;
             
             // Update header controls
-            section.EnableToggle?.SetValueWithoutNotify(layerSlot.IsEnabled);
-            section.WeightSlider?.SetValueWithoutNotify(layerSlot.Weight);
-            section.WeightLabel.text = layerSlot.Weight.ToString("F2");
+            section.EnableToggle?.SetValueWithoutNotify(layerState.IsEnabled);
+            section.WeightSlider?.SetValueWithoutNotify(layerState.Weight);
+            section.WeightLabel.text = layerState.Weight.ToString("F2");
             
             // Update selection display
-            if (layerSlot.IsTransitionMode)
+            if (previewState.IsTransitionMode)
             {
-                section.CurrentSelectionLabel.text = $"→ {layerSlot.TransitionFrom?.name ?? "?"} → {layerSlot.TransitionTo?.name ?? "?"}";
+                section.CurrentSelectionLabel.text = $"→ {previewState.TransitionFrom?.name ?? "?"} → {previewState.TransitionTo?.name ?? "?"}";
                 section.StateControls.style.display = DisplayStyle.None;
                 section.TransitionControls.style.display = DisplayStyle.Flex;
                 
                 // Update transition controls
-                section.TransitionProgressSlider?.SetValueWithoutNotify(layerSlot.TransitionProgress);
-                section.FromBlendSlider?.SetValueWithoutNotify(layerSlot.BlendPosition.x);
-                section.ToBlendSlider?.SetValueWithoutNotify(layerSlot.ToBlendPosition.x);
+                section.TransitionProgressSlider?.SetValueWithoutNotify(previewState.TransitionProgress);
+                section.FromBlendSlider?.SetValueWithoutNotify(previewState.BlendPosition.x);
+                section.ToBlendSlider?.SetValueWithoutNotify(previewState.ToBlendPosition.x);
             }
-            else if (layerSlot.IsStateMode)
+            else if (previewState.SelectedState != null)
             {
-                section.CurrentSelectionLabel.text = $"→ {layerSlot.SelectedState?.name ?? "(None)"}";
+                section.CurrentSelectionLabel.text = $"→ {previewState.SelectedState?.name ?? "(None)"}";
                 section.StateControls.style.display = DisplayStyle.Flex;
                 section.TransitionControls.style.display = DisplayStyle.None;
                 
                 // Update state controls
-                section.BlendSlider?.SetValueWithoutNotify(layerSlot.BlendPosition.x);
-                UpdateClipWeightsDisplay(section, layerSlot);
+                section.BlendSlider?.SetValueWithoutNotify(previewState.BlendPosition.x);
+                UpdateClipWeightsDisplay(section, layerState);
             }
             else
             {
@@ -530,7 +540,7 @@ namespace DMotion.Editor
             }
         }
         
-        private void UpdateClipWeightsDisplay(LayerSection section, LayerPreviewSlot layerSlot)
+        private void UpdateClipWeightsDisplay(LayerSection section, ObservableLayerState layerState)
         {
             section.ClipWeights.Clear();
             
@@ -539,7 +549,7 @@ namespace DMotion.Editor
             var layerStates = preview.GetLayerStates();
             if (section.LayerIndex >= layerStates.Length) return;
             
-            var layerState = layerStates[section.LayerIndex];
+            var state = layerStates[section.LayerIndex];
             // TODO: Get clip weights from preview and display them
             // This would require extending ILayerCompositionPreview to expose clip weights
         }
@@ -556,7 +566,10 @@ namespace DMotion.Editor
         
         private void OnResetButtonClicked()
         {
-            compositionState?.SetMasterTime(0f);
+            if (compositionState != null)
+            {
+                compositionState.MasterTime = 0f;
+            }
             OnGlobalTimeChanged?.Invoke(0f);
         }
         
@@ -568,37 +581,49 @@ namespace DMotion.Editor
             }
         }
         
-        private void OnGlobalTimeChanged(ChangeEvent<float> evt)
+        private void OnGlobalTimeChangedCallback(ChangeEvent<float> evt)
         {
-            compositionState?.SetMasterTime(evt.newValue);
+            if (compositionState != null)
+            {
+                compositionState.MasterTime = evt.newValue;
+            }
             OnGlobalTimeChanged?.Invoke(evt.newValue);
         }
         
         private void OnBlendPositionChanged(LayerSection section, float value)
         {
-            compositionState?.SetLayerBlendPosition(section.LayerIndex, new Unity.Mathematics.float2(value, 0));
+            var layerState = compositionState?.GetLayer(section.LayerIndex);
+            if (layerState != null)
+            {
+                layerState.BlendPosition = new Unity.Mathematics.float2(value, 0);
+            }
         }
         
         private void OnTransitionProgressChanged(LayerSection section, float value)
         {
-            compositionState?.SetLayerTransitionProgress(section.LayerIndex, value);
+            var layerState = compositionState?.GetLayer(section.LayerIndex);
+            if (layerState != null)
+            {
+                layerState.TransitionProgress = value;
+            }
         }
         
         private void OnFromBlendPositionChanged(LayerSection section, float value)
         {
-            var layerSlot = compositionState?.GetLayer(section.LayerIndex);
-            if (layerSlot != null)
+            var layerState = compositionState?.GetLayer(section.LayerIndex);
+            if (layerState != null)
             {
-                layerSlot.BlendPosition = new Unity.Mathematics.float2(value, layerSlot.BlendPosition.y);
+                layerState.BlendPosition = new Unity.Mathematics.float2(value, layerState.BlendPosition.y);
             }
         }
         
         private void OnToBlendPositionChanged(LayerSection section, float value)
         {
-            var layerSlot = compositionState?.GetLayer(section.LayerIndex);
-            if (layerSlot != null)
+            var layerState = compositionState?.GetLayer(section.LayerIndex);
+            var previewState = layerState?.PreviewState;
+            if (previewState != null)
             {
-                layerSlot.ToBlendPosition = new Unity.Mathematics.float2(value, layerSlot.ToBlendPosition.y);
+                previewState.ToBlendPosition = new Unity.Mathematics.float2(value, previewState.ToBlendPosition.y);
             }
         }
         
@@ -609,64 +634,30 @@ namespace DMotion.Editor
             Debug.Log($"Trigger transition for layer {section.LayerIndex}");
         }
         
-        private void OnPreviewPropertyChanged(object sender, PreviewPropertyChangedEventArgs e)
+        private void OnCompositionStatePropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
-            // Only handle events for our current state machine
-            if (e.Context.RootStateMachine != stateMachine) return;
-            
             switch (e.PropertyName)
             {
-                case PreviewEventSystem.PropertyNames.SelectedState:
-                case PreviewEventSystem.PropertyNames.SelectedTransition:
-                case PreviewEventSystem.PropertyNames.LayerWeight:
-                case PreviewEventSystem.PropertyNames.LayerEnabled:
-                case PreviewEventSystem.PropertyNames.BlendPosition1D:
-                case PreviewEventSystem.PropertyNames.BlendPosition2D:
-                case PreviewEventSystem.PropertyNames.TransitionProgress:
-                    HandleLayerPropertyChanged(e);
+                case nameof(ObservableCompositionState.MasterTime):
+                    globalTimeSlider?.SetValueWithoutNotify(compositionState.MasterTime);
                     break;
                     
-                case PreviewEventSystem.PropertyNames.NormalizedTime:
-                    HandleTimeChanged(e);
+                case nameof(ObservableCompositionState.IsPlaying):
+                    if (playButton != null)
+                    {
+                        playButton.text = compositionState.IsPlaying ? "⏸ Pause" : "▶ Play";
+                    }
                     break;
-                    
-                case PreviewEventSystem.PropertyNames.IsPlaying:
-                    HandlePlaybackStateChanged(e);
-                    break;
             }
         }
         
-        private void HandleLayerPropertyChanged(PreviewPropertyChangedEventArgs e)
+        private void OnCompositionLayerChanged(object sender, LayerPropertyChangedEventArgs e)
         {
-            // Refresh the specific layer section if we have a layer index
-            if (e.Context.LayerIndex.HasValue)
+            // Refresh the specific layer section
+            int layerIndex = e.LayerIndex;
+            if (layerIndex >= 0 && layerIndex < layerSections.Count)
             {
-                int layerIndex = e.Context.LayerIndex.Value;
-                if (layerIndex >= 0 && layerIndex < layerSections.Count)
-                {
-                    RefreshLayerSection(layerSections[layerIndex]);
-                }
-            }
-            else
-            {
-                // Refresh all sections
-                Refresh();
-            }
-        }
-        
-        private void HandleTimeChanged(PreviewPropertyChangedEventArgs e)
-        {
-            if (e.NewValue is float normalizedTime)
-            {
-                globalTimeSlider?.SetValueWithoutNotify(normalizedTime);
-            }
-        }
-        
-        private void HandlePlaybackStateChanged(PreviewPropertyChangedEventArgs e)
-        {
-            if (e.NewValue is bool isPlaying && playButton != null)
-            {
-                playButton.text = isPlaying ? "⏸ Pause" : "▶ Play";
+                RefreshLayerSection(layerSections[layerIndex]);
             }
         }
         

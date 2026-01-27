@@ -162,8 +162,7 @@ namespace DMotion.Editor
             dependenciesPanelController?.Unsubscribe();
             breadcrumbController?.Unsubscribe();
             
-            // Clear all event subscriptions to prevent memory leaks
-            StateMachineEditorEvents.ClearAllSubscriptions();
+            // EditorState handles its own cleanup via Dispose pattern
         }
 
         private void OnPlaymodeStateChanged(PlayModeStateChange stateChange)
@@ -310,26 +309,45 @@ namespace DMotion.Editor
             if (hasRestoredAfterDomainReload) return;
             hasRestoredAfterDomainReload = true;
             
-            // Restore breadcrumb navigation state first
+            // Restore EditorState.RootStateMachine from serialized field
+            // EditorState singleton is recreated after domain reload, losing RootStateMachine
+            if (rootStateMachine != null && EditorState.Instance.RootStateMachine != rootStateMachine)
+            {
+                EditorState.Instance.RootStateMachine = rootStateMachine;
+            }
+            
+            // Restore breadcrumb navigation state
             breadcrumbBar?.RestoreNavigationState();
             
             // Get the current state machine from breadcrumb (which may have been restored)
             var currentFromBreadcrumb = breadcrumbBar?.CurrentStateMachine;
             if (currentFromBreadcrumb != null)
             {
+                // Restore CurrentViewStateMachine if we were navigated into a layer/sub-machine
+                if (currentFromBreadcrumb != rootStateMachine)
+                {
+                    EditorState.Instance.CurrentViewStateMachine = currentFromBreadcrumb;
+                }
+                
                 // Load the current state machine without resetting breadcrumb
                 LoadStateMachineInternal(currentFromBreadcrumb, updateBreadcrumb: false);
                 return;
             }
             
-            // Fall back to serialized reference
+            // Fall back to serialized references (try lastEdited first, then root)
             if (lastEditedStateMachine != null)
             {
                 LoadStateMachine(lastEditedStateMachine);
                 return;
             }
             
-            // Fall back to GUID if reference was lost
+            if (rootStateMachine != null)
+            {
+                LoadStateMachine(rootStateMachine);
+                return;
+            }
+            
+            // Fall back to GUID if all references were lost
             if (!string.IsNullOrEmpty(lastEditedAssetGuid))
             {
                 string assetPath = AssetDatabase.GUIDToAssetPath(lastEditedAssetGuid);
@@ -354,6 +372,10 @@ namespace DMotion.Editor
             
             // This is a new root machine
             rootStateMachine = stateMachineAsset;
+            
+            // Update EditorState with the new root state machine
+            // This triggers preview type detection (multi-layer vs single) and initializes CompositionState
+            EditorState.Instance.RootStateMachine = stateMachineAsset;
             
             // Reset breadcrumb to new root via controller
             breadcrumbController?.SetRoot(stateMachineAsset);

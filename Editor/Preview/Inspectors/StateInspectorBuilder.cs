@@ -421,11 +421,11 @@ namespace DMotion.Editor
                 {
                     var row = CreateTransitionRow(
                         "\u2192", // →
-                        transition.ToState?.name ?? "(exit)",
-                        $"{transition.TransitionDuration:F2}s",
-                        transition.ToState != null ? $"Click to preview transition to {transition.ToState.name}" : null,
-                        "to",
-                        transition.ToState != null ? () => AnimationPreviewEvents.RaiseNavigateToTransition(state, transition.ToState, false) : null);
+                         transition.ToState?.name ?? "(exit)",
+                         $"{transition.TransitionDuration:F2}s",
+                         transition.ToState != null ? $"Click to preview transition to {transition.ToState.name}" : null,
+                         "to",
+                         transition.ToState != null ? () => EditorState.Instance.SelectTransition(state, transition.ToState, false) : null);
                     outFoldout.Add(row);
                 }
                 
@@ -445,10 +445,10 @@ namespace DMotion.Editor
                     var row = CreateTransitionRow(
                         "\u2190", // ←
                         fromState.name,
-                        null,
-                        $"Click to preview transition from {fromState.name}",
-                        "from",
-                        () => AnimationPreviewEvents.RaiseNavigateToTransition(fromState, state, false));
+                         null,
+                         $"Click to preview transition from {fromState.name}",
+                         "from",
+                         () => EditorState.Instance.SelectTransition(fromState, state, false));
                     inFoldout.Add(row);
                 }
                 
@@ -458,10 +458,10 @@ namespace DMotion.Editor
                     var row = CreateTransitionRow(
                         "\u2190", // ←
                         "Any State",
-                        $"{transition.TransitionDuration:F2}s",
-                        "Click to preview Any State transition",
-                        "any",
-                        () => AnimationPreviewEvents.RaiseNavigateToTransition(null, state, true));
+                         $"{transition.TransitionDuration:F2}s",
+                         "Click to preview Any State transition",
+                         "any",
+                         () => EditorState.Instance.SelectTransition(null, state, true));
                     inFoldout.Add(row);
                 }
                 

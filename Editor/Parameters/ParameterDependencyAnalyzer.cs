@@ -51,15 +51,18 @@ namespace DMotion.Editor
             StateMachineAsset machine,
             List<ParameterRequirement> requirements)
         {
-            if (machine == null) return;
+            // Use explicit Unity null check for destroyed objects
+            if (machine == null || !machine) return;
+            if (machine.States == null) return;
 
             // Analyze each state
             foreach (var state in machine.States)
             {
-                if (state == null) continue;
+                // Use explicit Unity null check for destroyed objects
+                if (state == null || !state) continue;
                 
-                // Speed parameter
-                if (state.SpeedParameter != null)
+                // Speed parameter (with Unity null check)
+                if (state.SpeedParameter != null && state.SpeedParameter)
                 {
                     requirements.Add(new ParameterRequirement(
                         state.SpeedParameter,
@@ -68,7 +71,7 @@ namespace DMotion.Editor
                 }
 
                 // Blend parameter (for LinearBlendState)
-                if (state is LinearBlendStateAsset blendState && blendState.BlendParameter != null)
+                if (state is LinearBlendStateAsset blendState && blendState.BlendParameter != null && blendState.BlendParameter)
                 {
                     requirements.Add(new ParameterRequirement(
                         blendState.BlendParameter,
@@ -77,25 +80,33 @@ namespace DMotion.Editor
                 }
 
                 // Transition conditions
-                foreach (var transition in state.OutTransitions)
+                if (state.OutTransitions != null)
                 {
-                    AnalyzeTransitionConditions(transition, state.name, requirements);
+                    foreach (var transition in state.OutTransitions)
+                    {
+                        if (transition == null) continue;
+                        AnalyzeTransitionConditions(transition, state.name, requirements);
+                    }
                 }
 
                 // Recurse into nested SubStateMachines
-                if (state is SubStateMachineStateAsset nestedSubMachine)
+                if (state is SubStateMachineStateAsset nestedSubMachine && nestedSubMachine.NestedStateMachine != null && nestedSubMachine.NestedStateMachine)
                 {
                     AnalyzeStateMachineRecursive(nestedSubMachine.NestedStateMachine, requirements);
                 }
             }
 
             // Any State transition conditions
-            foreach (var anyTransition in machine.AnyStateTransitions)
+            if (machine.AnyStateTransitions != null)
             {
-                var toStateName = anyTransition.ToState != null ? anyTransition.ToState.name : "?";
-                var sb = StringBuilderCache.Get();
-                sb.Append("Any -> ").Append(toStateName);
-                AnalyzeTransitionConditions(anyTransition, sb.ToString(), requirements, isAnyState: true);
+                foreach (var anyTransition in machine.AnyStateTransitions)
+                {
+                    if (anyTransition == null) continue;
+                    var toStateName = (anyTransition.ToState != null && anyTransition.ToState) ? anyTransition.ToState.name : "?";
+                    var sb = StringBuilderCache.Get();
+                    sb.Append("Any -> ").Append(toStateName);
+                    AnalyzeTransitionConditions(anyTransition, sb.ToString(), requirements, isAnyState: true);
+                }
             }
         }
 
@@ -285,21 +296,29 @@ namespace DMotion.Editor
         /// </summary>
         public static List<AnimationParameterAsset> FindOrphanedParameters(StateMachineAsset machine)
         {
-            if (machine == null) return new List<AnimationParameterAsset>();
+            // Use explicit Unity null check for destroyed objects
+            if (machine == null || !machine) return new List<AnimationParameterAsset>();
+            if (machine.States == null) return new List<AnimationParameterAsset>();
 
             var usedParameters = new HashSet<AnimationParameterAsset>();
             CollectUsedParametersRecursive(machine, usedParameters);
 
             // Also consider parameters used as source in explicit parameter links as "used"
-            foreach (var link in machine.ParameterLinks)
+            if (machine.ParameterLinks != null)
             {
-                if (link.SourceParameter != null)
-                    usedParameters.Add(link.SourceParameter);
+                foreach (var link in machine.ParameterLinks)
+                {
+                    if (link.SourceParameter != null && link.SourceParameter)
+                        usedParameters.Add(link.SourceParameter);
+                }
             }
 
             // Also consider parameters that implicitly satisfy nested container requirements (same name/type)
             foreach (var state in machine.States)
             {
+                // Use explicit Unity null check for destroyed objects
+                if (state == null || !state) continue;
+                
                 INestedStateMachineContainer container = state switch
                 {
                     SubStateMachineStateAsset subMachine => subMachine,
@@ -312,8 +331,9 @@ namespace DMotion.Editor
                     var requirements = AnalyzeRequiredParameters(container);
                     foreach (var req in requirements)
                     {
+                        if (req.Parameter == null || !req.Parameter) continue;
                         var compatible = FindCompatibleParameter(machine, req.Parameter);
-                        if (compatible != null)
+                        if (compatible != null && compatible)
                             usedParameters.Add(compatible);
                     }
                 }
@@ -326,7 +346,8 @@ namespace DMotion.Editor
             for (int i = 0; i < parameters.Count; i++)
             {
                 var p = parameters[i];
-                if (p == null) continue; // Skip null/destroyed parameters
+                // Use explicit Unity null check for destroyed parameters
+                if (p == null || !p) continue;
                 if (!usedParameters.Contains(p))
                 {
                     orphaned.Add(p);
@@ -339,26 +360,29 @@ namespace DMotion.Editor
             StateMachineAsset machine,
             HashSet<AnimationParameterAsset> usedParameters)
         {
-            if (machine == null) return;
+            // Use explicit Unity null check for destroyed objects
+            if (machine == null || !machine) return;
+            if (machine.States == null) return;
 
             foreach (var state in machine.States)
             {
-                if (state == null) continue;
+                // Use explicit Unity null check for destroyed objects
+                if (state == null || !state) continue;
                 
-                // Speed parameter
-                if (state.SpeedParameter != null)
+                // Speed parameter (with Unity null check)
+                if (state.SpeedParameter != null && state.SpeedParameter)
                     usedParameters.Add(state.SpeedParameter);
 
-                // Blend parameter
-                if (state is LinearBlendStateAsset blendState && blendState.BlendParameter != null)
+                // Blend parameter (with Unity null check)
+                if (state is LinearBlendStateAsset blendState && blendState.BlendParameter != null && blendState.BlendParameter)
                     usedParameters.Add(blendState.BlendParameter);
                     
-                // 2D Blend parameters
+                // 2D Blend parameters (with Unity null check)
                 if (state is Directional2DBlendStateAsset blend2D)
                 {
-                    if (blend2D.BlendParameterX != null)
+                    if (blend2D.BlendParameterX != null && blend2D.BlendParameterX)
                         usedParameters.Add(blend2D.BlendParameterX);
-                    if (blend2D.BlendParameterY != null)
+                    if (blend2D.BlendParameterY != null && blend2D.BlendParameterY)
                         usedParameters.Add(blend2D.BlendParameterY);
                 }
 
@@ -370,20 +394,20 @@ namespace DMotion.Editor
                         if (transition == null || transition.Conditions == null) continue;
                         foreach (var condition in transition.Conditions)
                         {
-                            if (condition.Parameter != null)
+                            if (condition.Parameter != null && condition.Parameter)
                                 usedParameters.Add(condition.Parameter);
                         }
                     }
                 }
 
-                // Recurse into nested SubStateMachines
-                if (state is SubStateMachineStateAsset subMachine)
+                // Recurse into nested SubStateMachines (with Unity null check)
+                if (state is SubStateMachineStateAsset subMachine && subMachine.NestedStateMachine != null && subMachine.NestedStateMachine)
                 {
                     CollectUsedParametersRecursive(subMachine.NestedStateMachine, usedParameters);
                 }
                 
-                // Recurse into LayerStateAssets (multi-layer support)
-                if (state is LayerStateAsset layer)
+                // Recurse into LayerStateAssets (multi-layer support, with Unity null check)
+                if (state is LayerStateAsset layer && layer.NestedStateMachine != null && layer.NestedStateMachine)
                 {
                     CollectUsedParametersRecursive(layer.NestedStateMachine, usedParameters);
                 }
@@ -397,7 +421,7 @@ namespace DMotion.Editor
                     if (anyTransition?.Conditions == null) continue;
                     foreach (var condition in anyTransition.Conditions)
                     {
-                        if (condition.Parameter != null)
+                        if (condition.Parameter != null && condition.Parameter)
                             usedParameters.Add(condition.Parameter);
                     }
                 }
@@ -408,7 +432,7 @@ namespace DMotion.Editor
             {
                 foreach (var condition in machine.AnyStateExitTransition.Conditions)
                 {
-                    if (condition.Parameter != null)
+                    if (condition.Parameter != null && condition.Parameter)
                         usedParameters.Add(condition.Parameter);
                 }
             }

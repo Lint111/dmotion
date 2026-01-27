@@ -28,9 +28,7 @@ namespace DMotion.Editor
 
         public void Subscribe()
         {
-            StateMachineEditorEvents.OnSubStateMachineEntered += OnSubStateMachineEntered;
-            StateMachineEditorEvents.OnSubStateMachineExited += OnSubStateMachineExited;
-            StateMachineEditorEvents.OnLayerEntered += OnLayerEntered;
+            EditorState.Instance.PropertyChanged += OnEditorStatePropertyChanged;
             
             // Wire up breadcrumb's internal navigation to raise events
             if (breadcrumbBar != null)
@@ -41,13 +39,35 @@ namespace DMotion.Editor
 
         public void Unsubscribe()
         {
-            StateMachineEditorEvents.OnSubStateMachineEntered -= OnSubStateMachineEntered;
-            StateMachineEditorEvents.OnSubStateMachineExited -= OnSubStateMachineExited;
-            StateMachineEditorEvents.OnLayerEntered -= OnLayerEntered;
+            EditorState.Instance.PropertyChanged -= OnEditorStatePropertyChanged;
             
             if (breadcrumbBar != null)
             {
                 breadcrumbBar.OnNavigate -= OnBreadcrumbClicked;
+            }
+        }
+        
+        private void OnEditorStatePropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            switch (e.PropertyName)
+            {
+                case nameof(EditorState.CurrentViewStateMachine):
+                    var machine = EditorState.Instance.CurrentViewStateMachine;
+                    if (machine != null)
+                    {
+                        breadcrumbBar?.Push(machine);
+                        OnNavigationRequested?.Invoke(machine);
+                    }
+                    break;
+                    
+                case nameof(EditorState.CurrentLayer):
+                    var layer = EditorState.Instance.CurrentLayer;
+                    if (layer?.NestedStateMachine != null)
+                    {
+                        breadcrumbBar?.Push(layer.NestedStateMachine);
+                        OnNavigationRequested?.Invoke(layer.NestedStateMachine);
+                    }
+                    break;
             }
         }
 
@@ -66,36 +86,15 @@ namespace DMotion.Editor
             breadcrumbBar?.Push(machine);
         }
 
-        private void OnSubStateMachineEntered(StateMachineAsset parent, StateMachineAsset entered)
-        {
-            breadcrumbBar?.Push(entered);
-            OnNavigationRequested?.Invoke(entered);
-        }
-        
-        private void OnLayerEntered(StateMachineAsset rootMachine, LayerStateAsset layer, StateMachineAsset layerMachine)
-        {
-            // Handle layer navigation from graph node double-click
-            // Push to breadcrumb and request navigation (same as SubStateMachine)
-            breadcrumbBar?.Push(layerMachine);
-            OnNavigationRequested?.Invoke(layerMachine);
-        }
-
-        private void OnSubStateMachineExited(StateMachineAsset returnedTo)
-        {
-            // Breadcrumb already handles its internal state via NavigateTo/NavigateBack
-            // Just request the navigation
-            OnNavigationRequested?.Invoke(returnedTo);
-        }
-
         private void OnBreadcrumbClicked(int index)
         {
             var target = breadcrumbBar?.NavigationStack[index];
             if (target != null)
             {
                 // Clear selection when navigating - inspector should not persist
-                StateMachineEditorEvents.RaiseSelectionCleared(target);
-                // Raise the global event for other listeners
-                StateMachineEditorEvents.RaiseBreadcrumbNavigationRequested(target, index);
+                EditorState.Instance.ClearSelection();
+                // Update current view state machine
+                EditorState.Instance.CurrentViewStateMachine = target;
                 // Request navigation
                 OnNavigationRequested?.Invoke(target);
             }
@@ -117,14 +116,12 @@ namespace DMotion.Editor
 
         public void Subscribe()
         {
-            StateMachineEditorEvents.OnParameterAdded += OnParameterChanged;
-            StateMachineEditorEvents.OnParameterRemoved += OnParameterChanged;
+            EditorState.Instance.StructureChanged += OnStructureChanged;
         }
 
         public void Unsubscribe()
         {
-            StateMachineEditorEvents.OnParameterAdded -= OnParameterChanged;
-            StateMachineEditorEvents.OnParameterRemoved -= OnParameterChanged;
+            EditorState.Instance.StructureChanged -= OnStructureChanged;
         }
 
         public void SetContext(StateMachineAsset machine)
@@ -133,10 +130,14 @@ namespace DMotion.Editor
             RefreshPanel();
         }
 
-        private void OnParameterChanged(StateMachineAsset machine, AnimationParameterAsset param)
+        private void OnStructureChanged(object sender, StructureChangedEventArgs e)
         {
-            if (machine != currentMachine) return;
-            // Panel auto-refreshes via SerializedObject, but we could force refresh here if needed
+            if (e.ChangeType == StructureChangeType.ParameterAdded ||
+                e.ChangeType == StructureChangeType.ParameterRemoved)
+            {
+                if (EditorState.Instance.RootStateMachine != currentMachine) return;
+                // Panel auto-refreshes via SerializedObject, but we could force refresh here if needed
+            }
         }
 
         private void RefreshPanel()
@@ -166,52 +167,12 @@ namespace DMotion.Editor
 
         public void Subscribe()
         {
-            StateMachineEditorEvents.OnStateAdded += OnStateAdded;
-            StateMachineEditorEvents.OnStateRemoved += OnStateRemoved;
-            StateMachineEditorEvents.OnLinkAdded += OnLinkChanged;
-            StateMachineEditorEvents.OnLinkRemoved += OnLinkChanged;
-            StateMachineEditorEvents.OnDependenciesResolved += OnDependenciesResolved;
-            StateMachineEditorEvents.OnLayerAdded += OnLayerAdded;
-            StateMachineEditorEvents.OnLayerRemoved += OnLayerRemoved;
-            StateMachineEditorEvents.OnConvertedToMultiLayer += OnConvertedToMultiLayer;
-            StateMachineEditorEvents.OnParameterRemoved += OnParameterRemoved;
+            EditorState.Instance.StructureChanged += OnStructureChanged;
         }
 
         public void Unsubscribe()
         {
-            StateMachineEditorEvents.OnStateAdded -= OnStateAdded;
-            StateMachineEditorEvents.OnStateRemoved -= OnStateRemoved;
-            StateMachineEditorEvents.OnLinkAdded -= OnLinkChanged;
-            StateMachineEditorEvents.OnLinkRemoved -= OnLinkChanged;
-            StateMachineEditorEvents.OnDependenciesResolved -= OnDependenciesResolved;
-            StateMachineEditorEvents.OnLayerAdded -= OnLayerAdded;
-            StateMachineEditorEvents.OnLayerRemoved -= OnLayerRemoved;
-            StateMachineEditorEvents.OnConvertedToMultiLayer -= OnConvertedToMultiLayer;
-            StateMachineEditorEvents.OnParameterRemoved -= OnParameterRemoved;
-        }
-        
-        private void OnParameterRemoved(StateMachineAsset machine, AnimationParameterAsset param)
-        {
-            if (machine != currentMachine) return;
-            RefreshPanel();
-        }
-        
-        private void OnLayerAdded(StateMachineAsset machine, LayerStateAsset layer)
-        {
-            if (machine != currentMachine) return;
-            RefreshPanel();
-        }
-        
-        private void OnLayerRemoved(StateMachineAsset machine, LayerStateAsset layer)
-        {
-            if (machine != currentMachine) return;
-            RefreshPanel();
-        }
-        
-        private void OnConvertedToMultiLayer(StateMachineAsset machine)
-        {
-            if (machine != currentMachine) return;
-            RefreshPanel();
+            EditorState.Instance.StructureChanged -= OnStructureChanged;
         }
 
         public void SetContext(StateMachineAsset machine)
@@ -220,34 +181,28 @@ namespace DMotion.Editor
             RefreshPanel();
         }
 
-        private void OnStateAdded(StateMachineAsset machine, AnimationStateAsset state)
+        private void OnStructureChanged(object sender, StructureChangedEventArgs e)
         {
-            if (machine != currentMachine) return;
-            if (state is INestedStateMachineContainer)
+            if (EditorState.Instance.RootStateMachine != currentMachine) return;
+            
+            switch (e.ChangeType)
             {
-                RefreshPanel();
+                case StructureChangeType.StateAdded:
+                case StructureChangeType.StateRemoved:
+                    if (e.State is INestedStateMachineContainer)
+                    {
+                        RefreshPanel();
+                    }
+                    break;
+                    
+                case StructureChangeType.ParameterRemoved:
+                case StructureChangeType.LayerAdded:
+                case StructureChangeType.LayerRemoved:
+                case StructureChangeType.ConvertedToMultiLayer:
+                case StructureChangeType.GeneralChange:
+                    RefreshPanel();
+                    break;
             }
-        }
-
-        private void OnStateRemoved(StateMachineAsset machine, AnimationStateAsset state)
-        {
-            if (machine != currentMachine) return;
-            if (state is INestedStateMachineContainer)
-            {
-                RefreshPanel();
-            }
-        }
-
-        private void OnLinkChanged(StateMachineAsset machine, ParameterLink link)
-        {
-            if (machine != currentMachine) return;
-            RefreshPanel();
-        }
-
-        private void OnDependenciesResolved(StateMachineAsset machine, SubStateMachineStateAsset subMachine, int count)
-        {
-            if (machine != currentMachine) return;
-            RefreshPanel();
         }
 
         private void RefreshPanel()
@@ -295,18 +250,12 @@ namespace DMotion.Editor
 
         public void Subscribe()
         {
-            StateMachineEditorEvents.OnLayerAdded += OnLayerAdded;
-            StateMachineEditorEvents.OnLayerRemoved += OnLayerRemoved;
-            StateMachineEditorEvents.OnLayerChanged += OnLayerChanged;
-            StateMachineEditorEvents.OnConvertedToMultiLayer += OnConvertedToMultiLayer;
+            EditorState.Instance.StructureChanged += OnStructureChanged;
         }
 
         public void Unsubscribe()
         {
-            StateMachineEditorEvents.OnLayerAdded -= OnLayerAdded;
-            StateMachineEditorEvents.OnLayerRemoved -= OnLayerRemoved;
-            StateMachineEditorEvents.OnLayerChanged -= OnLayerChanged;
-            StateMachineEditorEvents.OnConvertedToMultiLayer -= OnConvertedToMultiLayer;
+            EditorState.Instance.StructureChanged -= OnStructureChanged;
         }
 
         public void SetContext(StateMachineAsset machine, StateMachineAsset root = null)
@@ -316,28 +265,19 @@ namespace DMotion.Editor
             RefreshPanel();
         }
 
-        private void OnLayerAdded(StateMachineAsset machine, LayerStateAsset layer)
+        private void OnStructureChanged(object sender, StructureChangedEventArgs e)
         {
-            if (machine != rootMachine) return;
-            RefreshPanel();
-        }
-
-        private void OnLayerRemoved(StateMachineAsset machine, LayerStateAsset layer)
-        {
-            if (machine != rootMachine) return;
-            RefreshPanel();
-        }
-
-        private void OnLayerChanged(StateMachineAsset machine, LayerStateAsset layer)
-        {
-            if (machine != rootMachine) return;
-            RefreshPanel();
-        }
-
-        private void OnConvertedToMultiLayer(StateMachineAsset machine)
-        {
-            if (machine != rootMachine) return;
-            RefreshPanel();
+            if (EditorState.Instance.RootStateMachine != rootMachine) return;
+            
+            switch (e.ChangeType)
+            {
+                case StructureChangeType.LayerAdded:
+                case StructureChangeType.LayerRemoved:
+                case StructureChangeType.LayerChanged:
+                case StructureChangeType.ConvertedToMultiLayer:
+                    RefreshPanel();
+                    break;
+            }
         }
 
         private void RefreshPanel()

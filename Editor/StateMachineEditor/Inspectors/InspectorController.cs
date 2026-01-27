@@ -1,5 +1,6 @@
 using DMotion.Authoring;
-
+using System.ComponentModel;
+ 
 namespace DMotion.Editor
 {
     /// <summary>
@@ -23,12 +24,7 @@ namespace DMotion.Editor
         /// </summary>
         public void Subscribe()
         {
-            StateMachineEditorEvents.OnStateSelected += OnStateSelected;
-            StateMachineEditorEvents.OnTransitionSelected += OnTransitionSelected;
-            StateMachineEditorEvents.OnAnyStateSelected += OnAnyStateSelected;
-            StateMachineEditorEvents.OnAnyStateTransitionSelected += OnAnyStateTransitionSelected;
-            StateMachineEditorEvents.OnExitNodeSelected += OnExitNodeSelected;
-            StateMachineEditorEvents.OnSelectionCleared += OnSelectionCleared;
+            EditorState.Instance.PropertyChanged += OnEditorStatePropertyChanged;
         }
 
         /// <summary>
@@ -36,12 +32,7 @@ namespace DMotion.Editor
         /// </summary>
         public void Unsubscribe()
         {
-            StateMachineEditorEvents.OnStateSelected -= OnStateSelected;
-            StateMachineEditorEvents.OnTransitionSelected -= OnTransitionSelected;
-            StateMachineEditorEvents.OnAnyStateSelected -= OnAnyStateSelected;
-            StateMachineEditorEvents.OnAnyStateTransitionSelected -= OnAnyStateTransitionSelected;
-            StateMachineEditorEvents.OnExitNodeSelected -= OnExitNodeSelected;
-            StateMachineEditorEvents.OnSelectionCleared -= OnSelectionCleared;
+            EditorState.Instance.PropertyChanged -= OnEditorStatePropertyChanged;
         }
 
         /// <summary>
@@ -50,6 +41,66 @@ namespace DMotion.Editor
         public void SetContext(StateMachineAsset machine)
         {
             currentMachine = machine;
+        }
+
+        private void OnEditorStatePropertyChanged(object sender, PropertyChangedEventArgs e)
+        {
+            // We care about selection changes only.
+            switch (e.PropertyName)
+            {
+                case nameof(EditorState.SelectedState):
+                case nameof(EditorState.IsTransitionSelected):
+                case nameof(EditorState.IsAnyStateSelected):
+                case nameof(EditorState.IsExitNodeSelected):
+                case nameof(EditorState.HasSelection):
+                case nameof(EditorState.SelectedTransitionFrom):
+                case nameof(EditorState.SelectedTransitionTo):
+                    break;
+                default:
+                    return;
+            }
+
+            var state = EditorState.Instance;
+            if (state.RootStateMachine != currentMachine) return;
+
+            // State selected
+            if (state.SelectedState != null)
+            {
+                OnStateSelected(currentMachine, state.SelectedState);
+                return;
+            }
+
+            // Transition selected
+            if (state.IsTransitionSelected)
+            {
+                // Any State transition: from == null
+                if (state.IsAnyStateSelected)
+                {
+                    OnAnyStateTransitionSelected(currentMachine, state.SelectedTransitionTo);
+                }
+                else
+                {
+                    OnTransitionSelected(currentMachine, state.SelectedTransitionFrom, state.SelectedTransitionTo);
+                }
+                return;
+            }
+
+            // Any State selected
+            if (state.IsAnyStateSelected)
+            {
+                OnAnyStateSelected(currentMachine);
+                return;
+            }
+
+            // Exit selected
+            if (state.IsExitNodeSelected)
+            {
+                OnExitNodeSelected(currentMachine);
+                return;
+            }
+
+            // Nothing selected
+            OnSelectionCleared(currentMachine);
         }
 
         private void OnStateSelected(StateMachineAsset machine, AnimationStateAsset state)

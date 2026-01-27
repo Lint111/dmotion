@@ -89,10 +89,12 @@ namespace DMotion.Editor
             }
 
             // Raise navigation event - BreadcrumbController handles the actual navigation
-            var parentMachine = GraphView?.StateMachine;
-            if (parentMachine != null)
+            // Note: Don't set RootStateMachine here - it's set when opening the root asset
+            // EnterSubStateMachine updates CurrentViewStateMachine appropriately
+            var subStateMachine = subState.NestedStateMachine;
+            if (subStateMachine != null)
             {
-                StateMachineEditorEvents.RaiseSubStateMachineEntered(parentMachine, subState.NestedStateMachine);
+                EditorState.Instance.EnterSubStateMachine(subStateMachine);
             }
         }
     }
