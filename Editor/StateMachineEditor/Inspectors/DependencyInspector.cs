@@ -136,28 +136,36 @@ namespace DMotion.Editor
 
         // Cached label
         private static readonly GUIContent NoParamsLabel = new GUIContent("(no params)");
-        private static GUIContent _grayDotIcon;
-        private static GUIContent GrayDotIcon
+        private static Texture2D _grayDotTexture;
+        private static Texture2D GrayDotTexture
         {
             get
             {
-                if (_grayDotIcon != null) return _grayDotIcon;
+                if (_grayDotTexture != null) return _grayDotTexture;
                 
-                // Try various built-in icons, fall back to text
-                string[] iconNames = { "sv_icon_dot0_pix16_gizmo", "d_winbtn_mac_min_h", "DotFill" };
-                foreach (var name in iconNames)
+                // Try built-in small dot icon
+                var content = EditorGUIUtility.IconContent("sv_icon_dot0_sml");
+                if (content?.image is Texture2D tex)
                 {
-                    var content = EditorGUIUtility.IconContent(name);
-                    if (content?.image != null)
-                    {
-                        _grayDotIcon = content;
-                        return _grayDotIcon;
-                    }
+                    _grayDotTexture = tex;
+                    return _grayDotTexture;
                 }
                 
-                // Fallback to text
-                _grayDotIcon = new GUIContent("○");
-                return _grayDotIcon;
+                // Create a simple gray dot texture as fallback
+                _grayDotTexture = new Texture2D(12, 12);
+                var pixels = new Color[144];
+                var center = new Vector2(5.5f, 5.5f);
+                for (int y = 0; y < 12; y++)
+                {
+                    for (int x = 0; x < 12; x++)
+                    {
+                        var dist = Vector2.Distance(new Vector2(x, y), center);
+                        pixels[y * 12 + x] = dist < 4.5f ? new Color(0.5f, 0.5f, 0.5f, 1f) : Color.clear;
+                    }
+                }
+                _grayDotTexture.SetPixels(pixels);
+                _grayDotTexture.Apply();
+                return _grayDotTexture;
             }
         }
 
@@ -180,7 +188,7 @@ namespace DMotion.Editor
                     GUIContent statusIcon;
                     if (info.HasNoParams)
                     {
-                        statusIcon = IconCache.TempIcon(GrayDotIcon.image, TooltipNoParams);
+                        statusIcon = IconCache.TempIcon(GrayDotTexture, TooltipNoParams);
                     }
                     else if (hasMissing)
                     {
@@ -190,7 +198,7 @@ namespace DMotion.Editor
                     {
                         statusIcon = IconCache.TempIcon(IconCache.CheckmarkTexture, TooltipAllResolved);
                     }
-                    GUILayout.Label(statusIcon, GUILayout.Width(18));
+                    GUILayout.Label(statusIcon, GUILayout.Width(18), GUILayout.Height(18));
 
                     // Show type indicator for layers vs submachines
                     var displayName = info.Container is LayerStateAsset ? $"[Layer] {info.Container.name}" : info.Container.name;
