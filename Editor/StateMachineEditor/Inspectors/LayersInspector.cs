@@ -169,63 +169,59 @@ namespace DMotion.Editor
                 StateMachineEditorEvents.RaiseLayerChanged(model.StateMachine, layer);
             }
 
-            // Blend mode (disabled for base layer)
-            EditorGUI.BeginDisabledGroup(isBaseLayer);
-            EditorGUI.BeginChangeCheck();
-            var newBlendMode = (LayerBlendMode)EditorGUILayout.EnumPopup("Blend Mode", layer.BlendMode);
-            if (EditorGUI.EndChangeCheck())
-            {
-                Undo.RecordObject(layer, "Change Layer Blend Mode");
-                layer.BlendMode = newBlendMode;
-                EditorUtility.SetDirty(layer);
-                StateMachineEditorEvents.RaiseLayerChanged(model.StateMachine, layer);
-            }
-            EditorGUI.EndDisabledGroup();
-
+            // Base layer: show info messages instead of disabled controls
             if (isBaseLayer)
             {
-                EditorGUILayout.LabelField("Base layer always uses Override", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("Blend Mode", "Override (base layer)", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("Avatar Mask", "Full body (base layer)", EditorStyles.miniLabel);
             }
-            
-            // Avatar Mask (disabled for base layer - base should be full body)
-            EditorGUI.BeginDisabledGroup(isBaseLayer);
-            EditorGUILayout.BeginHorizontal();
-            EditorGUI.BeginChangeCheck();
-            var newMask = (AvatarMask)EditorGUILayout.ObjectField(
-                "Avatar Mask", 
-                layer.AvatarMask, 
-                typeof(AvatarMask), 
-                false);
-            if (EditorGUI.EndChangeCheck())
+            else
             {
-                Undo.RecordObject(layer, "Change Layer Avatar Mask");
-                layer.AvatarMask = newMask;
-                EditorUtility.SetDirty(layer);
-                StateMachineEditorEvents.RaiseLayerChanged(model.StateMachine, layer);
-            }
-            
-            // Quick-create button
-            if (GUILayout.Button(new GUIContent("+", "Create new Avatar Mask"), GUILayout.Width(20)))
-            {
-                var createdMask = AvatarMaskCreator.CreateMaskForAsset(layer, $"{layer.name}_Mask");
-                if (createdMask != null)
+                // Blend mode
+                EditorGUI.BeginChangeCheck();
+                var newBlendMode = (LayerBlendMode)EditorGUILayout.EnumPopup("Blend Mode", layer.BlendMode);
+                if (EditorGUI.EndChangeCheck())
                 {
-                    Undo.RecordObject(layer, "Create Avatar Mask");
-                    layer.AvatarMask = createdMask;
+                    Undo.RecordObject(layer, "Change Layer Blend Mode");
+                    layer.BlendMode = newBlendMode;
                     EditorUtility.SetDirty(layer);
                     StateMachineEditorEvents.RaiseLayerChanged(model.StateMachine, layer);
                 }
-            }
-            EditorGUILayout.EndHorizontal();
-            EditorGUI.EndDisabledGroup();
-            
-            if (isBaseLayer)
-            {
-                EditorGUILayout.LabelField("Base layer affects full body", EditorStyles.miniLabel);
-            }
-            else if (layer.AvatarMask == null)
-            {
-                EditorGUILayout.LabelField("No mask = full body (click + to create)", EditorStyles.miniLabel);
+                
+                // Avatar Mask with quick-create button
+                EditorGUILayout.BeginHorizontal();
+                EditorGUI.BeginChangeCheck();
+                var newMask = (AvatarMask)EditorGUILayout.ObjectField(
+                    "Avatar Mask", 
+                    layer.AvatarMask, 
+                    typeof(AvatarMask), 
+                    false);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    Undo.RecordObject(layer, "Change Layer Avatar Mask");
+                    layer.AvatarMask = newMask;
+                    EditorUtility.SetDirty(layer);
+                    StateMachineEditorEvents.RaiseLayerChanged(model.StateMachine, layer);
+                }
+                
+                // Quick-create button
+                if (GUILayout.Button(new GUIContent("+", "Create new Avatar Mask"), GUILayout.Width(20)))
+                {
+                    var createdMask = AvatarMaskCreator.CreateMaskForAsset(layer, $"{layer.name}_Mask");
+                    if (createdMask != null)
+                    {
+                        Undo.RecordObject(layer, "Create Avatar Mask");
+                        layer.AvatarMask = createdMask;
+                        EditorUtility.SetDirty(layer);
+                        StateMachineEditorEvents.RaiseLayerChanged(model.StateMachine, layer);
+                    }
+                }
+                EditorGUILayout.EndHorizontal();
+                
+                if (layer.AvatarMask == null)
+                {
+                    EditorGUILayout.LabelField("No mask = full body (click + to create)", EditorStyles.miniLabel);
+                }
             }
 
             // State count info
