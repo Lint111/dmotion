@@ -44,6 +44,7 @@ namespace DMotion.Editor
         private IMGUIContainer previewContainer;
         private Label previewPlaceholder;
         private ToolbarMenu modeDropdown;
+        private ToolbarMenu previewTypeDropdown;
         private Label selectionLabel;
         private ObjectField previewModelField;
 
@@ -72,6 +73,12 @@ namespace DMotion.Editor
             AnyState,
             AnyStateTransition
         }
+        
+        private enum PreviewType
+        {
+            SingleState,
+            LayerComposition
+        }
 
         #endregion
 
@@ -80,6 +87,8 @@ namespace DMotion.Editor
         private StateInspectorBuilder stateInspectorBuilder;
         private TransitionInspectorBuilder transitionInspectorBuilder;
         private PreviewSession previewSession;
+        private LayerCompositionState layerCompositionState;
+        private PreviewType currentPreviewType = PreviewType.SingleState;
 
         #endregion
 
@@ -156,6 +165,11 @@ namespace DMotion.Editor
             StateMachineEditorEvents.OnAnyStateTransitionSelected -= OnGraphAnyStateTransitionSelected;
             StateMachineEditorEvents.OnSelectionCleared -= OnGraphSelectionCleared;
             StateMachineEditorEvents.OnStateMachineChanged -= OnStateMachineChanged;
+            
+            // Unsubscribe from layer-aware events
+            StateMachineEditorEvents.OnLayerStateSelected -= OnLayerStateSelected;
+            StateMachineEditorEvents.OnLayerTransitionSelected -= OnLayerTransitionSelected;
+            StateMachineEditorEvents.OnLayerSelectionCleared -= OnLayerSelectionCleared;
             
             // Unsubscribe from blend position events
             AnimationPreviewEvents.OnBlendPosition1DChanged -= OnBlendPosition1DChanged;
@@ -328,6 +342,24 @@ namespace DMotion.Editor
             modeDropdown.tooltip = "Switch between authoring preview (PlayableGraph) and runtime preview (ECS)";
             toolbar.Add(modeDropdown);
 
+            // Preview type dropdown for switching between Single State and Layer Composition
+            previewTypeDropdown = new ToolbarMenu();
+            UpdatePreviewTypeDropdownText();
+            previewTypeDropdown.menu.AppendAction(
+                "Single State", 
+                _ => SetPreviewType(PreviewType.SingleState),
+                action => currentPreviewType == PreviewType.SingleState 
+                    ? DropdownMenuAction.Status.Checked 
+                    : DropdownMenuAction.Status.Normal);
+            previewTypeDropdown.menu.AppendAction(
+                "Layer Composition", 
+                _ => SetPreviewType(PreviewType.LayerComposition),
+                action => currentPreviewType == PreviewType.LayerComposition 
+                    ? DropdownMenuAction.Status.Checked 
+                    : DropdownMenuAction.Status.Normal);
+            previewTypeDropdown.tooltip = "Switch between single state preview and multi-layer composition preview";
+            toolbar.Add(previewTypeDropdown);
+
             // Spacer
             var spacer = new VisualElement();
             spacer.AddToClassList("toolbar-spacer");
@@ -487,7 +519,120 @@ namespace DMotion.Editor
         }
         
         #endregion
-
+        
+        #region Preview Type
+        
+        private void SetPreviewType(PreviewType type)
+        {
+            if (currentPreviewType == type) return;
+            
+            // Check if layer composition is valid for current state machine
+            if (type == PreviewType.LayerComposition)
+            {
+                if (currentStateMachine == null || !currentStateMachine.IsMultiLayer)
+                {
+                    Debug.LogWarning("[AnimationPreview] Layer Composition preview requires a multi-layer state machine.");
+                    return;
+                }
+            }
+            
+            currentPreviewType = type;
+            UpdatePreviewTypeDropdownText();
+            
+            // Initialize layer composition state if needed
+            if (type == PreviewType.LayerComposition && layerCompositionState == null)
+            {
+                layerCompositionState = new LayerCompositionState();
+                
+                // Subscribe to layer-aware selection events
+                StateMachineEditorEvents.OnLayerStateSelected += OnLayerStateSelected;
+                StateMachineEditorEvents.OnLayerTransitionSelected += OnLayerTransitionSelected;
+                StateMachineEditorEvents.OnLayerSelectionCleared += OnLayerSelectionCleared;
+            }
+            
+            // Initialize for current state machine
+            if (type == PreviewType.LayerComposition && currentStateMachine != null)
+            {
+                layerCompositionState?.Initialize(currentStateMachine);
+            }
+            
+            // Update the UI to reflect the new preview type
+            UpdateSelectionUI();
+            Repaint();
+        }
+        
+        private void UpdatePreviewTypeDropdownText()
+        {
+            if (previewTypeDropdown == null) return;
+            
+            previewTypeDropdown.text = currentPreviewType switch
+            {
+                PreviewType.SingleState => "Single State",
+                PreviewType.LayerComposition => "Layer Composition",
+                _ => "Preview Type"
+            };
+            
+            // Update visibility based on state machine type
+            if (currentStateMachine != null)
+            {
+                previewTypeDropdown.style.display = currentStateMachine.IsMultiLayer 
+                    ? DisplayStyle.Flex 
+                    : DisplayStyle.None;
+            }
+        }
+        
+        #endregion
+        
+        #region Layer Composition Events
+        
+        private void OnLayerStateSelected(StateMachineAsset rootMachine, LayerStateAsset layer, StateMachineAsset layerMachine, AnimationStateAsset state)
+        {
+            if (currentPreviewType != PreviewType.LayerComposition) return;
+            if (rootMachine != currentStateMachine) return;
+            
+            layerCompositionState?.HandleLayerStateSelected(layer, layerMachine, state);
+            
+            // Update preview if we're in layer composition mode
+            UpdateLayerCompositionPreview();
+        }
+        
+        private void OnLayerTransitionSelected(StateMachineAsset rootMachine, LayerStateAsset layer, StateMachineAsset layerMachine, AnimationStateAsset fromState, AnimationStateAsset toState)
+        {
+            if (currentPreviewType != PreviewType.LayerComposition) return;
+            if (rootMachine != currentStateMachine) return;
+            
+            layerCompositionState?.HandleLayerTransitionSelected(layer, layerMachine, fromState, toState);
+            
+            // Update preview if we're in layer composition mode
+            UpdateLayerCompositionPreview();
+        }
+        
+        private void OnLayerSelectionCleared(StateMachineAsset rootMachine, LayerStateAsset layer, StateMachineAsset layerMachine)
+        {
+            if (currentPreviewType != PreviewType.LayerComposition) return;
+            if (rootMachine != currentStateMachine) return;
+            
+            layerCompositionState?.HandleLayerSelectionCleared(layer);
+            
+            // Update preview if we're in layer composition mode
+            UpdateLayerCompositionPreview();
+        }
+        
+        private void UpdateLayerCompositionPreview()
+        {
+            if (currentPreviewType != PreviewType.LayerComposition) return;
+            if (layerCompositionState?.RootStateMachine == null) return;
+            
+            // Create layer composition preview in the backend
+            var backend = previewSession?.Backend as PlayableGraphBackend;
+            backend?.CreateLayerCompositionPreview(layerCompositionState.RootStateMachine);
+            
+            // Update the inspector to show layer controls
+            UpdateSelectionUI();
+        }
+        
+        #endregion
+        
         #region Selection Event Handlers
 
         private void OnGraphStateSelected(StateMachineAsset machine, AnimationStateAsset state)
@@ -606,6 +751,27 @@ namespace DMotion.Editor
             {
                 currentStateMachine = machine;
                 
+                // Update preview type dropdown visibility
+                UpdatePreviewTypeDropdownText();
+                
+                // Auto-switch to appropriate preview type
+                if (machine.IsMultiLayer && currentPreviewType == PreviewType.SingleState)
+                {
+                    // Auto-switch to layer composition for multi-layer machines
+                    SetPreviewType(PreviewType.LayerComposition);
+                }
+                else if (!machine.IsMultiLayer && currentPreviewType == PreviewType.LayerComposition)
+                {
+                    // Auto-switch to single state for single-layer machines
+                    SetPreviewType(PreviewType.SingleState);
+                }
+                
+                // Initialize layer composition state if needed
+                if (currentPreviewType == PreviewType.LayerComposition)
+                {
+                    layerCompositionState?.Initialize(machine);
+                }
+                
                 // Load saved preview model for this state machine
                 LoadPreviewModelPreference();
             }
@@ -693,29 +859,38 @@ namespace DMotion.Editor
             UpdateSelectionLabel();
             UpdateInspectorContent();
             
-            // Create 3D preview for the selected state or transition
-            // Note: PreviewSession reads initial blend positions from PreviewSettings internally
-            if (currentSelectionType == SelectionType.State && selectedState != null)
+            // Handle preview creation based on preview type
+            if (currentPreviewType == PreviewType.LayerComposition)
             {
-                previewSession.CreatePreviewForState(selectedState);
-            }
-            else if (currentSelectionType == SelectionType.Transition || currentSelectionType == SelectionType.AnyStateTransition)
-            {
-                CreateTransitionPreviewForSelection();
+                // Layer composition mode - create multi-layer preview
+                UpdateLayerCompositionPreview();
             }
             else
             {
-                var message = currentSelectionType switch
+                // Single state mode - create single state/transition preview
+                // Note: PreviewSession reads initial blend positions from PreviewSettings internally
+                if (currentSelectionType == SelectionType.State && selectedState != null)
                 {
-                    SelectionType.AnyState => 
-                        "Select a state to\npreview animation",
-                    _ => null
-                };
-                
-                if (message != null)
-                    previewSession.SetMessage(message);
+                    previewSession.CreatePreviewForState(selectedState);
+                }
+                else if (currentSelectionType == SelectionType.Transition || currentSelectionType == SelectionType.AnyStateTransition)
+                {
+                    CreateTransitionPreviewForSelection();
+                }
                 else
-                    previewSession.Clear();
+                {
+                    var message = currentSelectionType switch
+                    {
+                        SelectionType.AnyState => 
+                            "Select a state to\npreview animation",
+                        _ => null
+                    };
+                    
+                    if (message != null)
+                        previewSession.SetMessage(message);
+                    else
+                        previewSession.Clear();
+                }
             }
             
             UpdatePreviewVisibility();
@@ -725,14 +900,21 @@ namespace DMotion.Editor
         {
             if (selectionLabel == null) return;
 
-            selectionLabel.text = currentSelectionType switch
+            if (currentPreviewType == PreviewType.LayerComposition)
             {
-                SelectionType.State => selectedState?.name ?? "Unknown State",
-                SelectionType.Transition => $"{selectedTransitionFrom?.name ?? "?"} -> {selectedTransitionTo?.name ?? "?"}",
-                SelectionType.AnyState => "Any State",
-                SelectionType.AnyStateTransition => $"Any State -> {selectedTransitionTo?.name ?? "?"}",
-                _ => "No Selection"
-            };
+                selectionLabel.text = currentStateMachine?.name ?? "Layer Composition";
+            }
+            else
+            {
+                selectionLabel.text = currentSelectionType switch
+                {
+                    SelectionType.State => selectedState?.name ?? "Unknown State",
+                    SelectionType.Transition => $"{selectedTransitionFrom?.name ?? "?"} -> {selectedTransitionTo?.name ?? "?"}",
+                    SelectionType.AnyState => "Any State",
+                    SelectionType.AnyStateTransition => $"Any State -> {selectedTransitionTo?.name ?? "?"}",
+                    _ => "No Selection"
+                };
+            }
         }
 
         private void UpdateInspectorContent()
@@ -745,21 +927,28 @@ namespace DMotion.Editor
             
             inspectorContent.Clear();
 
-            switch (currentSelectionType)
+            if (currentPreviewType == PreviewType.LayerComposition)
             {
-                case SelectionType.State:
-                    BuildStateInspector();
-                    break;
-                case SelectionType.Transition:
-                case SelectionType.AnyStateTransition:
-                    BuildTransitionInspector();
-                    break;
-                case SelectionType.AnyState:
-                    BuildAnyStateInspector();
-                    break;
-                default:
-                    BuildNoSelectionInspector();
-                    break;
+                BuildLayerCompositionInspector();
+            }
+            else
+            {
+                switch (currentSelectionType)
+                {
+                    case SelectionType.State:
+                        BuildStateInspector();
+                        break;
+                    case SelectionType.Transition:
+                    case SelectionType.AnyStateTransition:
+                        BuildTransitionInspector();
+                        break;
+                    case SelectionType.AnyState:
+                        BuildAnyStateInspector();
+                        break;
+                    default:
+                        BuildNoSelectionInspector();
+                        break;
+                }
             }
         }
 
@@ -806,6 +995,58 @@ namespace DMotion.Editor
             {
                 inspectorContent.Add(content);
             }
+        }
+
+        private void BuildLayerCompositionInspector()
+        {
+            if (layerCompositionState?.RootStateMachine == null)
+            {
+                var message = new Label("No multi-layer state machine available.");
+                message.AddToClassList("no-selection-message");
+                inspectorContent.Add(message);
+                return;
+            }
+
+            // Create layer controls panel
+            var layerControls = new LayerControlsPanel();
+            
+            // Get the layer composition preview from the backend
+            var backend = previewSession?.Backend as PlayableGraphBackend;
+            var layerPreview = backend?.LayerComposition;
+            
+            if (layerPreview != null)
+            {
+                layerControls.Bind(layerPreview, layerCompositionState.RootStateMachine);
+                
+                // Subscribe to layer control events
+                layerControls.OnLayerWeightChanged += (layerIndex, weight) =>
+                {
+                    layerCompositionState.SetLayerWeight(layerIndex, weight);
+                };
+                
+                layerControls.OnLayerEnabledChanged += (layerIndex, enabled) =>
+                {
+                    layerCompositionState.SetLayerEnabled(layerIndex, enabled);
+                };
+                
+                layerControls.OnLayerStateChanged += (layerIndex, state) =>
+                {
+                    layerCompositionState.SetLayerState(layerIndex, state);
+                };
+                
+                layerControls.OnGlobalTimeChanged += (normalizedTime) =>
+                {
+                    layerCompositionState.SetMasterTime(normalizedTime);
+                };
+            }
+            else
+            {
+                var message = new Label("Layer composition preview not available.\nEnsure the state machine is multi-layer.");
+                message.AddToClassList("no-selection-message");
+                layerControls.Add(message);
+            }
+            
+            inspectorContent.Add(layerControls);
         }
 
         private void CreateTransitionPreviewForSelection()
