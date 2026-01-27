@@ -133,8 +133,6 @@ namespace DMotion.Editor
             }
         }
         
-        #endregion
-        
         /// <summary>
         /// Layer composition preview interface. Returns null - not yet implemented for ECS backend.
         /// </summary>
