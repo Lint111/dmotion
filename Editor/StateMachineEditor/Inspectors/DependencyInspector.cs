@@ -303,6 +303,10 @@ namespace DMotion.Editor
 
         private void DrawMissingRequirementRow(ParameterRequirement req, INestedStateMachineContainer container)
         {
+            // Skip if the parameter has been destroyed
+            if (req.Parameter == null)
+                return;
+                
             var rect = EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
             EditorGUI.DrawRect(rect, MissingRowBgColor);
             
@@ -360,13 +364,16 @@ namespace DMotion.Editor
             else
                 _cachedCompatibleParams.Clear();
 
+            if (target == null || model.StateMachine == null) return;
+            
             var targetType = target.GetType();
             var parameters = model.StateMachine.Parameters;
             for (int i = 0; i < parameters.Count; i++)
             {
-                if (parameters[i].GetType() == targetType)
+                var param = parameters[i];
+                if (param != null && param.GetType() == targetType)
                 {
-                    _cachedCompatibleParams.Add(parameters[i]);
+                    _cachedCompatibleParams.Add(param);
                 }
             }
         }

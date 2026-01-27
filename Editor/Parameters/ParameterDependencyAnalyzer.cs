@@ -364,10 +364,10 @@ namespace DMotion.Editor
                 {
                     foreach (var transition in state.OutTransitions)
                     {
-                        if (transition?.Conditions == null) continue;
+                        if (transition == null || transition.Conditions == null) continue;
                         foreach (var condition in transition.Conditions)
                         {
-                            if (condition?.Parameter != null)
+                            if (condition.Parameter != null)
                                 usedParameters.Add(condition.Parameter);
                         }
                     }
@@ -394,7 +394,7 @@ namespace DMotion.Editor
                     if (anyTransition?.Conditions == null) continue;
                     foreach (var condition in anyTransition.Conditions)
                     {
-                        if (condition?.Parameter != null)
+                        if (condition.Parameter != null)
                             usedParameters.Add(condition.Parameter);
                     }
                 }
@@ -405,7 +405,7 @@ namespace DMotion.Editor
             {
                 foreach (var condition in machine.AnyStateExitTransition.Conditions)
                 {
-                    if (condition?.Parameter != null)
+                    if (condition.Parameter != null)
                         usedParameters.Add(condition.Parameter);
                 }
             }
