@@ -135,23 +135,10 @@ namespace DMotion.Editor
         
         #endregion
         
-        #region Multi-Layer Preview (Stub Implementation)
-        
-        // Multi-layer preview not yet implemented for ECS backend
-        public bool IsMultiLayerPreview => false;
-        public int LayerCount => 0;
-        public void CreateMultiLayerPreview(StateMachineAsset stateMachine) 
-        {
-            errorMessage = "Multi-layer preview not yet supported in ECS backend.\nUse Authoring mode for multi-layer preview.";
-        }
-        public void SetLayerWeight(int layerIndex, float weight) { }
-        public float GetLayerWeight(int layerIndex) => 0f;
-        public void SetLayerEnabled(int layerIndex, bool enabled) { }
-        public bool IsLayerEnabled(int layerIndex) => false;
-        public void SetLayerState(int layerIndex, AnimationStateAsset state) { }
-        public void SetLayerNormalizedTime(int layerIndex, float normalizedTime) { }
-        public void SetLayerBlendPosition(int layerIndex, Unity.Mathematics.float2 position) { }
-        public LayerPreviewState[] GetLayerStates() => Array.Empty<LayerPreviewState>();
+        /// <summary>
+        /// Multi-layer preview interface. Returns null - not yet implemented for ECS backend.
+        /// </summary>
+        public IMultiLayerPreview MultiLayer => null;
         
         #endregion
         

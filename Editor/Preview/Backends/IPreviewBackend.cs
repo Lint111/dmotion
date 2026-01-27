@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using DMotion.Authoring;
 using Unity.Mathematics;
 using UnityEngine;
@@ -22,39 +21,6 @@ namespace DMotion.Editor
         /// Accurate to runtime behavior, requires ECS world setup.
         /// </summary>
         EcsRuntime
-    }
-    
-    /// <summary>
-    /// State of a single layer in multi-layer preview.
-    /// </summary>
-    public struct LayerPreviewState
-    {
-        /// <summary>Layer index (0 = base layer).</summary>
-        public int LayerIndex;
-        
-        /// <summary>Layer name for display.</summary>
-        public string Name;
-        
-        /// <summary>Current layer weight (0-1).</summary>
-        public float Weight;
-        
-        /// <summary>Layer blend mode.</summary>
-        public LayerBlendMode BlendMode;
-        
-        /// <summary>Whether this layer is enabled in preview.</summary>
-        public bool IsEnabled;
-        
-        /// <summary>Whether this layer has a bone mask (partial body).</summary>
-        public bool HasBoneMask;
-        
-        /// <summary>Current state being previewed in this layer (null if using default).</summary>
-        public AnimationStateAsset CurrentState;
-        
-        /// <summary>Normalized time for this layer's animation (0-1).</summary>
-        public float NormalizedTime;
-        
-        /// <summary>Blend position for this layer's blend state.</summary>
-        public float2 BlendPosition;
     }
     
     /// <summary>
@@ -82,17 +48,14 @@ namespace DMotion.Editor
         
         /// <summary>Whether the preview is successfully initialized.</summary>
         public bool IsInitialized;
-        
-        /// <summary>Whether this is a multi-layer preview.</summary>
-        public bool IsMultiLayerPreview;
-        
-        /// <summary>Layer states for multi-layer preview. Null for single-state preview.</summary>
-        public LayerPreviewState[] LayerStates;
     }
     
     /// <summary>
-    /// Interface for animation preview backends.
-    /// Allows switching between Authoring (PlayableGraph) and ECS Runtime preview modes.
+    /// Core interface for animation preview backends.
+    /// Focuses on previewing state internals: clips, blend trees, transitions.
+    /// 
+    /// For multi-layer composition preview, see IMultiLayerPreview.
+    /// A backend may implement both interfaces if it supports both preview modes.
     /// </summary>
     public interface IPreviewBackend : IDisposable
     {
@@ -128,6 +91,12 @@ namespace DMotion.Editor
         /// </summary>
         PlayableGraphPreview.CameraState CameraState { get; set; }
         
+        /// <summary>
+        /// Returns the multi-layer preview interface if supported, null otherwise.
+        /// Use this to check if the backend supports multi-layer preview.
+        /// </summary>
+        IMultiLayerPreview MultiLayer { get; }
+        
         #endregion
         
         #region Initialization
@@ -143,13 +112,6 @@ namespace DMotion.Editor
         void CreateTransitionPreview(AnimationStateAsset fromState, AnimationStateAsset toState, float transitionDuration);
         
         /// <summary>
-        /// Creates a multi-layer preview for a state machine with layers.
-        /// Each layer's default state will be previewed initially.
-        /// </summary>
-        /// <param name="stateMachine">The root state machine containing layers.</param>
-        void CreateMultiLayerPreview(StateMachineAsset stateMachine);
-        
-        /// <summary>
         /// Sets the preview model (armature with Animator).
         /// </summary>
         void SetPreviewModel(GameObject model);
@@ -163,66 +125,6 @@ namespace DMotion.Editor
         /// Sets an info/error message without a preview.
         /// </summary>
         void SetMessage(string message);
-        
-        #endregion
-        
-        #region Multi-Layer Control
-        
-        /// <summary>
-        /// Whether this is a multi-layer preview.
-        /// </summary>
-        bool IsMultiLayerPreview { get; }
-        
-        /// <summary>
-        /// Gets the number of layers in the current multi-layer preview.
-        /// Returns 0 if not a multi-layer preview.
-        /// </summary>
-        int LayerCount { get; }
-        
-        /// <summary>
-        /// Sets the weight of a layer in multi-layer preview.
-        /// </summary>
-        /// <param name="layerIndex">Layer index (0 = base layer).</param>
-        /// <param name="weight">Weight value (0-1).</param>
-        void SetLayerWeight(int layerIndex, float weight);
-        
-        /// <summary>
-        /// Gets the current weight of a layer.
-        /// </summary>
-        float GetLayerWeight(int layerIndex);
-        
-        /// <summary>
-        /// Enables or disables a layer in preview.
-        /// Disabled layers contribute no animation.
-        /// </summary>
-        void SetLayerEnabled(int layerIndex, bool enabled);
-        
-        /// <summary>
-        /// Gets whether a layer is enabled.
-        /// </summary>
-        bool IsLayerEnabled(int layerIndex);
-        
-        /// <summary>
-        /// Sets the current state for a specific layer in multi-layer preview.
-        /// </summary>
-        /// <param name="layerIndex">Layer index.</param>
-        /// <param name="state">The state to preview in this layer.</param>
-        void SetLayerState(int layerIndex, AnimationStateAsset state);
-        
-        /// <summary>
-        /// Sets the normalized time for a specific layer.
-        /// </summary>
-        void SetLayerNormalizedTime(int layerIndex, float normalizedTime);
-        
-        /// <summary>
-        /// Sets the blend position for a specific layer (for blend states).
-        /// </summary>
-        void SetLayerBlendPosition(int layerIndex, float2 position);
-        
-        /// <summary>
-        /// Gets information about all layers in the preview.
-        /// </summary>
-        LayerPreviewState[] GetLayerStates();
         
         #endregion
         
