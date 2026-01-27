@@ -561,6 +561,7 @@ namespace DMotion.Editor
                     requirements = new List<ParameterRequirement>();
                     foreach (var param in nestedMachine.Parameters)
                     {
+                        if (param == null) continue; // Skip destroyed parameters
                         requirements.Add(new ParameterRequirement { Parameter = param });
                     }
                 }
@@ -577,6 +578,9 @@ namespace DMotion.Editor
 
                 foreach (var req in requirements)
                 {
+                    // Skip if the parameter has been destroyed
+                    if (req.Parameter == null) continue;
+                    
                     ParameterLink? explicitLink = null;
                     bool hasExclusion = false;
                     

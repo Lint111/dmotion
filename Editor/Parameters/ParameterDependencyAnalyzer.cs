@@ -24,12 +24,13 @@ namespace DMotion.Editor
 
             AnalyzeStateMachineRecursive(container.NestedStateMachine, requirements);
 
-            // Deduplicate by parameter (keep first occurrence)
+            // Deduplicate by parameter (keep first occurrence), filter out null/destroyed
             var seen = new HashSet<AnimationParameterAsset>();
             var deduplicated = new List<ParameterRequirement>();
             for (int i = 0; i < requirements.Count; i++)
             {
                 var req = requirements[i];
+                if (req.Parameter == null) continue; // Skip destroyed parameters
                 if (seen.Add(req.Parameter))
                 {
                     deduplicated.Add(req);
@@ -55,6 +56,8 @@ namespace DMotion.Editor
             // Analyze each state
             foreach (var state in machine.States)
             {
+                if (state == null) continue;
+                
                 // Speed parameter
                 if (state.SpeedParameter != null)
                 {
