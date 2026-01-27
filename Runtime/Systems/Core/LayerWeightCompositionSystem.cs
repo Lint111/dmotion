@@ -12,8 +12,10 @@ namespace DMotion
     /// - Each sampler's final weight = intra-layer weight * layer influence
     /// - Layer influence = layer weight * (1 - sum of higher layer opacities)
     /// 
-    /// Phase 1C: Override blending only
-    /// Phase 1D: Additive blending support
+    /// For Additive blending:
+    /// - Additive layers do NOT reduce remaining opacity for lower layers
+    /// - They add their contribution on top of the base pose
+    /// - Additive layer influence = layer weight (full, not reduced by opacity)
     /// </summary>
     [UpdateInGroup(typeof(SimulationSystemGroup), OrderLast = true)]
     [UpdateBefore(typeof(ClipSamplingSystem))]
@@ -51,19 +53,28 @@ namespace DMotion
                 if (layers.Length == 0 || samplers.Length == 0)
                     return;
 
-                // Calculate effective influence for each layer based on override blending
+                // Calculate effective influence for each layer based on blend mode
                 // Higher index layers have priority (they're rendered "on top")
-                // Using a simple stack-based approach:
-                // - Layer N gets its full weight
-                // - Layer N-1 gets weight * (1 - layer N opacity)
-                // - And so on...
+                // 
+                // Override layers use opacity stacking:
+                // - Layer N gets weight * remainingOpacity
+                // - remainingOpacity reduced by (1 - layerWeight)
+                //
+                // Additive layers bypass opacity:
+                // - Get their full weight without reducing remainingOpacity
+                // - Add on top of the base pose from override layers
                 
-                // First, collect layer weights indexed by layer index
-                // Use stackalloc for small fixed-size array (max 8 layers typical)
                 const int MaxLayers = 16;
                 var layerWeights = stackalloc float[MaxLayers];
                 var layerBlendModes = stackalloc LayerBlendMode[MaxLayers];
                 int maxLayerIndex = -1;
+                
+                // Initialize to zero
+                for (int i = 0; i < MaxLayers; i++)
+                {
+                    layerWeights[i] = 0f;
+                    layerBlendModes[i] = LayerBlendMode.Override;
+                }
                 
                 for (int i = 0; i < layers.Length && i < MaxLayers; i++)
                 {
@@ -80,32 +91,31 @@ namespace DMotion
                 if (maxLayerIndex < 0)
                     return;
 
-                // Calculate effective layer influences using override blending
-                // Process from top to bottom, tracking remaining opacity
+                // Calculate effective layer influences
+                // Process from top to bottom for override stacking
                 var layerInfluences = stackalloc float[MaxLayers];
                 float remainingOpacity = 1.0f;
                 
                 for (int i = maxLayerIndex; i >= 0; i--)
                 {
+                    float layerWeight = layerWeights[i];
+                    
                     if (layerBlendModes[i] == LayerBlendMode.Override)
                     {
-                        // Override: this layer takes its weight from remaining opacity
-                        float layerWeight = layerWeights[i];
+                        // Override: takes from remaining opacity, reduces it for lower layers
                         layerInfluences[i] = layerWeight * remainingOpacity;
                         remainingOpacity *= (1.0f - layerWeight);
                     }
                     else // LayerBlendMode.Additive
                     {
-                        // Phase 1D: Additive layers don't reduce remaining opacity
-                        // They add on top without displacing lower layers
-                        // For now, treat as override (Phase 1C limitation)
-                        float layerWeight = layerWeights[i];
-                        layerInfluences[i] = layerWeight * remainingOpacity;
-                        remainingOpacity *= (1.0f - layerWeight);
+                        // Additive: gets full weight, does NOT reduce remaining opacity
+                        // This allows additive layers to add on top without displacing base
+                        layerInfluences[i] = layerWeight;
+                        // remainingOpacity unchanged - additive doesn't "consume" opacity
                     }
                 }
 
-                // Now scale each sampler's weight by its layer's influence
+                // Scale each sampler's weight by its layer's influence
                 for (int i = 0; i < samplers.Length; i++)
                 {
                     var sampler = samplers[i];
@@ -113,7 +123,6 @@ namespace DMotion
                     
                     if (layerIdx < MaxLayers)
                     {
-                        // Scale sampler weight by layer influence
                         sampler.Weight *= layerInfluences[layerIdx];
                         samplers[i] = sampler;
                     }

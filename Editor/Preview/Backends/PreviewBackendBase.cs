@@ -435,6 +435,79 @@ namespace DMotion.Editor
         
         #endregion
         
+        #region Multi-Layer Preview (Default Implementations)
+        
+        /// <summary>
+        /// Whether this is a multi-layer preview.
+        /// Default: false. Override in subclasses that support multi-layer.
+        /// </summary>
+        public virtual bool IsMultiLayerPreview => false;
+        
+        /// <summary>
+        /// Gets the number of layers in the current multi-layer preview.
+        /// Default: 0. Override in subclasses that support multi-layer.
+        /// </summary>
+        public virtual int LayerCount => 0;
+        
+        /// <summary>
+        /// Creates a multi-layer preview for a state machine with layers.
+        /// Default: not implemented. Override in subclasses that support multi-layer.
+        /// </summary>
+        public virtual void CreateMultiLayerPreview(StateMachineAsset stateMachine)
+        {
+            errorMessage = "Multi-layer preview not supported in this backend";
+        }
+        
+        /// <summary>
+        /// Sets the weight of a layer in multi-layer preview.
+        /// Default: no-op. Override in subclasses that support multi-layer.
+        /// </summary>
+        public virtual void SetLayerWeight(int layerIndex, float weight) { }
+        
+        /// <summary>
+        /// Gets the current weight of a layer.
+        /// Default: 0. Override in subclasses that support multi-layer.
+        /// </summary>
+        public virtual float GetLayerWeight(int layerIndex) => 0f;
+        
+        /// <summary>
+        /// Enables or disables a layer in preview.
+        /// Default: no-op. Override in subclasses that support multi-layer.
+        /// </summary>
+        public virtual void SetLayerEnabled(int layerIndex, bool enabled) { }
+        
+        /// <summary>
+        /// Gets whether a layer is enabled.
+        /// Default: false. Override in subclasses that support multi-layer.
+        /// </summary>
+        public virtual bool IsLayerEnabled(int layerIndex) => false;
+        
+        /// <summary>
+        /// Sets the current state for a specific layer in multi-layer preview.
+        /// Default: no-op. Override in subclasses that support multi-layer.
+        /// </summary>
+        public virtual void SetLayerState(int layerIndex, AnimationStateAsset state) { }
+        
+        /// <summary>
+        /// Sets the normalized time for a specific layer.
+        /// Default: no-op. Override in subclasses that support multi-layer.
+        /// </summary>
+        public virtual void SetLayerNormalizedTime(int layerIndex, float normalizedTime) { }
+        
+        /// <summary>
+        /// Sets the blend position for a specific layer (for blend states).
+        /// Default: no-op. Override in subclasses that support multi-layer.
+        /// </summary>
+        public virtual void SetLayerBlendPosition(int layerIndex, float2 position) { }
+        
+        /// <summary>
+        /// Gets information about all layers in the preview.
+        /// Default: empty array. Override in subclasses that support multi-layer.
+        /// </summary>
+        public virtual LayerPreviewState[] GetLayerStates() => Array.Empty<LayerPreviewState>();
+        
+        #endregion
+        
         #region Template Methods (Override in Subclasses)
         
         /// <summary>

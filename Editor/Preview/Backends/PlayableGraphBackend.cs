@@ -52,6 +52,36 @@ namespace DMotion.Editor
         
         #endregion
         
+        #region Multi-Layer Preview (Stub - TODO: Implement with AnimationLayerMixerPlayable)
+        
+        // Multi-layer preview will use AnimationLayerMixerPlayable for proper layer blending
+        // TODO: Implement full multi-layer support with:
+        // - Per-layer AnimationMixerPlayable for state blending
+        // - AnimationLayerMixerPlayable for layer composition
+        // - Avatar mask support via layer settings
+        
+        public bool IsMultiLayerPreview => false;
+        public int LayerCount => 0;
+        
+        public void CreateMultiLayerPreview(StateMachineAsset stateMachine)
+        {
+            // TODO: Implement multi-layer preview
+            // For now, show a message
+            Clear();
+            renderer.SetMessage("Multi-layer preview coming soon.\nSelect a specific state to preview.");
+        }
+        
+        public void SetLayerWeight(int layerIndex, float weight) { }
+        public float GetLayerWeight(int layerIndex) => 0f;
+        public void SetLayerEnabled(int layerIndex, bool enabled) { }
+        public bool IsLayerEnabled(int layerIndex) => false;
+        public void SetLayerState(int layerIndex, AnimationStateAsset state) { }
+        public void SetLayerNormalizedTime(int layerIndex, float normalizedTime) { }
+        public void SetLayerBlendPosition(int layerIndex, float2 position) { }
+        public LayerPreviewState[] GetLayerStates() => Array.Empty<LayerPreviewState>();
+        
+        #endregion
+        
         #region IPreviewBackend Initialization
         
         public void CreatePreviewForState(AnimationStateAsset state)

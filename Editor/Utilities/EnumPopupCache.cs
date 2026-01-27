@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using DMotion.Authoring;
 using UnityEditor;
 using UnityEngine;
 
