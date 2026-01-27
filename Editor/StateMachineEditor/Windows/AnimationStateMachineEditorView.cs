@@ -55,27 +55,21 @@ namespace DMotion.Editor
 
         private StateMachineEditorViewModel model;
 
-        private Dictionary<AnimationStateAsset, StateNodeView> stateToView =
-            new Dictionary<AnimationStateAsset, StateNodeView>();
+        private readonly Dictionary<AnimationStateAsset, StateNodeView> stateToView = new();
 
-        private Dictionary<TransitionPair, TransitionEdge> transitionToEdgeView =
-            new Dictionary<TransitionPair, TransitionEdge>();
+        private readonly Dictionary<TransitionPair, TransitionEdge> transitionToEdgeView = new();
 
         // NEW: Any State node and transitions
         private AnyStateNodeView anyStateNodeView;
-        private Dictionary<AnimationStateAsset, TransitionEdge> anyStateTransitionEdges =
-            new Dictionary<AnimationStateAsset, TransitionEdge>();
-
+        private readonly Dictionary<AnimationStateAsset, TransitionEdge> anyStateTransitionEdges = new();
         // Exit node for nested state machines
         private ExitNodeView exitNodeView;
         
         // Exit transitions from SubStateMachines
-        private Dictionary<TransitionPair, TransitionEdge> exitTransitionEdges =
-            new Dictionary<TransitionPair, TransitionEdge>();
+        private readonly Dictionary<TransitionPair, TransitionEdge> exitTransitionEdges = new();
         
         // Layer nodes (multi-layer mode only)
-        private Dictionary<LayerStateAsset, LayerStateNodeView> layerToView =
-            new Dictionary<LayerStateAsset, LayerStateNodeView>();
+        private readonly Dictionary<LayerStateAsset, LayerStateNodeView> layerToView = new();
 
         // Search window for creating new states (opened with Space)
         private StateSearchWindowProvider searchWindowProvider;
@@ -208,6 +202,10 @@ namespace DMotion.Editor
             }
         }
         
+        // GraphView.viewTransform.position/scale are marked obsolete but there's no alternative API
+        // for reading the current view transform in GraphView. Suppress these warnings.
+#pragma warning disable CS0618
+        
         private bool HandlePanKeys(KeyCode keyCode)
         {
             Vector3 offset = Vector3.zero;
@@ -287,6 +285,8 @@ namespace DMotion.Editor
                 UpdateViewTransform(new Vector3(layout.width / 2, layout.height / 2, 0), currentScale);
             }
         }
+        
+#pragma warning restore CS0618
         
         private void HandleRenameShortcut()
         {
