@@ -294,12 +294,19 @@ namespace DMotion.Editor
                     usedParameters.Add(link.SourceParameter);
             }
 
-            // Also consider parameters that implicitly satisfy SubMachine requirements (same name/type)
+            // Also consider parameters that implicitly satisfy nested container requirements (same name/type)
             foreach (var state in machine.States)
             {
-                if (state is SubStateMachineStateAsset subMachine)
+                INestedStateMachineContainer container = state switch
                 {
-                    var requirements = AnalyzeRequiredParameters(subMachine);
+                    SubStateMachineStateAsset subMachine => subMachine,
+                    LayerStateAsset layer => layer,
+                    _ => null
+                };
+                
+                if (container != null)
+                {
+                    var requirements = AnalyzeRequiredParameters(container);
                     foreach (var req in requirements)
                     {
                         var compatible = FindCompatibleParameter(machine, req.Parameter);
@@ -355,6 +362,12 @@ namespace DMotion.Editor
                 if (state is SubStateMachineStateAsset subMachine)
                 {
                     CollectUsedParametersRecursive(subMachine.NestedStateMachine, usedParameters);
+                }
+                
+                // Recurse into LayerStateAssets (multi-layer support)
+                if (state is LayerStateAsset layer)
+                {
+                    CollectUsedParametersRecursive(layer.NestedStateMachine, usedParameters);
                 }
             }
 
