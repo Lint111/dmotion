@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using DMotion.Authoring;
 using UnityEditor;
 using UnityEngine;
@@ -191,11 +192,20 @@ namespace DMotion.Editor
                 }
             }
             
-            // Recursive deletion in nested state machines
+            // Delete linked target parameters (if this param is a link source, targets are also orphaned)
+            if (recursive)
+            {
+                DeleteLinkedTargetParameters(stateMachineAsset, parameterAsset);
+            }
+            
+            // Recursive deletion in nested state machines (by name/type matching)
             if (recursive)
             {
                 DeleteParameterRecursive(stateMachineAsset, parameterAsset);
             }
+            
+            // Remove any links involving this parameter (use existing method on StateMachineAsset)
+            stateMachineAsset.RemoveLinksForParameter(parameterAsset);
 
             stateMachineAsset.Parameters.Remove(parameterAsset);
             
@@ -203,6 +213,42 @@ namespace DMotion.Editor
             Undo.DestroyObjectImmediate(parameterAsset);
             
             AssetDatabase.SaveAssets();
+        }
+        
+        /// <summary>
+        /// Deletes target parameters that are linked from the given source parameter.
+        /// If parent param is orphaned, linked child params are also orphaned.
+        /// </summary>
+        private static void DeleteLinkedTargetParameters(StateMachineAsset machine, AnimationParameterAsset sourceParam)
+        {
+            if (machine.ParameterLinks == null) return;
+            
+            // Collect links where this param is the source
+            var linksToProcess = new List<ParameterLink>();
+            foreach (var link in machine.ParameterLinks)
+            {
+                if (link.SourceParameter == sourceParam && link.TargetParameter != null)
+                {
+                    linksToProcess.Add(link);
+                }
+            }
+            
+            // Delete target parameters from their nested machines
+            foreach (var link in linksToProcess)
+            {
+                var nestedMachine = link.NestedContainer?.NestedStateMachine;
+                if (nestedMachine == null) continue;
+                
+                var targetParam = link.TargetParameter;
+                if (targetParam == null) continue;
+                
+                // Check if target param actually exists in the nested machine
+                if (nestedMachine.Parameters.Contains(targetParam))
+                {
+                    Undo.RecordObject(nestedMachine, "Delete Linked Parameter");
+                    nestedMachine.DeleteParameter(targetParam, recursive: true);
+                }
+            }
         }
         
         /// <summary>
