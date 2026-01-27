@@ -137,9 +137,29 @@ namespace DMotion.Editor
         // Cached label
         private static readonly GUIContent NoParamsLabel = new GUIContent("(no params)");
         private static GUIContent _grayDotIcon;
-        private static GUIContent GrayDotIcon => _grayDotIcon ??= EditorGUIUtility.IconContent("d_GrayEmpty") 
-            ?? EditorGUIUtility.IconContent("d_ol_minus") 
-            ?? new GUIContent("○");
+        private static GUIContent GrayDotIcon
+        {
+            get
+            {
+                if (_grayDotIcon != null) return _grayDotIcon;
+                
+                // Try various built-in icons, fall back to text
+                string[] iconNames = { "sv_icon_dot0_pix16_gizmo", "d_winbtn_mac_min_h", "DotFill" };
+                foreach (var name in iconNames)
+                {
+                    var content = EditorGUIUtility.IconContent(name);
+                    if (content?.image != null)
+                    {
+                        _grayDotIcon = content;
+                        return _grayDotIcon;
+                    }
+                }
+                
+                // Fallback to text
+                _grayDotIcon = new GUIContent("○");
+                return _grayDotIcon;
+            }
+        }
 
         private void DrawContainerDependencies(NestedContainerDependencyInfo info)
         {
