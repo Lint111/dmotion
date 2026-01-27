@@ -92,6 +92,8 @@ namespace DMotion.Editor
             var target = breadcrumbBar?.NavigationStack[index];
             if (target != null)
             {
+                // Clear selection when navigating - inspector should not persist
+                StateMachineEditorEvents.RaiseSelectionCleared(target);
                 // Raise the global event for other listeners
                 StateMachineEditorEvents.RaiseBreadcrumbNavigationRequested(target, index);
                 // Request navigation

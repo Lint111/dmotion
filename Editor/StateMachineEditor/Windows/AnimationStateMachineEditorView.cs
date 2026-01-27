@@ -106,6 +106,9 @@ namespace DMotion.Editor
             // Centralized keyboard handling for all nodes
             RegisterCallback<KeyDownEvent>(OnKeyDown);
             
+            // Clear inspector when clicking on empty space (background)
+            RegisterCallback<PointerDownEvent>(OnPointerDown);
+            
             // Prevent deletion of special nodes (Any State, Exit)
             deleteSelection = OnDeleteSelection;
         }
@@ -187,6 +190,36 @@ namespace DMotion.Editor
                     selectedNode.StartRename();
                     evt.StopImmediatePropagation();
                 }
+            }
+        }
+        
+        private void OnPointerDown(PointerDownEvent evt)
+        {
+            // Only handle left-click on background (not on nodes/edges)
+            if (evt.button != 0) return;
+            if (model.StateMachineAsset == null) return;
+            
+            // Check if click target is the graph background (GridBackground or this GraphView)
+            var target = evt.target as VisualElement;
+            if (target == null) return;
+            
+            // If clicked on a node, edge, or port, don't clear selection
+            // The target will be the GridBackground or the GraphView itself for empty space clicks
+            bool isBackgroundClick = target is GridBackground || 
+                                     target == this || 
+                                     target == contentViewContainer;
+            
+            if (isBackgroundClick)
+            {
+                // Use schedule to allow the default selection behavior to complete first
+                schedule.Execute(() =>
+                {
+                    // Only clear if nothing is selected after the click
+                    if (selection.Count == 0)
+                    {
+                        StateMachineEditorEvents.RaiseSelectionCleared(model.StateMachineAsset);
+                    }
+                });
             }
         }
 

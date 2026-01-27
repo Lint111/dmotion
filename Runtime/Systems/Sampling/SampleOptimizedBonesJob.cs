@@ -7,7 +7,12 @@ using Unity.Profiling;
 
 namespace DMotion
 {
+    /// <summary>
+    /// Samples optimized bones for single-layer animation entities.
+    /// For multi-layer entities, see SampleMultiLayerOptimizedBonesJob.
+    /// </summary>
     [BurstCompile]
+    [WithNone(typeof(AnimationStateMachineLayer))] // Single-layer only
     internal partial struct SampleOptimizedBonesJob : IJobEntity
     {
         internal ProfilerMarker Marker;

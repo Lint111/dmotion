@@ -9,6 +9,7 @@ namespace DMotion
 {
     [UpdateInGroup(typeof(SimulationSystemGroup), OrderLast = true)]
     [UpdateAfter(typeof(BlendAnimationStatesSystem))]
+    [UpdateAfter(typeof(BlendMultiLayerAnimationStatesSystem))]
     [RequireMatchingQueriesForUpdate]
     [BurstCompile]
     internal partial struct UpdateAnimationStatesSystem : ISystem

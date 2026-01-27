@@ -186,6 +186,32 @@ namespace DMotion.Editor
             {
                 EditorGUILayout.LabelField("Base layer always uses Override", EditorStyles.miniLabel);
             }
+            
+            // Avatar Mask (disabled for base layer - base should be full body)
+            EditorGUI.BeginDisabledGroup(isBaseLayer);
+            EditorGUI.BeginChangeCheck();
+            var newMask = (AvatarMask)EditorGUILayout.ObjectField(
+                "Avatar Mask", 
+                layer.AvatarMask, 
+                typeof(AvatarMask), 
+                false);
+            if (EditorGUI.EndChangeCheck())
+            {
+                Undo.RecordObject(layer, "Change Layer Avatar Mask");
+                layer.AvatarMask = newMask;
+                EditorUtility.SetDirty(layer);
+                StateMachineEditorEvents.RaiseLayerChanged(model.StateMachine, layer);
+            }
+            EditorGUI.EndDisabledGroup();
+            
+            if (isBaseLayer)
+            {
+                EditorGUILayout.LabelField("Base layer affects full body", EditorStyles.miniLabel);
+            }
+            else if (layer.AvatarMask == null)
+            {
+                EditorGUILayout.LabelField("No mask = full body", EditorStyles.miniLabel);
+            }
 
             // State count info
             var stateCount = layer.NestedStateMachine != null ? layer.NestedStateMachine.States.Count : 0;

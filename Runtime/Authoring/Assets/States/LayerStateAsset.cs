@@ -13,7 +13,7 @@ namespace DMotion.Authoring
     /// Results are blended at the pose level based on weight and blend mode.
     /// </summary>
     [CreateAssetMenu(fileName = "NewLayer", menuName = "DMotion/Animation Layer")]
-    public class LayerStateAsset : AnimationStateAsset, INestedStateMachineContainer
+    public class LayerStateAsset : AnimationStateAsset, INestedStateMachineContainer, ILayerBoneMask
     {
         [Tooltip("The state machine for this layer")]
         [SerializeField]
@@ -26,8 +26,9 @@ namespace DMotion.Authoring
         [Tooltip("How this layer blends with layers below it")]
         public LayerBlendMode BlendMode = LayerBlendMode.Override;
         
-        // Phase 1D: Avatar mask for per-bone filtering
-        // public AvatarMask AvatarMask;
+        [Tooltip("Avatar mask defining which bones this layer affects. Leave empty for full body.")]
+        [SerializeField]
+        private AvatarMask avatarMask;
         
         #region AnimationStateAsset Implementation
         
@@ -62,6 +63,54 @@ namespace DMotion.Authoring
         /// Whether this layer has a valid state machine.
         /// </summary>
         public bool HasValidStateMachine => nestedStateMachine != null;
+        
+        #region ILayerBoneMask Implementation
+        
+        // Internal wrapper for interface implementation
+        private AvatarMaskBoneMask maskWrapper;
+        
+        private AvatarMaskBoneMask MaskWrapper
+        {
+            get
+            {
+                if (maskWrapper == null || maskWrapper.AvatarMask != avatarMask)
+                    maskWrapper = new AvatarMaskBoneMask(avatarMask);
+                return maskWrapper;
+            }
+        }
+        
+        /// <summary>
+        /// Whether this layer has a bone mask defined.
+        /// </summary>
+        public bool HasMask => avatarMask != null;
+        
+        /// <summary>
+        /// Whether this layer affects the full body (no mask).
+        /// </summary>
+        public bool IsFullBody => avatarMask == null;
+        
+        /// <summary>
+        /// The AvatarMask for this layer, or null for full body.
+        /// </summary>
+        public AvatarMask AvatarMask
+        {
+            get => avatarMask;
+            set => avatarMask = value;
+        }
+        
+        /// <inheritdoc/>
+        public IEnumerable<string> GetIncludedBonePaths(Transform skeletonRoot)
+        {
+            return MaskWrapper.GetIncludedBonePaths(skeletonRoot);
+        }
+        
+        /// <inheritdoc/>
+        public bool IsBoneIncluded(string bonePath)
+        {
+            return MaskWrapper.IsBoneIncluded(bonePath);
+        }
+        
+        #endregion
         
         /// <summary>
         /// Gets all states in this layer's state machine.

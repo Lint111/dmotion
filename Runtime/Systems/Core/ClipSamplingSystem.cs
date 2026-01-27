@@ -13,6 +13,9 @@ namespace DMotion
         internal static readonly ProfilerMarker Marker_SampleOptimizedBonesJob =
             new("SampleOptimizedBonesJob");
 
+        internal static readonly ProfilerMarker Marker_SampleMultiLayerOptimizedBonesJob =
+            new("SampleMultiLayerOptimizedBonesJob");
+
         internal static readonly ProfilerMarker Marker_SampleNonOptimizedBonesJob =
             new("SampleNonOptimizedBonesJob");
 
@@ -42,9 +45,16 @@ namespace DMotion
         public void OnUpdate(ref SystemState state)
         {
             // Phase 1: Sample bones - these jobs can run in parallel (all read ClipSampler)
+            // Single-layer optimized skeleton sampling
             var sampleOptimizedHandle = new SampleOptimizedBonesJob
             {
                 Marker = Marker_SampleOptimizedBonesJob
+            }.ScheduleParallel(state.Dependency);
+
+            // Multi-layer optimized skeleton sampling (with bone masks)
+            var sampleMultiLayerHandle = new SampleMultiLayerOptimizedBonesJob
+            {
+                Marker = Marker_SampleMultiLayerOptimizedBonesJob
             }.ScheduleParallel(state.Dependency);
 
             var sampleNonOptimizedHandle = new SampleNonOptimizedBones
@@ -61,7 +71,8 @@ namespace DMotion
             // Combine ALL sampling handles - root motion jobs must wait for all sampling
             // because SampleNonOptimizedBones and ApplyRootMotionToEntityJob both write LocalTransform
             var allSamplingComplete = JobHandle.CombineDependencies(
-                sampleOptimizedHandle, sampleNonOptimizedHandle, sampleRootDeltasHandle);
+                JobHandle.CombineDependencies(sampleOptimizedHandle, sampleMultiLayerHandle),
+                JobHandle.CombineDependencies(sampleNonOptimizedHandle, sampleRootDeltasHandle));
 
             // Phase 2: Root motion jobs - must wait for ALL sampling to complete
             var applyRootMotionHandle = new ApplyRootMotionToEntityJob

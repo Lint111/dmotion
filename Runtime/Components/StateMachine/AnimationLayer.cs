@@ -46,8 +46,15 @@ namespace DMotion
         /// <summary>Blend mode for this layer.</summary>
         public LayerBlendMode BlendMode;
         
-        // Phase 1D: Avatar mask reference will go here
-        // internal BlobAssetReference<BoneMaskBlob> BoneMask;
+        /// <summary>
+        /// Bone mask for per-bone layer filtering. 
+        /// When valid, only masked bones are affected by this layer.
+        /// Each bit in the mask corresponds to a bone index.
+        /// </summary>
+        internal BlobAssetReference<BoneMaskBlob> BoneMask;
+        
+        /// <summary>Whether this layer has a bone mask (partial body).</summary>
+        public bool HasBoneMask => BoneMask.IsCreated;
 
         #if UNITY_EDITOR || DEBUG
         internal StateMachineStateRef PreviousState;
