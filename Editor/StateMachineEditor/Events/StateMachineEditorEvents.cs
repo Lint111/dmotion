@@ -306,15 +306,25 @@ namespace DMotion.Editor
         /// <summary>Raises <see cref="OnStateAdded"/> and <see cref="OnStateMachineChanged"/>.</summary>
         public static void RaiseStateAdded(StateMachineAsset machine, AnimationStateAsset state)
         {
+            // Legacy events (for backward compatibility)
             OnStateAdded?.Invoke(machine, state);
             OnStateMachineChanged?.Invoke(machine);
+            
+            // New unified event system
+            DMotionEditorEventSystem.RaiseStateAdded(machine, state);
+            DMotionEditorEventSystem.RaiseStateMachineChanged(machine);
         }
 
         /// <summary>Raises <see cref="OnStateRemoved"/> and <see cref="OnStateMachineChanged"/>.</summary>
         public static void RaiseStateRemoved(StateMachineAsset machine, AnimationStateAsset state)
         {
+            // Legacy events (for backward compatibility)
             OnStateRemoved?.Invoke(machine, state);
             OnStateMachineChanged?.Invoke(machine);
+            
+            // New unified event system
+            DMotionEditorEventSystem.RaiseStateRemoved(machine, state);
+            DMotionEditorEventSystem.RaiseStateMachineChanged(machine);
         }
 
         /// <summary>Raises <see cref="OnDefaultStateChanged"/> and <see cref="OnStateMachineChanged"/>.</summary>
@@ -438,7 +448,11 @@ namespace DMotion.Editor
         /// <summary>Raises <see cref="OnStateSelected"/>.</summary>
         public static void RaiseStateSelected(StateMachineAsset machine, AnimationStateAsset state)
         {
+            // Legacy events (for backward compatibility)
             OnStateSelected?.Invoke(machine, state);
+            
+            // New unified event system
+            DMotionEditorEventSystem.RaiseStateSelected(machine, state);
         }
 
         /// <summary>Raises <see cref="OnTransitionSelected"/>.</summary>
@@ -548,8 +562,14 @@ namespace DMotion.Editor
         /// <summary>Raises <see cref="OnLayerAdded"/> and <see cref="OnStateMachineChanged"/>.</summary>
         public static void RaiseLayerAdded(StateMachineAsset machine, LayerStateAsset layer)
         {
+            // Legacy events (for backward compatibility)
             OnLayerAdded?.Invoke(machine, layer);
             OnStateMachineChanged?.Invoke(machine);
+            
+            // New unified event system
+            var layerIndex = machine.GetLayers().IndexOf(layer);
+            DMotionEditorEventSystem.RaiseLayerAdded(machine, layer, layerIndex);
+            DMotionEditorEventSystem.RaiseStateMachineChanged(machine);
         }
 
         /// <summary>Raises <see cref="OnLayerRemoved"/> and <see cref="OnStateMachineChanged"/>.</summary>
