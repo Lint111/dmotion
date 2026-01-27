@@ -279,17 +279,13 @@ namespace DMotion.Editor
 
         private void CreateExclusion(AnimationParameterAsset target, INestedStateMachineContainer container)
         {
-            Undo.SetCurrentGroupName("Break Auto-Match");
-            var undoGroup = Undo.GetCurrentGroup();
+            using (UndoScope.Begin("Break Auto-Match", model.StateMachine))
+            {
+                var exclusion = ParameterLink.Exclusion(target, container);
+                model.StateMachine.AddLink(exclusion);
+            }
             
-            Undo.RecordObject(model.StateMachine, "Break Auto-Match");
-            
-            var exclusion = ParameterLink.Exclusion(target, container);
-            model.StateMachine.AddLink(exclusion);
-            
-            Undo.CollapseUndoOperations(undoGroup);
             EditorUtility.SetDirty(model.StateMachine);
-            
             StateMachineEditorEvents.RaiseStateMachineChanged(model.StateMachine);
             ForceRefresh();
         }
@@ -382,33 +378,28 @@ namespace DMotion.Editor
 
         private void ResolveAllDependencies()
         {
-            Undo.SetCurrentGroupName("Resolve All Parameter Dependencies");
-            var undoGroup = Undo.GetCurrentGroup();
-            
-            Undo.RecordObject(model.StateMachine, "Resolve All Parameter Dependencies");
-
-            foreach (var info in _containerDependencies)
+            using (UndoScope.Begin("Resolve All Parameter Dependencies", model.StateMachine))
             {
-                if (info.MissingCount > 0)
+                foreach (var info in _containerDependencies)
                 {
-                    ResolveContainerDependenciesInternal(info.Container);
+                    if (info.MissingCount > 0)
+                    {
+                        ResolveContainerDependenciesInternal(info.Container);
+                    }
                 }
             }
-
-            Undo.CollapseUndoOperations(undoGroup);
+            
             EditorUtility.SetDirty(model.StateMachine);
             ForceRefresh();
         }
 
         private void ResolveContainerDependencies(INestedStateMachineContainer container)
         {
-            Undo.SetCurrentGroupName("Resolve Parameter Dependencies");
-            var undoGroup = Undo.GetCurrentGroup();
+            using (UndoScope.Begin("Resolve Parameter Dependencies", model.StateMachine))
+            {
+                ResolveContainerDependenciesInternal(container);
+            }
             
-            Undo.RecordObject(model.StateMachine, "Resolve Parameter Dependencies");
-            ResolveContainerDependenciesInternal(container);
-            
-            Undo.CollapseUndoOperations(undoGroup);
             EditorUtility.SetDirty(model.StateMachine);
             AssetDatabase.SaveAssets();
             ForceRefresh();
@@ -447,25 +438,22 @@ namespace DMotion.Editor
 
         private void CreateLink(AnimationParameterAsset source, AnimationParameterAsset target, INestedStateMachineContainer container)
         {
-            Undo.SetCurrentGroupName("Create Parameter Link");
-            var undoGroup = Undo.GetCurrentGroup();
-            
-            Undo.RecordObject(model.StateMachine, "Create Parameter Link");
-            Undo.RecordObject(source, "Create Parameter Link");
-            
-            // Remove any existing exclusion for this target
-            model.StateMachine.RemoveLink(null, target, container);
-            
-            var link = ParameterLink.Direct(source, target, container);
-            model.StateMachine.AddLink(link);
-            
-            // Track RequiredBy only for SubStateMachines (backwards compatibility)
-            if (container is SubStateMachineStateAsset subMachine)
+            ParameterLink link;
+            using (UndoScope.Begin("Create Parameter Link", model.StateMachine, source))
             {
-                source.AddRequiredBy(subMachine);
+                // Remove any existing exclusion for this target
+                model.StateMachine.RemoveLink(null, target, container);
+                
+                link = ParameterLink.Direct(source, target, container);
+                model.StateMachine.AddLink(link);
+                
+                // Track RequiredBy only for SubStateMachines (backwards compatibility)
+                if (container is SubStateMachineStateAsset subMachine)
+                {
+                    source.AddRequiredBy(subMachine);
+                }
             }
             
-            Undo.CollapseUndoOperations(undoGroup);
             EditorUtility.SetDirty(model.StateMachine);
             EditorUtility.SetDirty(source);
             
@@ -478,65 +466,61 @@ namespace DMotion.Editor
 
         private void CreateAndLinkParameter(ParameterRequirement req, INestedStateMachineContainer container)
         {
-            Undo.SetCurrentGroupName("Create and Link Parameter");
-            var undoGroup = Undo.GetCurrentGroup();
-            
-            Undo.RecordObject(model.StateMachine, "Create and Link Parameter");
-
             var assetPath = AssetDatabase.GetAssetPath(model.StateMachine);
             
             // Reuse single-item list
             _singleReqList.Clear();
             _singleReqList.Add(req);
             
-            var created = ParameterDependencyAnalyzer.CreateMissingParameters(
-                model.StateMachine, container, _singleReqList, assetPath);
+            List<AnimationParameterAsset> created;
+            ParameterLink link = default;
+            
+            using (UndoScope.Begin("Create and Link Parameter", model.StateMachine))
+            {
+                created = ParameterDependencyAnalyzer.CreateMissingParameters(
+                    model.StateMachine, container, _singleReqList, assetPath);
 
+                if (created.Count > 0)
+                {
+                    link = ParameterLink.Direct(created[0], req.Parameter, container);
+                    model.StateMachine.AddLink(link);
+                }
+            }
+            
             if (created.Count > 0)
             {
-                var link = ParameterLink.Direct(created[0], req.Parameter, container);
-                model.StateMachine.AddLink(link);
-                
-                Undo.CollapseUndoOperations(undoGroup);
                 EditorUtility.SetDirty(model.StateMachine);
-                
                 StateMachineEditorEvents.RaiseParameterAdded(model.StateMachine, created[0]);
                 StateMachineEditorEvents.RaiseLinkAdded(model.StateMachine, link);
-            }
-            else
-            {
-                Undo.CollapseUndoOperations(undoGroup);
             }
         }
 
         private void RemoveLink(AnimationParameterAsset source, AnimationParameterAsset target, INestedStateMachineContainer container)
         {
-            Undo.SetCurrentGroupName("Remove Parameter Link");
-            var undoGroup = Undo.GetCurrentGroup();
+            var link = ParameterLink.Direct(source, target, container);
             
-            Undo.RecordObject(model.StateMachine, "Remove Parameter Link");
-            if (source != null)
+            using (UndoScope.Begin("Remove Parameter Link", model.StateMachine, source))
             {
-                Undo.RecordObject(source, "Remove Parameter Link");
-                // Track RequiredBy only for SubStateMachines (backwards compatibility)
-                if (container is SubStateMachineStateAsset subMachine)
+                if (source != null)
                 {
-                    source.RemoveRequiredBy(subMachine);
+                    // Track RequiredBy only for SubStateMachines (backwards compatibility)
+                    if (container is SubStateMachineStateAsset subMachine)
+                    {
+                        source.RemoveRequiredBy(subMachine);
+                    }
                 }
+                
+                model.StateMachine.RemoveLink(source, target, container);
+                
+                // Also add an exclusion to prevent auto-matching
+                // (otherwise a compatible param with same name would immediately auto-match)
+                var exclusion = ParameterLink.Exclusion(target, container);
+                model.StateMachine.AddLink(exclusion);
             }
             
-            var link = ParameterLink.Direct(source, target, container);
-            model.StateMachine.RemoveLink(source, target, container);
-            
-            // Also add an exclusion to prevent auto-matching
-            // (otherwise a compatible param with same name would immediately auto-match)
-            var exclusion = ParameterLink.Exclusion(target, container);
-            model.StateMachine.AddLink(exclusion);
-            
-            Undo.CollapseUndoOperations(undoGroup);
             EditorUtility.SetDirty(model.StateMachine);
-            
             StateMachineEditorEvents.RaiseLinkRemoved(model.StateMachine, link);
+            ForceRefresh();
         }
 
         private List<NestedContainerDependencyInfo> AnalyzeAllNestedContainers()

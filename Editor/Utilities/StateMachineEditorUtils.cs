@@ -42,53 +42,51 @@ namespace DMotion.Editor
 
         public static void DeleteState(this StateMachineAsset stateMachineAsset, AnimationStateAsset stateAsset)
         {
-            Undo.SetCurrentGroupName("Delete State");
-            var undoGroup = Undo.GetCurrentGroup();
-            
-            // Record undo for the state machine
-            Undo.RecordObject(stateMachineAsset, "Delete State");
-            
-            // Record undo for all states that might have transitions modified
-            foreach (var state in stateMachineAsset.States)
+            // Build targets array for UndoScope - state machine + all states
+            var targets = new UnityEngine.Object[stateMachineAsset.States.Count + 1];
+            targets[0] = stateMachineAsset;
+            for (int i = 0; i < stateMachineAsset.States.Count; i++)
             {
-                Undo.RecordObject(state, "Delete State");
+                targets[i + 1] = stateMachineAsset.States[i];
             }
             
-            // Remove all transitions TO this state from other states
-            foreach (var state in stateMachineAsset.States)
+            using (UndoScope.Begin("Delete State", targets))
             {
-                for (int i = state.OutTransitions.Count - 1; i >= 0; i--)
+                // Remove all transitions TO this state from other states
+                foreach (var state in stateMachineAsset.States)
                 {
-                    if (state.OutTransitions[i].ToState == stateAsset)
+                    for (int i = state.OutTransitions.Count - 1; i >= 0; i--)
                     {
-                        state.OutTransitions.RemoveAt(i);
+                        if (state.OutTransitions[i].ToState == stateAsset)
+                        {
+                            state.OutTransitions.RemoveAt(i);
+                        }
                     }
                 }
-            }
-            
-            // Remove Any State transitions to this state
-            var anyTransitions = stateMachineAsset.AnyStateTransitions;
-            for (int i = anyTransitions.Count - 1; i >= 0; i--)
-            {
-                if (anyTransitions[i].ToState == stateAsset)
+                
+                // Remove Any State transitions to this state
+                var anyTransitions = stateMachineAsset.AnyStateTransitions;
+                for (int i = anyTransitions.Count - 1; i >= 0; i--)
                 {
-                    anyTransitions.RemoveAt(i);
+                    if (anyTransitions[i].ToState == stateAsset)
+                    {
+                        anyTransitions.RemoveAt(i);
+                    }
                 }
-            }
-            
-            // Remove from exit states if present
-            stateMachineAsset.ExitStates.Remove(stateAsset);
+                
+                // Remove from exit states if present
+                stateMachineAsset.ExitStates.Remove(stateAsset);
 
-            stateMachineAsset.States.Remove(stateAsset);
-            if (stateMachineAsset.DefaultState == stateAsset)
-            {
-                stateMachineAsset.DefaultState = stateMachineAsset.States.Count > 0 ? stateMachineAsset.States[0] : null;
+                stateMachineAsset.States.Remove(stateAsset);
+                if (stateMachineAsset.DefaultState == stateAsset)
+                {
+                    stateMachineAsset.DefaultState = stateMachineAsset.States.Count > 0 ? stateMachineAsset.States[0] : null;
+                }
+                
+                // Use Undo.DestroyObjectImmediate for proper undo support
+                Undo.DestroyObjectImmediate(stateAsset);
             }
             
-            // Use Undo.DestroyObjectImmediate for proper undo support
-            Undo.DestroyObjectImmediate(stateAsset);
-            
-            Undo.CollapseUndoOperations(undoGroup);
             AssetDatabase.SaveAssets();
         }
 
