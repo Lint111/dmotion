@@ -51,10 +51,10 @@ namespace DMotion.Editor
         }
         
         /// <summary>
-        /// Multi-layer preview interface. Returns null - not yet implemented.
+        /// Layer composition preview interface. Returns null - not yet implemented.
         /// TODO: Implement using AnimationLayerMixerPlayable.
         /// </summary>
-        public IMultiLayerPreview MultiLayer => null;
+        public ILayerCompositionPreview LayerComposition => null;
         
         #endregion
         
@@ -216,19 +216,15 @@ namespace DMotion.Editor
             renderer.ResetCameraView();
         }
         
-        public PreviewSnapshot GetSnapshot()
+        public StatePreviewSnapshot GetSnapshot()
         {
-            var weights = renderer.GetCurrentBlendWeights();
-            
-            return new PreviewSnapshot
+            return new StatePreviewSnapshot
             {
                 NormalizedTime = normalizedTime,
                 BlendPosition = blendPosition,
-                BlendWeights = weights,
+                BlendWeights = renderer.GetCurrentBlendWeights(),
                 TransitionProgress = IsTransitionPreview ? renderer.GetTransitionProgress() : -1f,
-                IsPlaying = false, // Playable backend doesn't track play state
-                ErrorMessage = renderer.ErrorMessage,
-                IsInitialized = renderer.IsInitialized
+                IsPlaying = false
             };
         }
         

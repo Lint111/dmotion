@@ -102,10 +102,10 @@ namespace DMotion.Editor
         }
         
         /// <summary>
-        /// Multi-layer preview interface. Returns null by default.
+        /// Layer composition preview interface. Returns null by default.
         /// Override in subclasses that support multi-layer preview.
         /// </summary>
-        public virtual IMultiLayerPreview MultiLayer => null;
+        public virtual ILayerCompositionPreview LayerComposition => null;
         
         #endregion
         
@@ -167,17 +167,15 @@ namespace DMotion.Editor
         /// <summary>
         /// Gets a snapshot of the current preview state.
         /// </summary>
-        public virtual PreviewSnapshot GetSnapshot()
+        public virtual StatePreviewSnapshot GetSnapshot()
         {
-            return new PreviewSnapshot
+            return new StatePreviewSnapshot
             {
                 NormalizedTime = timeState.NormalizedTime,
                 BlendPosition = parameterState.BlendPosition,
                 BlendWeights = GetCurrentBlendWeights(),
                 TransitionProgress = IsTransitionPreview ? timeState.TransitionProgress : -1f,
-                IsPlaying = timeState.IsPlaying,
-                ErrorMessage = errorMessage,
-                IsInitialized = isInitialized
+                IsPlaying = timeState.IsPlaying
             };
         }
         

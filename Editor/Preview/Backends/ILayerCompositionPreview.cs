@@ -1,11 +1,10 @@
-using System;
 using DMotion.Authoring;
 using Unity.Mathematics;
 
 namespace DMotion.Editor
 {
     /// <summary>
-    /// State of a single layer in multi-layer preview.
+    /// State of a single layer in composition preview.
     /// </summary>
     public struct LayerPreviewState
     {
@@ -27,60 +26,53 @@ namespace DMotion.Editor
         /// <summary>Whether this layer has a bone mask (partial body).</summary>
         public bool HasBoneMask;
         
-        /// <summary>Current state being previewed in this layer (null if using default).</summary>
+        /// <summary>Current state being previewed in this layer.</summary>
         public AnimationStateAsset CurrentState;
         
         /// <summary>Normalized time for this layer's animation (0-1).</summary>
         public float NormalizedTime;
         
-        /// <summary>Blend position for this layer's blend state.</summary>
+        /// <summary>Blend position for this layer (for blend states).</summary>
         public float2 BlendPosition;
     }
     
     /// <summary>
-    /// Interface for multi-layer animation preview.
-    /// Focuses on layer composition: weights, masks, override vs additive blending.
+    /// Preview interface for multi-layer composition.
+    /// Focuses on: layer weights, masks, override vs additive blending.
     /// 
-    /// Separate from IPreviewBackend because the preview concerns are different:
-    /// - IPreviewBackend: Preview state internals (clips, blends, transitions within one state)
-    /// - IMultiLayerPreview: Preview layer composition (how multiple layers blend together)
-    /// 
-    /// A backend that supports multi-layer preview implements both interfaces.
+    /// Use this to preview how layers COMBINE:
+    /// - How weight affects layer influence
+    /// - How bone masks create partial-body animation
+    /// - How override vs additive layers interact
     /// </summary>
-    public interface IMultiLayerPreview : IDisposable
+    public interface ILayerCompositionPreview : IAnimationPreview
     {
-        #region Properties
+        #region Layer Info
         
         /// <summary>
-        /// Whether the multi-layer preview is initialized.
-        /// </summary>
-        bool IsInitialized { get; }
-        
-        /// <summary>
-        /// Error message if initialization failed.
-        /// </summary>
-        string ErrorMessage { get; }
-        
-        /// <summary>
-        /// Gets the number of layers in the preview.
+        /// Number of layers in the preview.
         /// </summary>
         int LayerCount { get; }
+        
+        /// <summary>
+        /// Gets the state of all layers.
+        /// </summary>
+        LayerPreviewState[] GetLayerStates();
+        
+        /// <summary>
+        /// Gets the state of a specific layer.
+        /// </summary>
+        LayerPreviewState GetLayerState(int layerIndex);
         
         #endregion
         
         #region Initialization
         
         /// <summary>
-        /// Creates a multi-layer preview for a state machine.
+        /// Initializes the preview for a multi-layer state machine.
         /// Each layer starts with its default state.
         /// </summary>
-        /// <param name="stateMachine">The root state machine containing layers.</param>
         void Initialize(StateMachineAsset stateMachine);
-        
-        /// <summary>
-        /// Clears the preview.
-        /// </summary>
-        void Clear();
         
         #endregion
         
@@ -116,8 +108,6 @@ namespace DMotion.Editor
         /// <summary>
         /// Sets which state to preview in a specific layer.
         /// </summary>
-        /// <param name="layerIndex">Layer index.</param>
-        /// <param name="state">The state to preview (must belong to the layer's state machine).</param>
         void SetLayerState(int layerIndex, AnimationStateAsset state);
         
         /// <summary>
@@ -132,64 +122,13 @@ namespace DMotion.Editor
         
         #endregion
         
-        #region State Query
-        
-        /// <summary>
-        /// Gets the current state of all layers.
-        /// </summary>
-        LayerPreviewState[] GetLayerStates();
-        
-        /// <summary>
-        /// Gets the state of a specific layer.
-        /// </summary>
-        LayerPreviewState GetLayerState(int layerIndex);
-        
-        #endregion
-        
-        #region Global Controls
+        #region Global Time Control
         
         /// <summary>
         /// Sets the global time for all layers simultaneously.
-        /// Useful for synchronized playback.
+        /// Useful for synchronized playback preview.
         /// </summary>
         void SetGlobalNormalizedTime(float normalizedTime);
-        
-        /// <summary>
-        /// Sets whether playback is running or paused.
-        /// </summary>
-        void SetPlaying(bool playing);
-        
-        /// <summary>
-        /// Steps all layers by the given number of frames.
-        /// </summary>
-        void StepFrames(int frameCount, float fps = 30f);
-        
-        #endregion
-        
-        #region Update & Render
-        
-        /// <summary>
-        /// Updates the preview. Call every frame.
-        /// </summary>
-        /// <param name="deltaTime">Time since last update.</param>
-        /// <returns>True if repaint is needed.</returns>
-        bool Tick(float deltaTime);
-        
-        /// <summary>
-        /// Draws the preview in the given rect.
-        /// </summary>
-        void Draw(UnityEngine.Rect rect);
-        
-        /// <summary>
-        /// Handles camera input.
-        /// </summary>
-        /// <returns>True if input was handled.</returns>
-        bool HandleInput(UnityEngine.Rect rect);
-        
-        /// <summary>
-        /// Resets camera to default view.
-        /// </summary>
-        void ResetCameraView();
         
         #endregion
     }

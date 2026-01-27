@@ -136,9 +136,9 @@ namespace DMotion.Editor
         #endregion
         
         /// <summary>
-        /// Multi-layer preview interface. Returns null - not yet implemented for ECS backend.
+        /// Layer composition preview interface. Returns null - not yet implemented for ECS backend.
         /// </summary>
-        public IMultiLayerPreview MultiLayer => null;
+        public ILayerCompositionPreview LayerComposition => null;
         
         #endregion
         
@@ -644,7 +644,7 @@ namespace DMotion.Editor
             hybridRenderer?.ResetCameraView();
         }
         
-        public PreviewSnapshot GetSnapshot()
+        public StatePreviewSnapshot GetSnapshot()
         {
             var position = timelineHelper?.GetPosition() ?? default;
             var activeRequest = timelineHelper?.GetActiveRequest() ?? ActiveRenderRequest.None;
@@ -654,15 +654,14 @@ namespace DMotion.Editor
                 ? GetBlendPositionForState(transitionFromState)
                 : GetBlendPositionForState(currentState);
             
-            return new PreviewSnapshot
+            return new StatePreviewSnapshot
             {
-                IsInitialized = isInitialized,
-                ErrorMessage = errorMessage,
                 NormalizedTime = position.NormalizedTime,
                 BlendPosition = currentBlendPos,
                 TransitionProgress = activeRequest.Type == RenderRequestType.Transition 
                     ? position.SectionProgress 
-                    : -1f
+                    : -1f,
+                IsPlaying = false
             };
         }
         
