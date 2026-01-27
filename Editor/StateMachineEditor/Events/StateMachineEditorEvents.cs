@@ -171,24 +171,12 @@ namespace DMotion.Editor
         /// Args: (machine, selectedState) - state can be null for deselection
         /// </summary>
         public static event Action<StateMachineAsset, AnimationStateAsset> OnStateSelected;
-        
-        /// <summary>
-        /// Fired when a state node is selected in the graph with layer context.
-        /// Args: (rootMachine, layer, selectedState) - layer is null for non-multi-layer or root level
-        /// </summary>
-        public static event Action<StateMachineAsset, LayerStateAsset, AnimationStateAsset> OnStateSelectedInLayer;
 
         /// <summary>
         /// Fired when a transition edge is selected in the graph.
         /// Args: (machine, fromState, toState)
         /// </summary>
         public static event Action<StateMachineAsset, AnimationStateAsset, AnimationStateAsset> OnTransitionSelected;
-        
-        /// <summary>
-        /// Fired when a transition edge is selected in the graph with layer context.
-        /// Args: (rootMachine, layer, fromState, toState) - layer is null for non-multi-layer or root level
-        /// </summary>
-        public static event Action<StateMachineAsset, LayerStateAsset, AnimationStateAsset, AnimationStateAsset> OnTransitionSelectedInLayer;
 
         /// <summary>
         /// Fired when the Any State node is selected.
@@ -200,12 +188,6 @@ namespace DMotion.Editor
         /// Args: (machine, toState) - toState is null for exit transition
         /// </summary>
         public static event Action<StateMachineAsset, AnimationStateAsset> OnAnyStateTransitionSelected;
-        
-        /// <summary>
-        /// Fired when an Any State transition edge is selected with layer context.
-        /// Args: (rootMachine, layer, toState) - layer is null for non-multi-layer or root level
-        /// </summary>
-        public static event Action<StateMachineAsset, LayerStateAsset, AnimationStateAsset> OnAnyStateTransitionSelectedInLayer;
 
         /// <summary>
         /// Fired when the Exit node is selected.
@@ -216,6 +198,41 @@ namespace DMotion.Editor
         /// Fired when selection is cleared.
         /// </summary>
         public static event Action<StateMachineAsset> OnSelectionCleared;
+
+        #endregion
+
+        #region Layer-Aware Selection Events
+
+        /// <summary>
+        /// Fired when a state is selected within a specific layer context.
+        /// Args: (rootMachine, layer, layerMachine, selectedState)
+        /// Use this for multi-layer preview to track per-layer selections.
+        /// </summary>
+        public static event Action<StateMachineAsset, LayerStateAsset, StateMachineAsset, AnimationStateAsset> OnLayerStateSelected;
+
+        /// <summary>
+        /// Fired when a transition is selected within a specific layer context.
+        /// Args: (rootMachine, layer, layerMachine, fromState, toState)
+        /// </summary>
+        public static event Action<StateMachineAsset, LayerStateAsset, StateMachineAsset, AnimationStateAsset, AnimationStateAsset> OnLayerTransitionSelected;
+
+        /// <summary>
+        /// Fired when Any State is selected within a specific layer context.
+        /// Args: (rootMachine, layer, layerMachine)
+        /// </summary>
+        public static event Action<StateMachineAsset, LayerStateAsset, StateMachineAsset> OnLayerAnyStateSelected;
+
+        /// <summary>
+        /// Fired when an Any State transition is selected within a specific layer context.
+        /// Args: (rootMachine, layer, layerMachine, toState)
+        /// </summary>
+        public static event Action<StateMachineAsset, LayerStateAsset, StateMachineAsset, AnimationStateAsset> OnLayerAnyStateTransitionSelected;
+
+        /// <summary>
+        /// Fired when selection is cleared within a specific layer context.
+        /// Args: (rootMachine, layer, layerMachine)
+        /// </summary>
+        public static event Action<StateMachineAsset, LayerStateAsset, StateMachineAsset> OnLayerSelectionCleared;
 
         #endregion
 
@@ -423,34 +440,11 @@ namespace DMotion.Editor
         {
             OnStateSelected?.Invoke(machine, state);
         }
-        
-        /// <summary>Raises <see cref="OnStateSelected"/> and <see cref="OnStateSelectedInLayer"/>.</summary>
-        public static void RaiseStateSelectedInLayer(StateMachineAsset rootMachine, LayerStateAsset layer, AnimationStateAsset state)
-        {
-            // Raise layer-aware event
-            OnStateSelectedInLayer?.Invoke(rootMachine, layer, state);
-            
-            // Also raise legacy event for backwards compatibility
-            // Use the layer's state machine if available, otherwise root
-            var contextMachine = layer?.NestedStateMachine ?? rootMachine;
-            OnStateSelected?.Invoke(contextMachine, state);
-        }
 
         /// <summary>Raises <see cref="OnTransitionSelected"/>.</summary>
         public static void RaiseTransitionSelected(StateMachineAsset machine, AnimationStateAsset fromState, AnimationStateAsset toState)
         {
             OnTransitionSelected?.Invoke(machine, fromState, toState);
-        }
-        
-        /// <summary>Raises <see cref="OnTransitionSelected"/> and <see cref="OnTransitionSelectedInLayer"/>.</summary>
-        public static void RaiseTransitionSelectedInLayer(StateMachineAsset rootMachine, LayerStateAsset layer, AnimationStateAsset fromState, AnimationStateAsset toState)
-        {
-            // Raise layer-aware event
-            OnTransitionSelectedInLayer?.Invoke(rootMachine, layer, fromState, toState);
-            
-            // Also raise legacy event for backwards compatibility
-            var contextMachine = layer?.NestedStateMachine ?? rootMachine;
-            OnTransitionSelected?.Invoke(contextMachine, fromState, toState);
         }
 
         /// <summary>Raises <see cref="OnAnyStateSelected"/>.</summary>
@@ -464,17 +458,6 @@ namespace DMotion.Editor
         {
             OnAnyStateTransitionSelected?.Invoke(machine, toState);
         }
-        
-        /// <summary>Raises <see cref="OnAnyStateTransitionSelected"/> and <see cref="OnAnyStateTransitionSelectedInLayer"/>.</summary>
-        public static void RaiseAnyStateTransitionSelectedInLayer(StateMachineAsset rootMachine, LayerStateAsset layer, AnimationStateAsset toState)
-        {
-            // Raise layer-aware event
-            OnAnyStateTransitionSelectedInLayer?.Invoke(rootMachine, layer, toState);
-            
-            // Also raise legacy event for backwards compatibility
-            var contextMachine = layer?.NestedStateMachine ?? rootMachine;
-            OnAnyStateTransitionSelected?.Invoke(contextMachine, toState);
-        }
 
         /// <summary>Raises <see cref="OnExitNodeSelected"/>.</summary>
         public static void RaiseExitNodeSelected(StateMachineAsset machine)
@@ -486,6 +469,41 @@ namespace DMotion.Editor
         public static void RaiseSelectionCleared(StateMachineAsset machine)
         {
             OnSelectionCleared?.Invoke(machine);
+        }
+
+        #endregion
+
+        #region Raise Methods - Layer-Aware Selection
+        // Layer-aware selection events do NOT trigger OnStateMachineChanged (selection is transient).
+
+        /// <summary>Raises <see cref="OnLayerStateSelected"/>.</summary>
+        public static void RaiseLayerStateSelected(StateMachineAsset rootMachine, LayerStateAsset layer, StateMachineAsset layerMachine, AnimationStateAsset state)
+        {
+            OnLayerStateSelected?.Invoke(rootMachine, layer, layerMachine, state);
+        }
+
+        /// <summary>Raises <see cref="OnLayerTransitionSelected"/>.</summary>
+        public static void RaiseLayerTransitionSelected(StateMachineAsset rootMachine, LayerStateAsset layer, StateMachineAsset layerMachine, AnimationStateAsset fromState, AnimationStateAsset toState)
+        {
+            OnLayerTransitionSelected?.Invoke(rootMachine, layer, layerMachine, fromState, toState);
+        }
+
+        /// <summary>Raises <see cref="OnLayerAnyStateSelected"/>.</summary>
+        public static void RaiseLayerAnyStateSelected(StateMachineAsset rootMachine, LayerStateAsset layer, StateMachineAsset layerMachine)
+        {
+            OnLayerAnyStateSelected?.Invoke(rootMachine, layer, layerMachine);
+        }
+
+        /// <summary>Raises <see cref="OnLayerAnyStateTransitionSelected"/>.</summary>
+        public static void RaiseLayerAnyStateTransitionSelected(StateMachineAsset rootMachine, LayerStateAsset layer, StateMachineAsset layerMachine, AnimationStateAsset toState)
+        {
+            OnLayerAnyStateTransitionSelected?.Invoke(rootMachine, layer, layerMachine, toState);
+        }
+
+        /// <summary>Raises <see cref="OnLayerSelectionCleared"/>.</summary>
+        public static void RaiseLayerSelectionCleared(StateMachineAsset rootMachine, LayerStateAsset layer, StateMachineAsset layerMachine)
+        {
+            OnLayerSelectionCleared?.Invoke(rootMachine, layer, layerMachine);
         }
 
         #endregion
@@ -586,14 +604,16 @@ namespace DMotion.Editor
             OnLinkRemoved = null;
             OnDependenciesResolved = null;
             OnStateSelected = null;
-            OnStateSelectedInLayer = null;
             OnTransitionSelected = null;
-            OnTransitionSelectedInLayer = null;
             OnAnyStateSelected = null;
             OnAnyStateTransitionSelected = null;
-            OnAnyStateTransitionSelectedInLayer = null;
             OnExitNodeSelected = null;
             OnSelectionCleared = null;
+            OnLayerStateSelected = null;
+            OnLayerTransitionSelected = null;
+            OnLayerAnyStateSelected = null;
+            OnLayerAnyStateTransitionSelected = null;
+            OnLayerSelectionCleared = null;
             OnStateMachineChanged = null;
             OnGraphNeedsRepopulate = null;
             OnSubStateMachineEntered = null;

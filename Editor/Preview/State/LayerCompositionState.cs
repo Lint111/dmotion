@@ -7,262 +7,189 @@ using UnityEngine;
 namespace DMotion.Editor
 {
     /// <summary>
-    /// Tracks the preview configuration for all layers in a multi-layer state machine.
-    /// Updated when user navigates and selects elements in the graph editor.
+    /// Tracks the current state of multi-layer preview composition.
+    /// Maintains per-layer selections and global playback state.
     /// </summary>
     internal class LayerCompositionState
     {
         #region Properties
         
         /// <summary>
-        /// The root multi-layer state machine.
+        /// The root multi-layer state machine being previewed.
         /// </summary>
         public StateMachineAsset RootStateMachine { get; private set; }
         
         /// <summary>
-        /// Per-layer preview slots.
+        /// Per-layer preview configurations.
         /// </summary>
         public LayerPreviewSlot[] Layers { get; private set; }
         
         /// <summary>
-        /// Master playback time (0-1 normalized).
+        /// Master playback time (normalized 0-1).
         /// </summary>
         public float MasterTime { get; set; }
         
         /// <summary>
-        /// Is playback running?
+        /// Is playback running across all layers?
         /// </summary>
         public bool IsPlaying { get; set; }
         
         /// <summary>
-        /// The currently active layer (where the user is navigated to).
-        /// -1 means at root level (no layer selected).
+        /// Whether layers are time-synchronized (true) or independent (false).
         /// </summary>
-        public int ActiveLayerIndex { get; private set; } = -1;
+        public bool SyncLayers { get; set; } = true;
+        
+        #endregion
+        
+        #region Events
         
         /// <summary>
-        /// Event fired when a layer's preview configuration changes.
+        /// Fired when any layer's configuration changes.
+        /// Parameters: layerIndex
         /// </summary>
         public event Action<int> OnLayerChanged;
         
         /// <summary>
-        /// Event fired when the active layer changes.
+        /// Fired when the master time changes.
+        /// Parameters: normalizedTime
         /// </summary>
-        public event Action<int> OnActiveLayerChanged;
+        public event Action<float> OnMasterTimeChanged;
+        
+        /// <summary>
+        /// Fired when playback state changes.
+        /// Parameters: isPlaying
+        /// </summary>
+        public event Action<bool> OnPlaybackStateChanged;
         
         #endregion
         
         #region Initialization
         
         /// <summary>
-        /// Initializes the state for a multi-layer state machine.
+        /// Initializes the composition state for the given multi-layer state machine.
         /// </summary>
         public void Initialize(StateMachineAsset stateMachine)
         {
-            RootStateMachine = stateMachine;
-            MasterTime = 0f;
-            IsPlaying = false;
-            ActiveLayerIndex = -1;
-            
             if (stateMachine == null || !stateMachine.IsMultiLayer)
             {
-                Layers = Array.Empty<LayerPreviewSlot>();
-                return;
+                throw new ArgumentException("State machine must be multi-layer", nameof(stateMachine));
             }
             
-            // Create slots for each layer
-            var layerAssets = new List<LayerStateAsset>(stateMachine.GetLayers());
+            RootStateMachine = stateMachine;
+            
+            // Create layer slots
+            var layerAssets = stateMachine.GetLayers();
             Layers = new LayerPreviewSlot[layerAssets.Count];
             
             for (int i = 0; i < layerAssets.Count; i++)
             {
-                var layer = layerAssets[i];
+                var layerAsset = layerAssets[i];
                 Layers[i] = new LayerPreviewSlot
                 {
                     LayerIndex = i,
-                    LayerAsset = layer,
-                    SelectedState = layer.NestedStateMachine?.DefaultState,
+                    LayerAsset = layerAsset,
+                    Weight = layerAsset.Weight,
+                    IsEnabled = true,
+                    
+                    // Default to the layer's default state
+                    SelectedState = layerAsset.NestedStateMachine?.DefaultState,
                     SelectedTransition = null,
-                    TransitionFrom = null,
-                    TransitionTo = null,
-                    TransitionProgress = 0f,
+                    
                     BlendPosition = float2.zero,
                     ToBlendPosition = float2.zero,
-                    Weight = layer.Weight,
-                    IsEnabled = true
+                    TransitionProgress = 0f
                 };
             }
+            
+            // Reset playback state
+            MasterTime = 0f;
+            IsPlaying = false;
+            SyncLayers = true;
         }
         
         /// <summary>
-        /// Clears all state.
+        /// Clears the composition state.
         /// </summary>
         public void Clear()
         {
             RootStateMachine = null;
-            Layers = Array.Empty<LayerPreviewSlot>();
+            Layers = null;
             MasterTime = 0f;
             IsPlaying = false;
-            ActiveLayerIndex = -1;
         }
         
         #endregion
         
-        #region Layer Access
+        #region Layer Management
         
         /// <summary>
-        /// Gets the preview slot for a layer by index.
+        /// Gets the layer slot for the given layer index.
         /// </summary>
-        public LayerPreviewSlot GetLayer(int index)
+        public LayerPreviewSlot GetLayer(int layerIndex)
         {
-            if (index < 0 || index >= Layers.Length)
+            if (layerIndex < 0 || layerIndex >= Layers?.Length)
                 return null;
-            return Layers[index];
+            return Layers[layerIndex];
         }
         
         /// <summary>
-        /// Gets the preview slot for a layer asset.
+        /// Finds the layer index for the given layer asset.
         /// </summary>
-        public LayerPreviewSlot GetLayer(LayerStateAsset layer)
+        public int FindLayerIndex(LayerStateAsset layerAsset)
         {
-            if (layer == null) return null;
+            if (Layers == null || layerAsset == null) return -1;
             
             for (int i = 0; i < Layers.Length; i++)
             {
-                if (Layers[i].LayerAsset == layer)
-                    return Layers[i];
-            }
-            return null;
-        }
-        
-        /// <summary>
-        /// Finds the layer index for a given layer asset.
-        /// </summary>
-        public int FindLayerIndex(LayerStateAsset layer)
-        {
-            if (layer == null) return -1;
-            
-            for (int i = 0; i < Layers.Length; i++)
-            {
-                if (Layers[i].LayerAsset == layer)
+                if (Layers[i].LayerAsset == layerAsset)
                     return i;
             }
             return -1;
         }
         
-        #endregion
-        
-        #region Selection Handling
-        
         /// <summary>
-        /// Updates a layer's selection to a state.
+        /// Sets the selected state for a layer.
         /// </summary>
         public void SetLayerState(int layerIndex, AnimationStateAsset state)
         {
-            if (layerIndex < 0 || layerIndex >= Layers.Length) return;
+            var layer = GetLayer(layerIndex);
+            if (layer == null) return;
             
-            var slot = Layers[layerIndex];
-            slot.SelectedState = state;
-            slot.SelectedTransition = null;
-            slot.TransitionFrom = null;
-            slot.TransitionTo = null;
-            slot.TransitionProgress = 0f;
-            
-            // Initialize blend position from saved settings
-            slot.BlendPosition = PreviewSettings.GetBlendPosition(state);
+            layer.SelectedState = state;
+            layer.SelectedTransition = null; // Clear transition when selecting state
+            layer.TransitionFrom = null;
+            layer.TransitionTo = null;
+            layer.TransitionProgress = 0f;
             
             OnLayerChanged?.Invoke(layerIndex);
         }
         
         /// <summary>
-        /// Updates a layer's selection to a transition.
+        /// Sets the selected transition for a layer.
         /// </summary>
-        public void SetLayerTransition(int layerIndex, AnimationStateAsset fromState, AnimationStateAsset toState, StateOutTransition transition = null)
+        public void SetLayerTransition(int layerIndex, StateOutTransition transition, AnimationStateAsset fromState, AnimationStateAsset toState)
         {
-            if (layerIndex < 0 || layerIndex >= Layers.Length) return;
+            var layer = GetLayer(layerIndex);
+            if (layer == null) return;
             
-            var slot = Layers[layerIndex];
-            slot.SelectedState = null;
-            slot.SelectedTransition = transition;
-            slot.TransitionFrom = fromState;
-            slot.TransitionTo = toState;
-            slot.TransitionProgress = 0f;
-            
-            // Initialize blend positions from saved settings
-            slot.BlendPosition = PreviewSettings.GetBlendPosition(fromState);
-            slot.ToBlendPosition = PreviewSettings.GetBlendPosition(toState);
+            layer.SelectedState = null; // Clear state when selecting transition
+            layer.SelectedTransition = transition;
+            layer.TransitionFrom = fromState;
+            layer.TransitionTo = toState;
+            layer.TransitionProgress = 0f;
             
             OnLayerChanged?.Invoke(layerIndex);
         }
         
         /// <summary>
-        /// Sets the active layer (where the user is currently navigated).
-        /// </summary>
-        public void SetActiveLayer(int layerIndex)
-        {
-            if (layerIndex == ActiveLayerIndex) return;
-            
-            ActiveLayerIndex = layerIndex;
-            OnActiveLayerChanged?.Invoke(layerIndex);
-        }
-        
-        /// <summary>
-        /// Sets the active layer by layer asset.
-        /// </summary>
-        public void SetActiveLayer(LayerStateAsset layer)
-        {
-            SetActiveLayer(FindLayerIndex(layer));
-        }
-        
-        #endregion
-        
-        #region Blend Control
-        
-        /// <summary>
-        /// Sets the blend position for a layer's current state/transition.
-        /// </summary>
-        public void SetLayerBlendPosition(int layerIndex, float2 position)
-        {
-            if (layerIndex < 0 || layerIndex >= Layers.Length) return;
-            
-            Layers[layerIndex].BlendPosition = position;
-            OnLayerChanged?.Invoke(layerIndex);
-        }
-        
-        /// <summary>
-        /// Sets the "to" blend position for a layer's transition.
-        /// </summary>
-        public void SetLayerToBlendPosition(int layerIndex, float2 position)
-        {
-            if (layerIndex < 0 || layerIndex >= Layers.Length) return;
-            
-            Layers[layerIndex].ToBlendPosition = position;
-            OnLayerChanged?.Invoke(layerIndex);
-        }
-        
-        /// <summary>
-        /// Sets the transition progress for a layer.
-        /// </summary>
-        public void SetLayerTransitionProgress(int layerIndex, float progress)
-        {
-            if (layerIndex < 0 || layerIndex >= Layers.Length) return;
-            
-            Layers[layerIndex].TransitionProgress = Mathf.Clamp01(progress);
-            OnLayerChanged?.Invoke(layerIndex);
-        }
-        
-        #endregion
-        
-        #region Weight Control
-        
-        /// <summary>
-        /// Sets the weight for a layer.
+        /// Sets the layer weight.
         /// </summary>
         public void SetLayerWeight(int layerIndex, float weight)
         {
-            if (layerIndex < 0 || layerIndex >= Layers.Length) return;
+            var layer = GetLayer(layerIndex);
+            if (layer == null) return;
             
-            Layers[layerIndex].Weight = Mathf.Clamp01(weight);
+            layer.Weight = Mathf.Clamp01(weight);
             OnLayerChanged?.Invoke(layerIndex);
         }
         
@@ -271,79 +198,218 @@ namespace DMotion.Editor
         /// </summary>
         public void SetLayerEnabled(int layerIndex, bool enabled)
         {
-            if (layerIndex < 0 || layerIndex >= Layers.Length) return;
+            var layer = GetLayer(layerIndex);
+            if (layer == null) return;
             
-            Layers[layerIndex].IsEnabled = enabled;
+            layer.IsEnabled = enabled;
             OnLayerChanged?.Invoke(layerIndex);
+        }
+        
+        /// <summary>
+        /// Sets the blend position for a layer's current state.
+        /// </summary>
+        public void SetLayerBlendPosition(int layerIndex, float2 position)
+        {
+            var layer = GetLayer(layerIndex);
+            if (layer == null) return;
+            
+            layer.BlendPosition = position;
+            OnLayerChanged?.Invoke(layerIndex);
+        }
+        
+        /// <summary>
+        /// Sets the transition progress for a layer.
+        /// </summary>
+        public void SetLayerTransitionProgress(int layerIndex, float progress)
+        {
+            var layer = GetLayer(layerIndex);
+            if (layer == null) return;
+            
+            layer.TransitionProgress = Mathf.Clamp01(progress);
+            OnLayerChanged?.Invoke(layerIndex);
+        }
+        
+        #endregion
+        
+        #region Playback Control
+        
+        /// <summary>
+        /// Sets the master time and optionally syncs all layers.
+        /// </summary>
+        public void SetMasterTime(float normalizedTime)
+        {
+            MasterTime = Mathf.Clamp01(normalizedTime);
+            OnMasterTimeChanged?.Invoke(MasterTime);
+        }
+        
+        /// <summary>
+        /// Sets the playback state.
+        /// </summary>
+        public void SetPlaying(bool playing)
+        {
+            if (IsPlaying != playing)
+            {
+                IsPlaying = playing;
+                OnPlaybackStateChanged?.Invoke(IsPlaying);
+            }
+        }
+        
+        /// <summary>
+        /// Toggles playback state.
+        /// </summary>
+        public void TogglePlayback()
+        {
+            SetPlaying(!IsPlaying);
+        }
+        
+        #endregion
+        
+        #region Selection Tracking
+        
+        /// <summary>
+        /// Updates layer selection based on editor events.
+        /// </summary>
+        public void HandleLayerStateSelected(LayerStateAsset layer, StateMachineAsset layerMachine, AnimationStateAsset state)
+        {
+            int layerIndex = FindLayerIndex(layer);
+            if (layerIndex >= 0)
+            {
+                SetLayerState(layerIndex, state);
+            }
+        }
+        
+        /// <summary>
+        /// Updates layer selection based on editor events.
+        /// </summary>
+        public void HandleLayerTransitionSelected(LayerStateAsset layer, StateMachineAsset layerMachine, AnimationStateAsset fromState, AnimationStateAsset toState)
+        {
+            int layerIndex = FindLayerIndex(layer);
+            if (layerIndex >= 0)
+            {
+                // Find the transition object
+                StateOutTransition transition = null;
+                if (fromState != null)
+                {
+                    foreach (var t in fromState.OutTransitions)
+                    {
+                        if (t.ToState == toState)
+                        {
+                            transition = t;
+                            break;
+                        }
+                    }
+                }
+                
+                SetLayerTransition(layerIndex, transition, fromState, toState);
+            }
+        }
+        
+        /// <summary>
+        /// Clears selection for a specific layer.
+        /// </summary>
+        public void HandleLayerSelectionCleared(LayerStateAsset layer)
+        {
+            int layerIndex = FindLayerIndex(layer);
+            if (layerIndex >= 0)
+            {
+                // Reset to default state
+                var defaultState = layer.NestedStateMachine?.DefaultState;
+                SetLayerState(layerIndex, defaultState);
+            }
+        }
+        
+        #endregion
+        
+        #region Utility
+        
+        /// <summary>
+        /// Gets a summary of the current composition state for debugging.
+        /// </summary>
+        public string GetDebugSummary()
+        {
+            if (RootStateMachine == null) return "No state machine";
+            
+            var summary = $"Root: {RootStateMachine.name}\n";
+            summary += $"Playing: {IsPlaying}, Time: {MasterTime:F2}, Sync: {SyncLayers}\n";
+            
+            if (Layers != null)
+            {
+                for (int i = 0; i < Layers.Length; i++)
+                {
+                    var layer = Layers[i];
+                    var mode = layer.SelectedTransition != null ? "Transition" : "State";
+                    var target = layer.SelectedTransition != null 
+                        ? $"{layer.TransitionFrom?.name} → {layer.TransitionTo?.name}"
+                        : layer.SelectedState?.name ?? "(None)";
+                    
+                    summary += $"Layer {i}: {mode} = {target}, Weight = {layer.Weight:F2}, Enabled = {layer.IsEnabled}\n";
+                }
+            }
+            
+            return summary;
         }
         
         #endregion
     }
     
     /// <summary>
-    /// Preview configuration for a single layer.
+    /// Configuration for a single layer in the preview composition.
     /// </summary>
     internal class LayerPreviewSlot
     {
         /// <summary>Layer index in the state machine.</summary>
         public int LayerIndex;
         
-        /// <summary>The layer asset.</summary>
+        /// <summary>The layer asset being previewed.</summary>
         public LayerStateAsset LayerAsset;
         
-        /// <summary>Selected state (null if transition is selected).</summary>
+        // Selection (mutually exclusive)
+        /// <summary>Currently selected state (null if transition is selected).</summary>
         public AnimationStateAsset SelectedState;
         
-        /// <summary>Selected transition (null if state is selected).</summary>
+        /// <summary>Currently selected transition (null if state is selected).</summary>
         public StateOutTransition SelectedTransition;
         
-        /// <summary>Transition source state.</summary>
+        // Transition data (only valid when SelectedTransition != null)
+        /// <summary>From state for transition preview.</summary>
         public AnimationStateAsset TransitionFrom;
         
-        /// <summary>Transition target state.</summary>
+        /// <summary>To state for transition preview.</summary>
         public AnimationStateAsset TransitionTo;
         
-        /// <summary>Current transition progress (0-1).</summary>
+        /// <summary>Transition progress (0-1).</summary>
         public float TransitionProgress;
         
+        // Blend positions (works for both state and transition)
         /// <summary>Blend position for state, or "from" state in transition.</summary>
         public float2 BlendPosition;
         
         /// <summary>Blend position for "to" state in transition.</summary>
         public float2 ToBlendPosition;
         
+        // Layer controls
         /// <summary>Layer weight (0-1).</summary>
         public float Weight;
         
-        /// <summary>Whether the layer is enabled for preview.</summary>
+        /// <summary>Whether this layer is enabled.</summary>
         public bool IsEnabled;
         
         /// <summary>
-        /// Returns true if a transition is being previewed.
+        /// Whether this layer is currently in transition mode.
         /// </summary>
-        public bool IsTransitionPreview => SelectedTransition != null || (TransitionFrom != null && TransitionTo != null);
+        public bool IsTransitionMode => SelectedTransition != null;
         
         /// <summary>
-        /// Returns true if a state is being previewed.
+        /// Whether this layer is currently in state mode.
         /// </summary>
-        public bool IsStatePreview => SelectedState != null && !IsTransitionPreview;
+        public bool IsStateMode => SelectedState != null;
         
         /// <summary>
-        /// Gets the display name for the current selection.
+        /// Gets the effective target for preview (state or transition target).
         /// </summary>
-        public string SelectionDisplayName
+        public AnimationStateAsset GetEffectiveTarget()
         {
-            get
-            {
-                if (IsTransitionPreview)
-                {
-                    var fromName = TransitionFrom?.name ?? "Any";
-                    var toName = TransitionTo?.name ?? "?";
-                    return $"{fromName} → {toName}";
-                }
-                
-                return SelectedState?.name ?? "(None)";
-            }
+            return IsTransitionMode ? TransitionTo : SelectedState;
         }
     }
 }
