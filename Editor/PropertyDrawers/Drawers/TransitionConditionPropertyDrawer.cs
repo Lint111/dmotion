@@ -77,7 +77,7 @@ namespace DMotion.Editor
             var rects = position.HorizontalLayout2(0.7f, 0.3f);
             parameterPopupSelector.OnGUI(rects[0], parameterProperty, GUIContent.none);
 
-            var enumValue = (BoolConditionComparison)EditorGUI.EnumPopup(rects[1],
+            var enumValue = EnumPopupCache.BoolConditionPopup(rects[1],
                 (BoolConditionComparison)comparisonModeProperty.intValue);
             comparisonModeProperty.intValue = (int)enumValue;
             comparisonValueProperty.floatValue = enumValue == BoolConditionComparison.True ? 1 : 0;
@@ -90,7 +90,7 @@ namespace DMotion.Editor
             var rects = position.HorizontalLayout3(0.4f, 0.4f, 0.2f);
             parameterPopupSelector.OnGUI(rects[0], parameterProperty, GUIContent.none);
 
-            var enumValue = (IntConditionComparison)EditorGUI.EnumPopup(rects[1],
+            var enumValue = EnumPopupCache.IntConditionPopup(rects[1],
                 (IntConditionComparison)comparisonModeProperty.intValue);
             comparisonModeProperty.intValue = (int)enumValue;
 
@@ -107,7 +107,7 @@ namespace DMotion.Editor
             var rects = position.HorizontalLayout3(0.3f, 0.2f, 0.3f);
             parameterPopupSelector.OnGUI(rects[0], parameterProperty, GUIContent.none);
 
-            var comparisonEnumValue = (IntConditionComparison)EditorGUI.EnumPopup(rects[1],
+            var comparisonEnumValue = EnumPopupCache.IntConditionPopup(rects[1],
                 (IntConditionComparison)comparisonModeProperty.intValue);
             comparisonModeProperty.intValue = (int)comparisonEnumValue;
 

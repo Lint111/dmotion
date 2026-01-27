@@ -191,7 +191,7 @@ namespace DMotion.Editor
             {
                 // Blend mode
                 EditorGUI.BeginChangeCheck();
-                var newBlendMode = (LayerBlendMode)EditorGUILayout.EnumPopup("Blend Mode", layer.BlendMode);
+                var newBlendMode = EnumPopupCache.LayerBlendModePopup("Blend Mode", layer.BlendMode);
                 if (EditorGUI.EndChangeCheck())
                 {
                     Undo.RecordObject(layer, "Change Layer Blend Mode");
