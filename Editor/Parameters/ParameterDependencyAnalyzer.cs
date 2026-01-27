@@ -318,9 +318,12 @@ namespace DMotion.Editor
 
             var orphaned = new List<AnimationParameterAsset>();
             var parameters = machine.Parameters;
+            if (parameters == null) return orphaned;
+            
             for (int i = 0; i < parameters.Count; i++)
             {
                 var p = parameters[i];
+                if (p == null) continue; // Skip null/destroyed parameters
                 if (!usedParameters.Contains(p))
                 {
                     orphaned.Add(p);
@@ -337,6 +340,8 @@ namespace DMotion.Editor
 
             foreach (var state in machine.States)
             {
+                if (state == null) continue;
+                
                 // Speed parameter
                 if (state.SpeedParameter != null)
                     usedParameters.Add(state.SpeedParameter);
@@ -344,15 +349,25 @@ namespace DMotion.Editor
                 // Blend parameter
                 if (state is LinearBlendStateAsset blendState && blendState.BlendParameter != null)
                     usedParameters.Add(blendState.BlendParameter);
+                    
+                // 2D Blend parameters
+                if (state is Directional2DBlendStateAsset blend2D)
+                {
+                    if (blend2D.BlendParameterX != null)
+                        usedParameters.Add(blend2D.BlendParameterX);
+                    if (blend2D.BlendParameterY != null)
+                        usedParameters.Add(blend2D.BlendParameterY);
+                }
 
                 // Transition conditions
-                foreach (var transition in state.OutTransitions)
+                if (state.OutTransitions != null)
                 {
-                    if (transition.Conditions != null)
+                    foreach (var transition in state.OutTransitions)
                     {
+                        if (transition?.Conditions == null) continue;
                         foreach (var condition in transition.Conditions)
                         {
-                            if (condition.Parameter != null)
+                            if (condition?.Parameter != null)
                                 usedParameters.Add(condition.Parameter);
                         }
                     }
@@ -372,15 +387,26 @@ namespace DMotion.Editor
             }
 
             // Any State transitions
-            foreach (var anyTransition in machine.AnyStateTransitions)
+            if (machine.AnyStateTransitions != null)
             {
-                if (anyTransition.Conditions != null)
+                foreach (var anyTransition in machine.AnyStateTransitions)
                 {
+                    if (anyTransition?.Conditions == null) continue;
                     foreach (var condition in anyTransition.Conditions)
                     {
-                        if (condition.Parameter != null)
+                        if (condition?.Parameter != null)
                             usedParameters.Add(condition.Parameter);
                     }
+                }
+            }
+            
+            // Any State exit transition
+            if (machine.AnyStateExitTransition?.Conditions != null)
+            {
+                foreach (var condition in machine.AnyStateExitTransition.Conditions)
+                {
+                    if (condition?.Parameter != null)
+                        usedParameters.Add(condition.Parameter);
                 }
             }
         }

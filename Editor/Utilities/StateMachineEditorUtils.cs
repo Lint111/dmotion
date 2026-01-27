@@ -125,7 +125,7 @@ namespace DMotion.Editor
         }
 
         public static void DeleteParameter(this StateMachineAsset stateMachineAsset,
-            AnimationParameterAsset parameterAsset)
+            AnimationParameterAsset parameterAsset, bool recursive = true)
         {
             // Record undo for the state machine before modifying
             Undo.RecordObject(stateMachineAsset, "Delete Parameter");
@@ -136,7 +136,7 @@ namespace DMotion.Editor
                 Undo.RecordObject(state, "Delete Parameter");
             }
             
-            //Remove all transitions that reference this parameter
+            // Remove all transitions that reference this parameter
             foreach (var state in stateMachineAsset.States)
             {
                 for (int i = state.OutTransitions.Count - 1; i >= 0; i--)
@@ -150,6 +150,52 @@ namespace DMotion.Editor
                     }
                 }
             }
+            
+            // Clean up AnyState transitions
+            foreach (var anyTransition in stateMachineAsset.AnyStateTransitions)
+            {
+                if (anyTransition.Conditions == null) continue;
+                for (int j = anyTransition.Conditions.Count - 1; j >= 0; j--)
+                {
+                    if (anyTransition.Conditions[j].Parameter == parameterAsset)
+                        anyTransition.Conditions.RemoveAt(j);
+                }
+            }
+            
+            // Clean up AnyState exit transition
+            if (stateMachineAsset.AnyStateExitTransition?.Conditions != null)
+            {
+                var exitConditions = stateMachineAsset.AnyStateExitTransition.Conditions;
+                for (int j = exitConditions.Count - 1; j >= 0; j--)
+                {
+                    if (exitConditions[j].Parameter == parameterAsset)
+                        exitConditions.RemoveAt(j);
+                }
+            }
+            
+            // Clear state references to this parameter (speed, blend params)
+            foreach (var state in stateMachineAsset.States)
+            {
+                if (state.SpeedParameter == parameterAsset)
+                    state.SpeedParameter = null;
+                    
+                if (state is LinearBlendStateAsset blendState && blendState.BlendParameter == parameterAsset)
+                    blendState.BlendParameter = null;
+                    
+                if (state is Directional2DBlendStateAsset blend2D)
+                {
+                    if (blend2D.BlendParameterX == parameterAsset)
+                        blend2D.BlendParameterX = null;
+                    if (blend2D.BlendParameterY == parameterAsset)
+                        blend2D.BlendParameterY = null;
+                }
+            }
+            
+            // Recursive deletion in nested state machines
+            if (recursive)
+            {
+                DeleteParameterRecursive(stateMachineAsset, parameterAsset);
+            }
 
             stateMachineAsset.Parameters.Remove(parameterAsset);
             
@@ -157,6 +203,46 @@ namespace DMotion.Editor
             Undo.DestroyObjectImmediate(parameterAsset);
             
             AssetDatabase.SaveAssets();
+        }
+        
+        /// <summary>
+        /// Recursively deletes matching parameters (by name and type) from nested state machines.
+        /// </summary>
+        private static void DeleteParameterRecursive(StateMachineAsset machine, AnimationParameterAsset parameterAsset)
+        {
+            foreach (var state in machine.States)
+            {
+                StateMachineAsset nestedMachine = state switch
+                {
+                    SubStateMachineStateAsset sub => sub.NestedStateMachine,
+                    LayerStateAsset layer => layer.NestedStateMachine,
+                    _ => null
+                };
+                
+                if (nestedMachine == null) continue;
+                
+                // Find matching parameter in nested machine (same name and type)
+                AnimationParameterAsset matchingParam = null;
+                foreach (var p in nestedMachine.Parameters)
+                {
+                    if (p != null && p.name == parameterAsset.name && p.GetType() == parameterAsset.GetType())
+                    {
+                        matchingParam = p;
+                        break;
+                    }
+                }
+                
+                if (matchingParam != null)
+                {
+                    // Delete from nested machine (recursive: true to go deeper)
+                    nestedMachine.DeleteParameter(matchingParam, recursive: true);
+                }
+                else
+                {
+                    // Still recurse deeper even if no match at this level
+                    DeleteParameterRecursive(nestedMachine, parameterAsset);
+                }
+            }
         }
 
         public static bool IsDefaultState(this StateMachineAsset stateMachineAsset, AnimationStateAsset state)

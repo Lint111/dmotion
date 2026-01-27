@@ -71,7 +71,15 @@ namespace DMotion.Editor
 
         private void RefreshAnalysis()
         {
-            _orphanedParameters = ParameterDependencyAnalyzer.FindOrphanedParameters(model.StateMachine);
+            try
+            {
+                _orphanedParameters = ParameterDependencyAnalyzer.FindOrphanedParameters(model.StateMachine);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[DMotion] Error analyzing orphaned parameters: {e.Message}");
+                _orphanedParameters = new List<AnimationParameterAsset>();
+            }
         }
 
         private void ForceRefresh()
@@ -261,18 +269,25 @@ namespace DMotion.Editor
 
         private void DeleteParameter(int index)
         {
+            if (index < 0 || index >= model.StateMachine.Parameters.Count)
+                return;
+                
             var param = model.StateMachine.Parameters[index];
+            if (param == null) return;
             
             Undo.SetCurrentGroupName("Delete Parameter");
             var undoGroup = Undo.GetCurrentGroup();
             
             Undo.RecordObject(model.StateMachine, "Delete Parameter");
             RemoveLinksForParameter(param);
-            model.StateMachine.DeleteParameter(param);
+            model.StateMachine.DeleteParameter(param); // Now recursive by default
             
             Undo.CollapseUndoOperations(undoGroup);
             
             StateMachineEditorEvents.RaiseParameterRemoved(model.StateMachine, param);
+            
+            // Force full refresh to update orphan analysis and UI
+            ForceRefresh();
             serializedObject.Update();
         }
         

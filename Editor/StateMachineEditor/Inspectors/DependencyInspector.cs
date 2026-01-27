@@ -71,7 +71,15 @@ namespace DMotion.Editor
 
         private void RefreshAnalysis()
         {
-            _containerDependencies = AnalyzeAllNestedContainers();
+            try
+            {
+                _containerDependencies = AnalyzeAllNestedContainers();
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[DMotion] Error analyzing dependencies: {e.Message}");
+                _containerDependencies = new List<NestedContainerDependencyInfo>();
+            }
         }
 
         private void ForceRefresh()

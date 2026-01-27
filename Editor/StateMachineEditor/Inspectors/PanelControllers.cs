@@ -174,6 +174,7 @@ namespace DMotion.Editor
             StateMachineEditorEvents.OnLayerAdded += OnLayerAdded;
             StateMachineEditorEvents.OnLayerRemoved += OnLayerRemoved;
             StateMachineEditorEvents.OnConvertedToMultiLayer += OnConvertedToMultiLayer;
+            StateMachineEditorEvents.OnParameterRemoved += OnParameterRemoved;
         }
 
         public void Unsubscribe()
@@ -186,6 +187,13 @@ namespace DMotion.Editor
             StateMachineEditorEvents.OnLayerAdded -= OnLayerAdded;
             StateMachineEditorEvents.OnLayerRemoved -= OnLayerRemoved;
             StateMachineEditorEvents.OnConvertedToMultiLayer -= OnConvertedToMultiLayer;
+            StateMachineEditorEvents.OnParameterRemoved -= OnParameterRemoved;
+        }
+        
+        private void OnParameterRemoved(StateMachineAsset machine, AnimationParameterAsset param)
+        {
+            if (machine != currentMachine) return;
+            RefreshPanel();
         }
         
         private void OnLayerAdded(StateMachineAsset machine, LayerStateAsset layer)
