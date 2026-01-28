@@ -115,7 +115,7 @@ MonoBehaviour:
       m_PostInfinity: 2
       m_RotationOrder: 4
   StateEditorData:
-    GraphPosition: {x: 333.00003, y: 202.00003}
+    GraphPosition: {x: 330, y: 202}
     Guid: 039c0298c5d43d943b7bc7b34f1395c0
   BlendClips:
   - Clip: {fileID: 11400000, guid: 2d8b5b7a11d7f3c418b9a6677c0cc292, type: 2}

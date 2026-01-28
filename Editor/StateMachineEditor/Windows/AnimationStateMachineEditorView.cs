@@ -164,8 +164,23 @@ namespace DMotion.Editor
         {
             if (Application.isPlaying) return;
             
-            // Space to open state creation search window
-            if (evt.keyCode == KeyCode.Space && model.StateMachineAsset != null)
+            // Ctrl+Shift+Space or Ctrl+Shift+N to toggle quick navigation
+            if (evt.ctrlKey && evt.shiftKey && (evt.keyCode == KeyCode.Space || evt.keyCode == KeyCode.N))
+            {
+                ToggleQuickNavigation();
+                evt.StopImmediatePropagation();
+                return;
+            }
+            
+            // Ctrl+Number to jump to layer (1-9)
+            if (evt.ctrlKey && !evt.shiftKey && !evt.altKey && TryHandleLayerShortcut(evt.keyCode))
+            {
+                evt.StopImmediatePropagation();
+                return;
+            }
+            
+            // Space to open state creation search window (only without modifiers)
+            if (evt.keyCode == KeyCode.Space && !evt.ctrlKey && !evt.shiftKey && model.StateMachineAsset != null)
             {
                 OpenStateSearchWindow();
                 evt.StopImmediatePropagation();
@@ -173,21 +188,21 @@ namespace DMotion.Editor
             }
             
             // Shift+Arrow keys to pan
-            if (evt.shiftKey && HandlePanKeys(evt.keyCode))
+            if (evt.shiftKey && !evt.ctrlKey && HandlePanKeys(evt.keyCode))
             {
                 evt.StopImmediatePropagation();
                 return;
             }
             
             // Shift+=/- to zoom
-            if (evt.shiftKey && HandleZoomKeys(evt.keyCode))
+            if (evt.shiftKey && !evt.ctrlKey && HandleZoomKeys(evt.keyCode))
             {
                 evt.StopImmediatePropagation();
                 return;
             }
             
             // Shift+F to focus selection or reset view
-            if (evt.shiftKey && evt.keyCode == KeyCode.F)
+            if (evt.shiftKey && !evt.ctrlKey && evt.keyCode == KeyCode.F)
             {
                 FocusSelectionOrReset();
                 evt.StopImmediatePropagation();
@@ -204,6 +219,65 @@ namespace DMotion.Editor
                 evt.StopImmediatePropagation();
             }
         }
+        
+        /// <summary>
+        /// Tries to handle Ctrl+Number shortcut to jump to a layer.
+        /// </summary>
+        private bool TryHandleLayerShortcut(KeyCode keyCode)
+        {
+            // Map KeyCode to layer index (Ctrl+1 = Layer 0, Ctrl+2 = Layer 1, etc.)
+            int layerIndex = keyCode switch
+            {
+                KeyCode.Alpha1 or KeyCode.Keypad1 => 0,
+                KeyCode.Alpha2 or KeyCode.Keypad2 => 1,
+                KeyCode.Alpha3 or KeyCode.Keypad3 => 2,
+                KeyCode.Alpha4 or KeyCode.Keypad4 => 3,
+                KeyCode.Alpha5 or KeyCode.Keypad5 => 4,
+                KeyCode.Alpha6 or KeyCode.Keypad6 => 5,
+                KeyCode.Alpha7 or KeyCode.Keypad7 => 6,
+                KeyCode.Alpha8 or KeyCode.Keypad8 => 7,
+                KeyCode.Alpha9 or KeyCode.Keypad9 => 8,
+                KeyCode.Alpha0 or KeyCode.Keypad0 => 9, // Ctrl+0 = Layer 9 (10th layer)
+                _ => -1
+            };
+            
+            if (layerIndex < 0) return false;
+            
+            // Get root state machine
+            var rootMachine = EditorState.Instance.RootStateMachine;
+            if (rootMachine == null || !rootMachine.IsMultiLayer) return false;
+            
+            // Find layer at index
+            int currentIndex = 0;
+            foreach (var layer in rootMachine.GetLayers())
+            {
+                if (currentIndex == layerIndex)
+                {
+                    // Navigate to this layer
+                    EditorState.Instance.EnterLayer(layer, layerIndex);
+                    OnLayerNavigationRequested?.Invoke(layer, layerIndex);
+                    return true;
+                }
+                currentIndex++;
+            }
+            
+            return false; // Layer index out of range
+        }
+        
+        /// <summary>
+        /// Toggles the quick navigation overlay via the parent window.
+        /// </summary>
+        private void ToggleQuickNavigation()
+        {
+            // Find parent window and toggle its overlay
+            var window = EditorWindow.GetWindow<AnimationStateMachineEditorWindow>();
+            window?.ToggleQuickNavigationOverlay();
+        }
+        
+        /// <summary>
+        /// Event fired when layer navigation is requested via keyboard shortcut.
+        /// </summary>
+        internal Action<LayerStateAsset, int> OnLayerNavigationRequested;
         
         // GraphView.viewTransform.position/scale are marked obsolete but there's no alternative API
         // for reading the current view transform in GraphView. Suppress these warnings.
@@ -289,8 +363,62 @@ namespace DMotion.Editor
             }
         }
         
+        /// <summary>
+        /// Centers the view on a specific state, placing it in the middle of the viewport.
+        /// </summary>
+        internal void CenterOnState(AnimationStateAsset state)
+        {
+            if (state == null) return;
+
+            var stateView = GetViewForState(state);
+            if (stateView == null) return;
+
+            CenterOnNode(stateView);
+        }
+
+        /// <summary>
+        /// Centers the view on a specific layer, placing it in the middle of the viewport.
+        /// </summary>
+        internal void CenterOnLayer(LayerStateAsset layer)
+        {
+            if (layer == null) return;
+
+            if (!layerToView.TryGetValue(layer, out var layerView)) return;
+
+            CenterOnNode(layerView);
+        }
+
+        /// <summary>
+        /// Centers the view on a GraphElement node.
+        /// </summary>
+        private void CenterOnNode(Node node)
+        {
+            if (node == null) return;
+
+            // Get the node's position in content space
+            var nodeRect = node.GetPosition();
+            var nodeCenter = nodeRect.center;
+
+            // Calculate the view center in content space
+            var viewportCenter = new Vector2(layout.width / 2f, layout.height / 2f);
+
+            // Current scale (use x since we scale uniformly)
+            var currentScale = viewTransform.scale.x;
+
+            // Calculate the position offset needed to center the node
+            // Position moves the content, so we need to offset by the difference
+            // between where we want the node (viewport center) and where it is (node center)
+            var newPosition = new Vector3(
+                viewportCenter.x - (nodeCenter.x * currentScale),
+                viewportCenter.y - (nodeCenter.y * currentScale),
+                0f
+            );
+
+            UpdateViewTransform(newPosition, viewTransform.scale);
+        }
+
 #pragma warning restore CS0618
-        
+
         private void HandleRenameShortcut()
         {
             foreach (var item in selection)

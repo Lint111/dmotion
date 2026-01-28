@@ -20,10 +20,65 @@ namespace DMotion
         /// Offset used to encode exit transition indices.
         /// Exit transitions are encoded as (ExitTransitionIndexOffset + index) to distinguish
         /// them from regular transitions (0 to 999) and any-state transitions (negative).
+        ///
+        /// NOTE: This encoding scheme is deprecated and will be replaced with TransitionRef in a future update.
+        /// For now, use the helper methods EncodeTransition/DecodeTransition to make the encoding explicit.
         /// </summary>
         private const short ExitTransitionIndexOffset = 1000;
 
         internal ProfilerMarker Marker;
+
+        #region Transition Index Encoding Helpers
+
+        /// <summary>
+        /// Encodes a state transition index.
+        /// Range: 0 to 999
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static short EncodeStateTransition(short stateTransitionIndex) => stateTransitionIndex;
+
+        /// <summary>
+        /// Encodes an Any State transition index.
+        /// Returns negative values: -1 for index 0, -2 for index 1, etc.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static short EncodeAnyStateTransition(short anyStateTransitionIndex) => (short)(-(anyStateTransitionIndex + 1));
+
+        /// <summary>
+        /// Encodes an Exit transition index.
+        /// Range: 1000+
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static short EncodeExitTransition(short exitTransitionIndex) => (short)(ExitTransitionIndexOffset + exitTransitionIndex);
+
+        /// <summary>
+        /// Decodes an encoded transition index and returns its source type.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static TransitionSource DecodeTransitionSource(short encodedIndex)
+        {
+            if (encodedIndex < 0)
+                return TransitionSource.AnyState;
+            if (encodedIndex >= ExitTransitionIndexOffset)
+                return TransitionSource.Exit;
+            return TransitionSource.State;
+        }
+
+        /// <summary>
+        /// Decodes an Any State transition index.
+        /// Input: -1, -2, -3... Output: 0, 1, 2...
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static short DecodeAnyStateTransition(short encodedIndex) => (short)(-(encodedIndex + 1));
+
+        /// <summary>
+        /// Decodes an Exit transition index.
+        /// Input: 1000, 1001, 1002... Output: 0, 1, 2...
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static short DecodeExitTransition(short encodedIndex) => (short)(encodedIndex - ExitTransitionIndexOffset);
+
+        #endregion
 
         /// <summary>
         /// Execute processes state machine updates. While the parameter list appears long,
@@ -118,10 +173,7 @@ namespace DMotion
 
             if (shouldStartTransition)
             {
-                // Get transition info based on source:
-                // - Negative index (-1 to -N): Any State transition (index = -(transitionIndex + 1))
-                // - Zero to 999: Regular state transition
-                // - 1000+: Exit transition (encoded as 1000 + exitTransitionIndex)
+                // Get transition info based on source type (decoded from encoded index)
                 short toStateIndex;
                 float transitionDuration;
                 float transitionOffset;
@@ -129,24 +181,26 @@ namespace DMotion
                 short curveSourceTransitionIndex;
                 TransitionSource curveSource;
 
-                if (transitionIndex < 0)
+                var transitionSource = DecodeTransitionSource(transitionIndex);
+
+                if (transitionSource == TransitionSource.AnyState)
                 {
-                    // Any State transition (negative index)
-                    var anyTransitionIndex = (short)(-(transitionIndex + 1));
+                    // Any State transition
+                    var anyTransitionIndex = DecodeAnyStateTransition(transitionIndex);
                     ref var anyTransition = ref stateMachineBlob.AnyStateTransitions[anyTransitionIndex];
                     toStateIndex = anyTransition.ToStateIndex;
                     transitionDuration = anyTransition.TransitionDuration;
                     transitionOffset = anyTransition.Offset;
-                    
+
                     // Curve lookup: Any State transitions use AnyStateTransitions array
                     curveSourceStateIndex = -1;  // Not applicable for Any State
                     curveSourceTransitionIndex = anyTransitionIndex;
                     curveSource = TransitionSource.AnyState;
                 }
-                else if (transitionIndex >= ExitTransitionIndexOffset)
+                else if (transitionSource == TransitionSource.Exit)
                 {
-                    // Exit transition (encoded as 1000 + index)
-                    var exitTransitionIndex = (short)(transitionIndex - ExitTransitionIndexOffset);
+                    // Exit transition
+                    var exitTransitionIndex = DecodeExitTransition(transitionIndex);
                     var exitGroupIndex = stateMachine.CurrentStateBlob.ExitTransitionGroupIndex;
                     ref var exitGroup = ref stateMachineBlob.ExitTransitionGroups[exitGroupIndex];
                     ref var exitTransition = ref exitGroup.ExitTransitions[exitTransitionIndex];
@@ -327,9 +381,8 @@ namespace DMotion
             {
                 if (EvaluateAnyStateTransition(animation, ref stateMachine.AnyStateTransitions[i], parameters, currentStateIndex))
                 {
-                    // Return negative index to indicate Any State transition
-                    // -1 for index 0, -2 for index 1, etc.
-                    transitionIndex = (short)(-(i + 1));
+                    // Encode as Any State transition
+                    transitionIndex = EncodeAnyStateTransition(i);
                     return true;
                 }
             }
@@ -389,8 +442,7 @@ namespace DMotion
 
         /// <summary>
         /// Evaluates exit transitions for states that are designated as exit states.
-        /// Returns encoded transition index (ExitTransitionIndexOffset + index) to distinguish
-        /// from regular and any-state transitions.
+        /// Returns encoded transition index to distinguish from regular and any-state transitions.
         /// </summary>
         [BurstCompile]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -407,8 +459,8 @@ namespace DMotion
             {
                 if (EvaluateTransitionGroup(animation, ref exitGroup.ExitTransitions[i], parameters))
                 {
-                    // Encode as exit transition (offset + index)
-                    transitionIndex = (short)(ExitTransitionIndexOffset + i);
+                    // Encode as exit transition
+                    transitionIndex = EncodeExitTransition(i);
                     return true;
                 }
             }

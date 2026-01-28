@@ -55,15 +55,23 @@ namespace DMotion.Editor
             public Label BlendModeLabel;
             public Label SelectionLabel;
             public Button NavigateButton;
-            
+            public IconButton ClearButton; // Explicit clear assignment button
+
             // Per-layer timeline
             public TimelineScrubber Timeline;
-            
+
             // State controls
             public VisualElement StateControls;
             public Slider BlendSlider;
+            public FloatField BlendField;
             public Label BlendLabel;
-            
+
+            // Blend space visual element (reusable across state changes)
+            public VisualElement BlendSpaceContainer;
+            public BlendSpaceVisualElement BlendSpaceElement;
+            public AnimationStateAsset BoundBlendState; // Track which state the element is bound to
+            public Action<Vector2> CachedPreviewPositionHandler;
+
             // Transition controls
             public VisualElement TransitionControls;
             public Slider TransitionProgressSlider;
@@ -184,6 +192,8 @@ namespace DMotion.Editor
             // Cleanup layer sections
             foreach (var section in layerSections)
             {
+                UnbindBlendSpaceElement(section);
+
                 if (section.Timeline != null)
                 {
                     section.Timeline.OnTimeChanged -= time => OnLayerTimeChanged(section.LayerIndex, time);
@@ -208,14 +218,26 @@ namespace DMotion.Editor
         public void Tick(float deltaTime)
         {
             if (!isPlaying || compositionState == null) return;
-            
+
             var dt = deltaTime * playbackSpeed;
-            
+
             if (compositionState.SyncLayers)
             {
                 // Update global time
                 var newTime = compositionState.MasterTime + dt;
                 compositionState.MasterTime = newTime % 1f; // Loop
+
+                // Propagate global time to the preview backend
+                preview?.SetGlobalNormalizedTime(compositionState.MasterTime);
+
+                // Update all layer timelines to show the synced master time
+                foreach (var section in layerSections)
+                {
+                    if (section.Timeline != null)
+                    {
+                        section.Timeline.NormalizedTime = compositionState.MasterTime;
+                    }
+                }
             }
             else
             {
@@ -223,9 +245,16 @@ namespace DMotion.Editor
                 foreach (var section in layerSections)
                 {
                     section.Timeline?.Tick(dt);
+
+                    // Propagate layer time to backend
+                    var layerState = compositionState.GetLayer(section.LayerIndex);
+                    if (layerState != null)
+                    {
+                        preview?.SetLayerNormalizedTime(section.LayerIndex, layerState.NormalizedTime);
+                    }
                 }
             }
-            
+
             OnTimeChanged?.Invoke(compositionState.MasterTime);
             OnRepaintRequested?.Invoke();
         }
@@ -421,8 +450,13 @@ namespace DMotion.Editor
         private void OnGlobalTimeChanged(float time)
         {
             if (compositionState != null)
+            {
                 compositionState.MasterTime = time;
-            
+
+                // Propagate time to the preview backend
+                preview?.SetGlobalNormalizedTime(time);
+            }
+
             OnTimeChanged?.Invoke(time);
         }
         
@@ -458,32 +492,54 @@ namespace DMotion.Editor
                 LayerIndex = layerIndex,
                 LayerAsset = layerState.LayerAsset
             };
-            
-            // Create foldout
+
+            // Use a wrapper element instead of Foldout to have full control over collapse behavior
+            // This avoids issues with Foldout's internal toggle manipulation
             section.Foldout = new Foldout();
             section.Foldout.AddToClassList("layer-section");
             section.Foldout.value = true;
-            
-            // Build custom header
+
+            // Keep the foldout's text empty since we're using custom header
+            section.Foldout.text = "";
+
+            // Create custom header as part of the Foldout's label area
             var header = CreateLayerHeader(section, layerState);
-            
-            // Replace default toggle with custom header
+
+            // Instead of manipulating internal toggle, put header in the Foldout's toggle area properly
             var toggle = section.Foldout.Q<Toggle>();
             if (toggle != null)
             {
-                toggle.style.display = DisplayStyle.None;
-                toggle.parent.Insert(0, header);
+                // Add our header content to the toggle's visual tree directly
+                // This keeps the header visible when foldout collapses
+                var checkmark = toggle.Q<VisualElement>(className: "unity-foldout__checkmark");
+                if (checkmark != null)
+                {
+                    // Insert header after checkmark, replacing the default label
+                    var toggleContainer = checkmark.parent;
+                    var defaultLabel = toggle.Q<Label>(className: "unity-foldout__text");
+                    if (defaultLabel != null)
+                        defaultLabel.style.display = DisplayStyle.None;
+
+                    toggleContainer.Add(header);
+                    header.style.flexGrow = 1;
+                }
+                else
+                {
+                    // Fallback: add header directly to toggle
+                    toggle.Add(header);
+                    header.style.flexGrow = 1;
+                }
             }
-            
-            // Content area
+
+            // Content area - this goes into the Foldout's collapsible section
             section.Content = new VisualElement();
             section.Content.AddToClassList("layer-content");
             section.Content.style.paddingLeft = 15;
-            
+
             BuildLayerContent(section, layerState);
-            
+
             section.Foldout.Add(section.Content);
-            
+
             return section;
         }
         
@@ -495,51 +551,50 @@ namespace DMotion.Editor
             header.style.alignItems = Align.Center;
             header.style.paddingTop = 2;
             header.style.paddingBottom = 2;
-            
-            // Foldout arrow
-            var arrow = new Label("▼");
-            arrow.AddToClassList("foldout-arrow");
-            arrow.style.minWidth = 16;
-            header.Add(arrow);
-            
+
+            // No manual arrow needed - Foldout's native checkmark handles collapse indicator
+
             // Enable toggle
             section.EnableToggle = new Toggle();
             section.EnableToggle.value = layerState.IsEnabled;
             section.EnableToggle.style.marginRight = 5;
+            section.EnableToggle.style.marginLeft = 5;
             section.EnableToggle.RegisterValueChangedCallback(evt =>
             {
                 var layer = compositionState?.GetLayer(section.LayerIndex);
                 if (layer != null) layer.IsEnabled = evt.newValue;
             });
+            // Stop click propagation to prevent foldout toggle when clicking enable checkbox
+            section.EnableToggle.RegisterCallback<ClickEvent>(evt => evt.StopPropagation());
             header.Add(section.EnableToggle);
-            
+
             // Layer name
             var nameContainer = new VisualElement();
             nameContainer.style.flexDirection = FlexDirection.Column;
             nameContainer.style.flexGrow = 1;
-            
+
             var nameLabel = new Label($"Layer {layerState.LayerIndex}: {layerState.Name}");
             nameLabel.AddToClassList("layer-name");
             nameContainer.Add(nameLabel);
-            
+
             section.BlendModeLabel = new Label(layerState.BlendMode.ToString());
             section.BlendModeLabel.AddToClassList("layer-blend-mode");
             section.BlendModeLabel.style.fontSize = 10;
             section.BlendModeLabel.style.color = new Color(0.6f, 0.6f, 0.6f);
             nameContainer.Add(section.BlendModeLabel);
-            
+
             header.Add(nameContainer);
-            
+
             // Weight slider
             var weightContainer = new VisualElement();
             weightContainer.style.flexDirection = FlexDirection.Row;
             weightContainer.style.alignItems = Align.Center;
             weightContainer.style.minWidth = 140;
-            
+
             var weightLabel = new Label("Weight:");
             weightLabel.style.minWidth = 45;
             weightContainer.Add(weightLabel);
-            
+
             section.WeightSlider = new Slider(MinWeight, MaxWeight);
             section.WeightSlider.style.flexGrow = 1;
             section.WeightSlider.value = layerState.Weight;
@@ -549,22 +604,26 @@ namespace DMotion.Editor
                 if (layer != null) layer.Weight = evt.newValue;
                 section.WeightLabel.text = evt.newValue.ToString("F2");
             });
+            // Stop click propagation to prevent foldout toggle when interacting with slider
+            section.WeightSlider.RegisterCallback<ClickEvent>(evt => evt.StopPropagation());
+            section.WeightSlider.RegisterCallback<PointerDownEvent>(evt => evt.StopPropagation());
             weightContainer.Add(section.WeightSlider);
-            
+
             section.WeightLabel = new Label(layerState.Weight.ToString("F2"));
             section.WeightLabel.style.minWidth = 35;
             weightContainer.Add(section.WeightLabel);
-            
+
             header.Add(weightContainer);
-            
-            // Click to toggle foldout
-            header.RegisterCallback<ClickEvent>(evt =>
-            {
-                if (evt.target == section.EnableToggle || evt.target == section.WeightSlider) return;
-                section.Foldout.value = !section.Foldout.value;
-                arrow.text = section.Foldout.value ? "▼" : "►";
-            });
-            
+
+            // Clear assignment button (X) - explicit action to unassign layer
+            section.ClearButton = IconButton.CreateClearButton(
+                    "Clear layer assignment",
+                    () => compositionState?.ClearLayerSelection(section.LayerIndex))
+                .StopClickPropagation()
+                .SetVisible(layerState.IsAssigned);
+            section.ClearButton.style.marginLeft = 5;
+            header.Add(section.ClearButton);
+
             return header;
         }
         
@@ -626,24 +685,237 @@ namespace DMotion.Editor
         
         private void BuildLayerStateControls(LayerSectionData section, ObservableLayerState layerState)
         {
-            var selectedState = layerState.SelectedState;
-            
-            // Blend position (for blend states)
-            if (selectedState is LinearBlendStateAsset || selectedState is Directional2DBlendStateAsset)
+            // Blend space visual element container - populated dynamically based on selected state
+            section.BlendSpaceContainer = new VisualElement();
+            section.BlendSpaceContainer.name = "blend-space-container";
+            section.StateControls.Add(section.BlendSpaceContainer);
+
+            // Blend slider row with float field - range is updated dynamically
+            var blendRow = new VisualElement();
+            blendRow.name = "blend-row";
+            blendRow.AddToClassList("property-row");
+
+            var blendLabel = new Label("Blend");
+            blendLabel.AddToClassList("property-label");
+            blendLabel.style.minWidth = 60;
+            blendRow.Add(blendLabel);
+
+            var valueContainer = new VisualElement();
+            valueContainer.AddToClassList("slider-value-container");
+            valueContainer.style.flexDirection = FlexDirection.Row;
+            valueContainer.style.flexGrow = 1;
+
+            section.BlendSlider = new Slider(0f, 1f);
+            section.BlendSlider.AddToClassList("property-slider");
+            section.BlendSlider.style.flexGrow = 1;
+            section.BlendSlider.RegisterValueChangedCallback(evt =>
             {
-                var blendRow = CreateSliderRow(
-                    "Blend",
-                    0f, 1f,
-                    layerState.BlendPosition.x,
-                    value =>
-                    {
-                        var layer = compositionState?.GetLayer(section.LayerIndex);
-                        if (layer != null)
-                            layer.BlendPosition = new Unity.Mathematics.float2(value, layer.BlendPosition.y);
-                    },
-                    out section.BlendSlider,
-                    out section.BlendLabel);
-                section.StateControls.Add(blendRow);
+                SetLayerBlendValue(section, evt.newValue);
+                section.BlendField?.SetValueWithoutNotify(evt.newValue);
+            });
+
+            section.BlendField = new FloatField();
+            section.BlendField.AddToClassList("property-float-field");
+            section.BlendField.style.minWidth = FloatFieldWidth;
+            section.BlendField.RegisterValueChangedCallback(evt =>
+            {
+                SetLayerBlendValue(section, evt.newValue);
+                section.BlendSlider?.SetValueWithoutNotify(evt.newValue);
+            });
+
+            valueContainer.Add(section.BlendSlider);
+            valueContainer.Add(section.BlendField);
+            blendRow.Add(valueContainer);
+
+            section.StateControls.Add(blendRow);
+        }
+
+        /// <summary>
+        /// Creates or updates the blend space visual element for a layer based on its selected state.
+        /// </summary>
+        private void BindBlendSpaceElement(LayerSectionData section, AnimationStateAsset selectedState)
+        {
+            // Skip if already bound to this state
+            if (section.BoundBlendState == selectedState && section.BlendSpaceElement != null)
+                return;
+
+            // Cleanup previous element
+            UnbindBlendSpaceElement(section);
+
+            section.BoundBlendState = selectedState;
+
+            if (selectedState is LinearBlendStateAsset linear)
+            {
+                var element = new BlendSpace1DVisualElement();
+                element.SetTarget(linear);
+                element.ShowPreviewIndicator = true;
+                element.EditMode = false;
+                element.ShowModeToggle = false;
+                element.AddToClassList("blend-space-1d-preview");
+                element.style.height = 80;
+
+                // Restore persisted blend value
+                float persistedValue = PreviewSettings.instance.GetBlendValue1D(linear);
+                element.PreviewPosition = new Vector2(persistedValue, 0);
+
+                // Update slider range from clip thresholds
+                UpdateBlendSliderRange(section, linear);
+                section.BlendSlider?.SetValueWithoutNotify(persistedValue);
+                section.BlendField?.SetValueWithoutNotify(persistedValue);
+
+                // Sync to observable
+                var layer = compositionState?.GetLayer(section.LayerIndex);
+                if (layer != null)
+                    layer.BlendPosition = new Unity.Mathematics.float2(persistedValue, 0);
+
+                // Handle preview position changes from the visual element
+                section.CachedPreviewPositionHandler = pos =>
+                {
+                    SetLayerBlendValue(section, pos.x);
+                    section.BlendSlider?.SetValueWithoutNotify(pos.x);
+                    section.BlendField?.SetValueWithoutNotify(pos.x);
+                };
+                element.OnPreviewPositionChanged += section.CachedPreviewPositionHandler;
+
+                section.BlendSpaceElement = element;
+                section.BlendSpaceContainer.Add(element);
+            }
+            else if (selectedState is Directional2DBlendStateAsset blend2D)
+            {
+                var element = new BlendSpace2DVisualElement();
+                element.SetTarget(blend2D);
+                element.ShowPreviewIndicator = true;
+                element.EditMode = false;
+                element.ShowModeToggle = false;
+                element.AddToClassList("blend-space-2d-preview");
+                element.style.height = 150;
+
+                // Restore persisted blend value
+                Vector2 persistedValue = PreviewSettings.instance.GetBlendValue2D(blend2D);
+                element.PreviewPosition = persistedValue;
+
+                // Update slider range (X axis)
+                UpdateBlendSliderRange2D(section, blend2D);
+                section.BlendSlider?.SetValueWithoutNotify(persistedValue.x);
+                section.BlendField?.SetValueWithoutNotify(persistedValue.x);
+
+                // Sync to observable
+                var layer = compositionState?.GetLayer(section.LayerIndex);
+                if (layer != null)
+                    layer.BlendPosition = new Unity.Mathematics.float2(persistedValue.x, persistedValue.y);
+
+                // Handle preview position changes from the visual element
+                section.CachedPreviewPositionHandler = pos =>
+                {
+                    SetLayerBlendValue2D(section, pos);
+                    section.BlendSlider?.SetValueWithoutNotify(pos.x);
+                    section.BlendField?.SetValueWithoutNotify(pos.x);
+                };
+                element.OnPreviewPositionChanged += section.CachedPreviewPositionHandler;
+
+                section.BlendSpaceElement = element;
+                section.BlendSpaceContainer.Add(element);
+            }
+        }
+
+        /// <summary>
+        /// Removes and cleans up the current blend space visual element for a layer.
+        /// </summary>
+        private void UnbindBlendSpaceElement(LayerSectionData section)
+        {
+            if (section.BlendSpaceElement != null && section.CachedPreviewPositionHandler != null)
+            {
+                section.BlendSpaceElement.OnPreviewPositionChanged -= section.CachedPreviewPositionHandler;
+                section.CachedPreviewPositionHandler = null;
+            }
+
+            section.BlendSpaceContainer?.Clear();
+            section.BlendSpaceElement = null;
+            section.BoundBlendState = null;
+        }
+
+        private void SetLayerBlendValue(LayerSectionData section, float value)
+        {
+            var layer = compositionState?.GetLayer(section.LayerIndex);
+            if (layer == null) return;
+
+            layer.BlendPosition = new Unity.Mathematics.float2(value, layer.BlendPosition.y);
+
+            // Update visual element
+            if (section.BlendSpaceElement != null)
+                section.BlendSpaceElement.PreviewPosition = new Vector2(value, section.BlendSpaceElement.PreviewPosition.y);
+
+            // Propagate to preview backend
+            preview?.SetLayerBlendPosition(section.LayerIndex, layer.BlendPosition);
+
+            // Persist via PreviewSettings
+            var selectedState = layer.PreviewState.SelectedState;
+            if (selectedState is LinearBlendStateAsset)
+                PreviewSettings.instance.SetBlendValue1D(selectedState, value);
+            else if (selectedState is Directional2DBlendStateAsset)
+                PreviewSettings.instance.SetBlendValue2D(selectedState, new Vector2(value, layer.BlendPosition.y));
+        }
+
+        private void SetLayerBlendValue2D(LayerSectionData section, Vector2 value)
+        {
+            var layer = compositionState?.GetLayer(section.LayerIndex);
+            if (layer == null) return;
+
+            layer.BlendPosition = new Unity.Mathematics.float2(value.x, value.y);
+
+            // Propagate to preview backend
+            preview?.SetLayerBlendPosition(section.LayerIndex, layer.BlendPosition);
+
+            // Visual element already updated by the caller
+            // Persist via PreviewSettings
+            var selectedState = layer.PreviewState.SelectedState;
+            if (selectedState is Directional2DBlendStateAsset)
+                PreviewSettings.instance.SetBlendValue2D(selectedState, value);
+        }
+
+        private static void UpdateBlendSliderRange(LayerSectionData section, LinearBlendStateAsset linear)
+        {
+            if (linear.BlendClips == null || linear.BlendClips.Length == 0) return;
+
+            float min = float.MaxValue, max = float.MinValue;
+            foreach (var clip in linear.BlendClips)
+            {
+                min = Mathf.Min(min, clip.Threshold);
+                max = Mathf.Max(max, clip.Threshold);
+            }
+
+            var range = max - min;
+            if (range < 0.1f) range = 1f;
+            min -= range * 0.1f;
+            max += range * 0.1f;
+
+            if (section.BlendSlider != null)
+            {
+                section.BlendSlider.lowValue = min;
+                section.BlendSlider.highValue = max;
+            }
+        }
+
+        private static void UpdateBlendSliderRange2D(LayerSectionData section, Directional2DBlendStateAsset blend2D)
+        {
+            if (blend2D.BlendClips == null || blend2D.BlendClips.Length == 0) return;
+
+            float minX = float.MaxValue, maxX = float.MinValue;
+            foreach (var clip in blend2D.BlendClips)
+            {
+                minX = Mathf.Min(minX, clip.Position.x);
+                maxX = Mathf.Max(maxX, clip.Position.x);
+            }
+
+            var rangeX = maxX - minX;
+            if (rangeX < 0.1f) rangeX = 1f;
+            minX -= rangeX * 0.1f;
+            maxX += rangeX * 0.1f;
+
+            if (section.BlendSlider != null)
+            {
+                section.BlendSlider.lowValue = minX;
+                section.BlendSlider.highValue = maxX;
             }
         }
         
@@ -695,10 +967,36 @@ namespace DMotion.Editor
             section.WeightSlider?.SetValueWithoutNotify(layerState.Weight);
             if (section.WeightLabel != null)
                 section.WeightLabel.text = layerState.Weight.ToString("F2");
-            
+
             // Update selection label
             if (section.SelectionLabel != null)
                 section.SelectionLabel.text = GetSelectionText(layerState);
+
+            // Check if layer is unassigned
+            bool isAssigned = layerState.IsAssigned;
+
+            // Show/hide clear button based on assignment status
+            section.ClearButton?.SetVisible(isAssigned);
+            
+            // Disable weight controls for unassigned layers (they don't contribute)
+            section.WeightSlider?.SetEnabled(isAssigned);
+            section.EnableToggle?.SetEnabled(isAssigned);
+            
+            if (!isAssigned)
+            {
+                // Hide all controls for unassigned layers
+                if (section.StateControls != null)
+                    section.StateControls.style.display = DisplayStyle.None;
+                if (section.TransitionControls != null)
+                    section.TransitionControls.style.display = DisplayStyle.None;
+                if (section.Timeline != null)
+                    section.Timeline.style.display = DisplayStyle.None;
+                return;
+            }
+
+            // Show timeline for assigned layers
+            if (section.Timeline != null)
+                section.Timeline.style.display = DisplayStyle.Flex;
             
             // Show/hide state vs transition controls
             bool isTransition = layerState.IsTransitionMode;
@@ -713,9 +1011,39 @@ namespace DMotion.Editor
             // Update state controls
             if (hasState && !isTransition)
             {
-                section.BlendSlider?.SetValueWithoutNotify(layerState.BlendPosition.x);
-                if (section.BlendLabel != null)
-                    section.BlendLabel.text = layerState.BlendPosition.x.ToString("F2");
+                // Show blend controls only for blend state types
+                var selectedState = layerState.SelectedState;
+                bool isBlendState = selectedState is LinearBlendStateAsset || selectedState is Directional2DBlendStateAsset;
+
+                var blendRow = section.StateControls?.Q<VisualElement>("blend-row");
+                if (blendRow != null)
+                    blendRow.style.display = isBlendState ? DisplayStyle.Flex : DisplayStyle.None;
+
+                var blendSpaceContainer = section.BlendSpaceContainer;
+                if (blendSpaceContainer != null)
+                    blendSpaceContainer.style.display = isBlendState ? DisplayStyle.Flex : DisplayStyle.None;
+
+                if (isBlendState)
+                {
+                    // Bind/update the blend space visual element for this state
+                    BindBlendSpaceElement(section, selectedState);
+
+                    // Read persisted value
+                    var persisted = PreviewSettings.GetBlendPosition(selectedState);
+                    section.BlendSlider?.SetValueWithoutNotify(persisted.x);
+                    section.BlendField?.SetValueWithoutNotify(persisted.x);
+                }
+                else
+                {
+                    // Unbind blend space when not a blend state
+                    UnbindBlendSpaceElement(section);
+                }
+            }
+            else
+            {
+                // Hide blend space when not in state mode
+                if (section.BlendSpaceContainer != null)
+                    section.BlendSpaceContainer.style.display = DisplayStyle.None;
             }
             
             // Update transition controls
@@ -742,7 +1070,8 @@ namespace DMotion.Editor
                 return $"→ {layerState.SelectedState.name}";
             }
             
-            return "→ (No Selection)";
+            // Layer is unassigned - not contributing to animation
+            return $"⚠ Layer {layerState.LayerIndex} state is unassigned";
         }
         
         private void OnLayerTimeChanged(int layerIndex, float time)

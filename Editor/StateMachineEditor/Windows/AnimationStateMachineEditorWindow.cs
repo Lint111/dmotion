@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using DMotion.Authoring;
 using Unity.Entities.Editor;
 using UnityEditor;
@@ -60,7 +61,13 @@ namespace DMotion.Editor
         private DependenciesPanelController dependenciesPanelController;
         private BreadcrumbController breadcrumbController;
         
+        // Quick navigation overlay (Ctrl+Shift)
+        private QuickNavigationOverlay quickNavigationOverlay;
+
         private bool hasRestoredAfterDomainReload;
+
+        // Store subscribed EditorState instance to handle domain reload correctly
+        private EditorState _subscribedEditorState;
 
         [MenuItem(ToolMenuConstants.DMotionPath + "/Open Workspace")]
         internal static void OpenWorkspace()
@@ -162,7 +169,21 @@ namespace DMotion.Editor
             dependenciesPanelController?.Unsubscribe();
             breadcrumbController?.Unsubscribe();
             
+            // Cleanup quick navigation overlay
+            if (quickNavigationOverlay != null)
+            {
+                quickNavigationOverlay.OnNavigate -= OnQuickNavigationRequested;
+                quickNavigationOverlay.OnClosed -= OnQuickNavigationClosed;
+            }
+            
             // EditorState handles its own cleanup via Dispose pattern
+        }
+        
+        private void OnFocus()
+        {
+            // When window gains focus (e.g., clicking on tab), focus the editor view
+            // so keyboard shortcuts work immediately
+            stateMachineEditorView?.Focus();
         }
 
         private void OnPlaymodeStateChanged(PlayModeStateChange stateChange)
@@ -230,13 +251,303 @@ namespace DMotion.Editor
                         breadcrumbController.OnNavigationRequested += OnNavigationRequested;
                         breadcrumbController.Subscribe();
                     }
+                    
+                    // Wire up layer navigation shortcut handler
+                    stateMachineEditorView.OnLayerNavigationRequested = OnLayerShortcutNavigation;
                 }
             }
+            
+            // Create quick navigation overlay
+            quickNavigationOverlay = new QuickNavigationOverlay();
+            quickNavigationOverlay.OnNavigate += OnQuickNavigationRequested;
+            quickNavigationOverlay.OnClosed += OnQuickNavigationClosed;
+            quickNavigationOverlay.style.display = DisplayStyle.None;
+            root.Add(quickNavigationOverlay);
+            
+            // Register keyboard handler for Ctrl+Shift quick navigation
+            root.RegisterCallback<KeyDownEvent>(OnRootKeyDown);
+            
+            // Focus window and editor view when clicking anywhere in the window
+            root.RegisterCallback<PointerDownEvent>(OnRootPointerDown);
             
             // Restore last edited asset after domain reload
             RestoreAfterDomainReload();
         }
         
+        /// <summary>
+        /// Handles keyboard shortcuts at the root level.
+        /// </summary>
+        private void OnRootKeyDown(KeyDownEvent evt)
+        {
+            // Ctrl+Shift to toggle quick navigation overlay
+            if (evt.ctrlKey && evt.shiftKey && evt.keyCode == KeyCode.None)
+            {
+                // Just Ctrl+Shift pressed without another key - might be starting the combo
+                return;
+            }
+            
+            // Ctrl+Shift+Space or Ctrl+Shift+N to toggle quick navigation
+            if (evt.ctrlKey && evt.shiftKey && (evt.keyCode == KeyCode.Space || evt.keyCode == KeyCode.N))
+            {
+                ToggleQuickNavigationOverlay();
+                evt.StopPropagation();
+            }
+        }
+        
+        /// <summary>
+        /// Handles pointer down on the window to ensure proper focus.
+        /// </summary>
+        private void OnRootPointerDown(PointerDownEvent evt)
+        {
+            // Focus the window and editor view when clicking anywhere
+            Focus();
+            stateMachineEditorView?.Focus();
+        }
+        
+        /// <summary>
+        /// Handles layer navigation via Ctrl+Number shortcut.
+        /// </summary>
+        private void OnLayerShortcutNavigation(LayerStateAsset layer, int layerIndex)
+        {
+            if (layer?.NestedStateMachine == null) return;
+            
+            // Push to breadcrumb and navigate
+            breadcrumbController?.Push(layer.NestedStateMachine);
+            LoadStateMachineInternal(layer.NestedStateMachine, updateBreadcrumb: false);
+        }
+        
+        /// <summary>
+        /// Toggles the quick navigation overlay.
+        /// </summary>
+        internal void ToggleQuickNavigationOverlay()
+        {
+            if (quickNavigationOverlay == null) return;
+            
+            if (quickNavigationOverlay.IsVisible)
+            {
+                quickNavigationOverlay.Close();
+            }
+            else if (rootStateMachine != null)
+            {
+                // Show overlay with current context
+                var currentView = breadcrumbBar?.CurrentStateMachine ?? lastEditedStateMachine;
+                quickNavigationOverlay.Show(rootStateMachine, currentView);
+            }
+        }
+        
+        /// <summary>
+        /// Handles navigation request from quick navigation overlay.
+        /// </summary>
+        private void OnQuickNavigationRequested(NavigationTreeNode node)
+        {
+            if (node == null || node.StateMachine == null) return;
+
+            // Build the full path from root to target by traversing up the tree
+            var pathFromRoot = BuildNavigationPath(node);
+
+            // Find containing layer (if any) by checking ancestors
+            var containingLayer = FindContainingLayerNode(node);
+
+            // Set layer context if target is inside a layer
+            if (containingLayer != null && containingLayer.LayerAsset != null)
+            {
+                EditorState.Instance.EnterLayer(containingLayer.LayerAsset, containingLayer.LayerIndex);
+            }
+            else if (node.NodeType == NavigationNodeType.Root)
+            {
+                // Exiting layers - clear layer context
+                EditorState.Instance.ExitLayer();
+            }
+
+            // Reset breadcrumb to root, then push each node in the path
+            if (pathFromRoot.Count > 0)
+            {
+                // First node is root
+                breadcrumbController?.SetRoot(pathFromRoot[0].StateMachine);
+
+                // Push remaining nodes in order
+                for (int i = 1; i < pathFromRoot.Count; i++)
+                {
+                    breadcrumbController?.Push(pathFromRoot[i].StateMachine);
+                }
+            }
+
+            // Load the target state machine
+            LoadStateMachineInternal(node.StateMachine, updateBreadcrumb: false);
+
+            // Restore focus to editor view after navigation
+            RestoreFocusToEditorView();
+        }
+
+        /// <summary>
+        /// Builds the navigation path from root to target node.
+        /// </summary>
+        private List<NavigationTreeNode> BuildNavigationPath(NavigationTreeNode target)
+        {
+            var path = new List<NavigationTreeNode>();
+            var current = target;
+
+            while (current != null)
+            {
+                path.Insert(0, current); // Insert at beginning to maintain root-to-target order
+                current = current.Parent;
+            }
+
+            return path;
+        }
+
+        /// <summary>
+        /// Finds the containing layer node by traversing up the tree.
+        /// </summary>
+        private NavigationTreeNode FindContainingLayerNode(NavigationTreeNode node)
+        {
+            var current = node;
+            while (current != null)
+            {
+                if (current.NodeType == NavigationNodeType.Layer)
+                {
+                    return current;
+                }
+                current = current.Parent;
+            }
+            return null;
+        }
+        
+        /// <summary>
+        /// Handles quick navigation overlay closed (Escape or outside click).
+        /// </summary>
+        private void OnQuickNavigationClosed()
+        {
+            RestoreFocusToEditorView();
+        }
+        
+        /// <summary>
+        /// Restores keyboard focus to the editor view.
+        /// </summary>
+        private void RestoreFocusToEditorView()
+        {
+            // Schedule focus restoration to ensure UI has updated
+            stateMachineEditorView?.schedule.Execute(() =>
+            {
+                stateMachineEditorView?.Focus();
+            });
+        }
+
+        /// <summary>
+        /// Handles navigation requests from EditorState (e.g., preview window "Navigate" button).
+        /// Traverses sub-state machine hierarchy to reach the target state and frames it.
+        /// </summary>
+        private void OnNavigationRequested(object sender, NavigationRequestedEventArgs e)
+        {
+            if (e.Container?.NestedStateMachine == null) return;
+
+            var containerStateMachine = e.Container.NestedStateMachine;
+            var targetState = e.IsTransition ? e.TransitionFrom : e.TargetState;
+
+            if (targetState == null) return;
+
+            // Find the state machine that directly contains the target state
+            var containingMachine = FindContainingStateMachine(containerStateMachine, targetState);
+
+            // Enter the layer if the container is a LayerStateAsset
+            if (e.LayerAsset != null && e.LayerIndex >= 0)
+            {
+                EditorState.Instance.EnterLayer(e.LayerAsset, e.LayerIndex);
+            }
+
+            // Navigate to the containing state machine (traverse sub-state machines)
+            if (containingMachine != null && containingMachine != containerStateMachine)
+            {
+                // Build path from container root to containing machine
+                var path = BuildPathToStateMachine(containerStateMachine, containingMachine);
+                foreach (var machine in path)
+                {
+                    breadcrumbController?.Push(machine);
+                }
+                LoadStateMachineInternal(containingMachine, updateBreadcrumb: false);
+            }
+            else
+            {
+                // State is directly in the container root
+                LoadStateMachineInternal(containerStateMachine, updateBreadcrumb: false);
+            }
+
+            // Select the state or transition after graph is loaded
+            stateMachineEditorView?.schedule.Execute(() =>
+            {
+                if (e.IsTransition)
+                {
+                    EditorState.Instance.SelectTransition(e.TransitionFrom, e.TransitionTo);
+                    // Center on the transition source state
+                    stateMachineEditorView?.CenterOnState(e.TransitionFrom);
+                }
+                else
+                {
+                    EditorState.Instance.SelectedState = e.TargetState;
+                    // Center the view on the target state
+                    stateMachineEditorView?.CenterOnState(e.TargetState);
+                }
+            });
+        }
+
+        /// <summary>
+        /// Finds the state machine that directly contains the target state.
+        /// </summary>
+        private StateMachineAsset FindContainingStateMachine(StateMachineAsset root, AnimationStateAsset targetState)
+        {
+            if (root?.States == null) return null;
+
+            // Check if state is directly in this machine
+            if (root.States.Contains(targetState))
+                return root;
+
+            // Search in sub-state machines
+            foreach (var state in root.States)
+            {
+                if (state is SubStateMachineStateAsset subMachine && subMachine.NestedStateMachine != null)
+                {
+                    var found = FindContainingStateMachine(subMachine.NestedStateMachine, targetState);
+                    if (found != null)
+                        return found;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Builds a path of state machines from root to target (excluding root, including target).
+        /// </summary>
+        private List<StateMachineAsset> BuildPathToStateMachine(StateMachineAsset root, StateMachineAsset target)
+        {
+            var path = new List<StateMachineAsset>();
+            BuildPathRecursive(root, target, path);
+            return path;
+        }
+
+        private bool BuildPathRecursive(StateMachineAsset current, StateMachineAsset target, List<StateMachineAsset> path)
+        {
+            if (current?.States == null) return false;
+
+            foreach (var state in current.States)
+            {
+                if (state is not SubStateMachineStateAsset subMachine || subMachine.NestedStateMachine == null) continue; 
+                if (subMachine.NestedStateMachine == target)
+                {
+                    path.Add(target);
+                    return true;
+                }
+
+                if (BuildPathRecursive(subMachine.NestedStateMachine, target, path))
+                {
+                    path.Insert(0, subMachine.NestedStateMachine);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         /// <summary>
         /// Called by BreadcrumbController when navigation is requested (via events or clicks).
         /// </summary>
@@ -263,14 +574,24 @@ namespace DMotion.Editor
         {
             // Reset the restore flag when window is enabled
             hasRestoredAfterDomainReload = false;
-            
+
             // Register for Undo/Redo to refresh the view
             Undo.undoRedoPerformed += OnUndoRedoPerformed;
+
+            // Register for navigation requests (e.g., from preview window "Navigate" button)
+            _subscribedEditorState = EditorState.Instance;
+            _subscribedEditorState.NavigationRequested += OnNavigationRequested;
         }
-        
+
         private void OnDisable()
         {
             Undo.undoRedoPerformed -= OnUndoRedoPerformed;
+
+            if (_subscribedEditorState != null)
+            {
+                _subscribedEditorState.NavigationRequested -= OnNavigationRequested;
+                _subscribedEditorState = null;
+            }
         }
         
         private void OnUndoRedoPerformed()
@@ -287,7 +608,7 @@ namespace DMotion.Editor
                 
                 // Refresh panel controllers (they will re-render with updated data)
                 parametersPanelController?.SetContext(lastEditedStateMachine);
-                dependenciesPanelController?.SetContext(lastEditedStateMachine);
+                dependenciesPanelController?.SetContext(lastEditedStateMachine, rootStateMachine);
                 
                 // Repopulate graph without framing
                 stateMachineEditorView.PopulateView(new StateMachineEditorViewModel
@@ -409,7 +730,7 @@ namespace DMotion.Editor
             inspectorController?.SetContext(stateMachineAsset);
             parametersPanelController?.SetContext(stateMachineAsset);
             layersPanelController?.SetContext(stateMachineAsset, rootStateMachine);
-            dependenciesPanelController?.SetContext(stateMachineAsset);
+            dependenciesPanelController?.SetContext(stateMachineAsset, rootStateMachine);
             
             stateMachineEditorView.PopulateView(new StateMachineEditorViewModel
             {
@@ -467,7 +788,7 @@ namespace DMotion.Editor
                         // Update panel controllers
                         inspectorController?.SetContext(stateMachineDebug.StateMachineAsset);
                         parametersPanelController?.SetContext(stateMachineDebug.StateMachineAsset);
-                        dependenciesPanelController?.SetContext(stateMachineDebug.StateMachineAsset);
+                        dependenciesPanelController?.SetContext(stateMachineDebug.StateMachineAsset, stateMachineDebug.StateMachineAsset);
                         
                         stateMachineEditorView.PopulateView(new StateMachineEditorViewModel
                         {

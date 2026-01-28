@@ -225,6 +225,9 @@ namespace DMotion.Authoring
         {
             foreach (var state in machine.States)
             {
+                if (state == null)
+                    continue;
+
                 var statePath = BuildStatePath(pathPrefix, state.name);
                 ProcessState(state, statePath, machine, clipIndexOffset, context, parentSubMachine);
             }

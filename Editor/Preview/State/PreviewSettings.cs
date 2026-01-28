@@ -144,11 +144,13 @@ namespace DMotion.Editor
         private static string GetAssetGuid(UnityEngine.Object asset)
         {
             if (asset == null) return null;
-            
-            var path = AssetDatabase.GetAssetPath(asset);
-            if (string.IsNullOrEmpty(path)) return null;
-            
-            return AssetDatabase.AssetPathToGUID(path);
+
+            // Use GlobalObjectId to uniquely identify sub-assets (states inside state machines)
+            // AssetPathToGUID would return the same GUID for all sub-assets in the same file
+            var globalId = GlobalObjectId.GetGlobalObjectIdSlow(asset);
+            if (globalId.identifierType == 0) return null; // Invalid
+
+            return globalId.ToString();
         }
         
         #endregion
@@ -173,8 +175,147 @@ namespace DMotion.Editor
         
         #endregion
         
+        #region Layer Composition State
+
+        [Serializable]
+        private class LayerSelectionEntry
+        {
+            public int layerIndex;
+            public string selectedStateGuid;
+            public string transitionFromGuid;
+            public string transitionToGuid;
+            public float weight = 1f;
+            public bool enabled = true;
+        }
+
+        [Serializable]
+        private class CompositionStateEntry
+        {
+            public string stateMachineGuid;
+            public List<LayerSelectionEntry> layerSelections = new();
+        }
+
+        [SerializeField] private List<CompositionStateEntry> compositionStates = new();
+
+        // Runtime lookup cache
+        private Dictionary<string, CompositionStateEntry> compositionStateCache;
+
+        private Dictionary<string, CompositionStateEntry> CompositionStateCache
+        {
+            get
+            {
+                if (compositionStateCache == null)
+                {
+                    compositionStateCache = new Dictionary<string, CompositionStateEntry>();
+                    foreach (var entry in compositionStates)
+                    {
+                        if (!string.IsNullOrEmpty(entry.stateMachineGuid))
+                        {
+                            compositionStateCache[entry.stateMachineGuid] = entry;
+                        }
+                    }
+                }
+                return compositionStateCache;
+            }
+        }
+
+        /// <summary>
+        /// Saves layer selection state for a multi-layer state machine.
+        /// </summary>
+        public void SaveLayerSelection(StateMachineAsset rootStateMachine, int layerIndex,
+            AnimationStateAsset selectedState, AnimationStateAsset transitionFrom, AnimationStateAsset transitionTo,
+            float weight = 1f, bool enabled = true)
+        {
+            var smGuid = GetAssetGuid(rootStateMachine);
+            if (string.IsNullOrEmpty(smGuid)) return;
+
+            if (!CompositionStateCache.TryGetValue(smGuid, out var compositionEntry))
+            {
+                compositionEntry = new CompositionStateEntry { stateMachineGuid = smGuid };
+                compositionStates.Add(compositionEntry);
+                CompositionStateCache[smGuid] = compositionEntry;
+            }
+
+            // Find or create layer entry
+            var layerEntry = compositionEntry.layerSelections.Find(l => l.layerIndex == layerIndex);
+            if (layerEntry == null)
+            {
+                layerEntry = new LayerSelectionEntry { layerIndex = layerIndex };
+                compositionEntry.layerSelections.Add(layerEntry);
+            }
+
+            layerEntry.selectedStateGuid = GetAssetGuid(selectedState);
+            layerEntry.transitionFromGuid = GetAssetGuid(transitionFrom);
+            layerEntry.transitionToGuid = GetAssetGuid(transitionTo);
+            layerEntry.weight = weight;
+            layerEntry.enabled = enabled;
+
+            Save(true);
+        }
+
+        /// <summary>
+        /// Gets saved layer selection state for a multi-layer state machine.
+        /// Returns null if no saved state exists.
+        /// </summary>
+        public (AnimationStateAsset selectedState, AnimationStateAsset transitionFrom, AnimationStateAsset transitionTo, float weight, bool enabled)?
+            GetLayerSelection(StateMachineAsset rootStateMachine, int layerIndex)
+        {
+            var smGuid = GetAssetGuid(rootStateMachine);
+            if (string.IsNullOrEmpty(smGuid)) return null;
+
+            if (!CompositionStateCache.TryGetValue(smGuid, out var compositionEntry))
+                return null;
+
+            var layerEntry = compositionEntry.layerSelections.Find(l => l.layerIndex == layerIndex);
+            if (layerEntry == null) return null;
+
+            var selectedState = LoadAssetFromGuid<AnimationStateAsset>(layerEntry.selectedStateGuid);
+            var transitionFrom = LoadAssetFromGuid<AnimationStateAsset>(layerEntry.transitionFromGuid);
+            var transitionTo = LoadAssetFromGuid<AnimationStateAsset>(layerEntry.transitionToGuid);
+
+            return (selectedState, transitionFrom, transitionTo, layerEntry.weight, layerEntry.enabled);
+        }
+
+        /// <summary>
+        /// Clears saved layer selection state for a state machine.
+        /// </summary>
+        public void ClearLayerSelections(StateMachineAsset rootStateMachine)
+        {
+            var smGuid = GetAssetGuid(rootStateMachine);
+            if (string.IsNullOrEmpty(smGuid)) return;
+
+            if (CompositionStateCache.TryGetValue(smGuid, out var entry))
+            {
+                compositionStates.Remove(entry);
+                CompositionStateCache.Remove(smGuid);
+                Save(true);
+            }
+        }
+
+        private static T LoadAssetFromGuid<T>(string globalIdString) where T : UnityEngine.Object
+        {
+            if (string.IsNullOrEmpty(globalIdString)) return null;
+
+            // Parse GlobalObjectId string format (e.g., "GlobalObjectId_V1-2-guid-fileId-0")
+            if (GlobalObjectId.TryParse(globalIdString, out var globalId))
+            {
+                return GlobalObjectId.GlobalObjectIdentifierToObjectSlow(globalId) as T;
+            }
+
+            // Fallback: try legacy GUID format for backwards compatibility
+            var path = AssetDatabase.GUIDToAssetPath(globalIdString);
+            if (!string.IsNullOrEmpty(path))
+            {
+                return AssetDatabase.LoadAssetAtPath<T>(path);
+            }
+
+            return null;
+        }
+
+        #endregion
+
         #region Cleanup
-        
+
         /// <summary>
         /// Removes blend values for assets that no longer exist.
         /// </summary>

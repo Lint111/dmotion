@@ -35,7 +35,9 @@ namespace DMotion.Editor
             if (e.ChangeType == StructureChangeType.GeneralChange ||
                 e.ChangeType == StructureChangeType.ParameterRemoved)
             {
-                if (EditorState.Instance.RootStateMachine == model.StateMachine)
+                // Refresh when structure changes for our context
+                // Note: model.StateMachine may be a nested machine (layer/sub-state machine)
+                if (model.StateMachine != null)
                 {
                     _needsRefresh = true;
                     Repaint();

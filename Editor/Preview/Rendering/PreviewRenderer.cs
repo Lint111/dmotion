@@ -500,12 +500,12 @@ namespace DMotion.Editor
         private void CreateSingleClipPreview(SingleClipStateAsset state)
         {
             var clipAsset = state.Clip;
-                if (clipAsset == null || clipAsset.Clip == null)
-                {
-                    previewErrorMessage = "No animation clip assigned";
-                    return;
-                }
-            
+            if (clipAsset == null || clipAsset.Clip == null)
+            {
+                previewErrorMessage = "No animation clip assigned";
+                return;
+            }
+
             try
             {
                 var preview = new SingleClipPreview(clipAsset.Clip);
@@ -692,12 +692,6 @@ namespace DMotion.Editor
             previewInitialized = false;
             transitionFromState = null;
             transitionToState = null;
-            
-            // Raise disposed event if we had an active preview
-            if (wasInitialized && previousState != null)
-            {
-                // No-op: previous external preview lifecycle events removed.
-            }
         }
         
         /// <summary>

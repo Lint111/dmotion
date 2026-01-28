@@ -166,16 +166,35 @@ namespace DMotion.Editor
         public void SetPreviewModel(GameObject model)
         {
             if (gameObject == model) return;
-            
+
             gameObject = model;
+
+            // If already initialized, rebuild with new model
             if (isInitialized && model != null)
             {
-                // Rebuild with new model
                 DestroyPreviewInstance();
                 if (TryInstantiateModel(model))
                 {
                     BuildPlayableGraph();
                     RestoreCameraState();
+                }
+            }
+            // If not initialized yet but we have a model and state machine, try to initialize now
+            else if (!isInitialized && model != null && stateMachine != null)
+            {
+                // Clear error message since we now have a model
+                errorMessage = null;
+
+                // Try to complete initialization with the new model
+                if (TryInstantiateModel(model))
+                {
+                    BuildPlayableGraph();
+                    RestoreCameraState();
+                    isInitialized = true;
+                }
+                else
+                {
+                    errorMessage = "Failed to instantiate preview model";
                 }
             }
         }
@@ -277,7 +296,7 @@ namespace DMotion.Editor
         public void SetLayerNormalizedTime(int layerIndex, float normalizedTime)
         {
             if (layerIndex < 0 || layerIndex >= layers.Count) return;
-            
+
             layers[layerIndex].NormalizedTime = Mathf.Clamp01(normalizedTime);
             SyncLayerClipTimes(layers[layerIndex]);
         }
@@ -285,7 +304,7 @@ namespace DMotion.Editor
         public void SetLayerBlendPosition(int layerIndex, float2 position)
         {
             if (layerIndex < 0 || layerIndex >= layers.Count) return;
-            
+
             var layer = layers[layerIndex];
             layer.BlendPosition = position;
             UpdateLayerBlendWeights(layer);
@@ -318,12 +337,14 @@ namespace DMotion.Editor
         public void Draw(Rect rect)
         {
             if (rect.width <= 0 || rect.height <= 0) return;
-            
+
             EditorGUI.DrawRect(rect, PreviewBackground);
-            
+
             if (isInitialized && skinnedMeshRenderer != null && playableGraph.IsValid())
             {
-                // Sample the graph
+                // Sample the graph at current time
+                // Note: The graph has already been evaluated via Evaluate() in SetGlobalNormalizedTime/SetLayerNormalizedTime
+                // This just samples the current pose for rendering
                 AnimationMode.BeginSampling();
                 AnimationMode.SamplePlayableGraph(playableGraph, 0, 0);
                 AnimationMode.EndSampling();
@@ -553,7 +574,8 @@ namespace DMotion.Editor
             
             playableGraph = PlayableGraph.Create("LayerCompositionPreview");
             playableGraph.SetTimeUpdateMode(DirectorUpdateMode.Manual);
-            
+            // Note: Do NOT call Play() - manual time control via SetTime() on individual clip playables
+
             var output = AnimationPlayableOutput.Create(playableGraph, "Animation", animator);
             
             if (layers.Count == 0)
@@ -753,7 +775,9 @@ namespace DMotion.Editor
             for (int i = 0; i < layers.Count; i++)
             {
                 var layer = layers[i];
-                float weight = layer.IsEnabled ? layer.Weight : 0f;
+                // Unassigned layers (no CurrentState) should not contribute to the final animation
+                bool isAssigned = layer.CurrentState != null;
+                float weight = (layer.IsEnabled && isAssigned) ? layer.Weight : 0f;
                 layerMixer.SetInputWeight(i, weight);
             }
         }

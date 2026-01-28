@@ -140,6 +140,10 @@ namespace DMotion.Editor
         {
             if (parentMachine == null || requiredParam == null)
                 return null;
+            
+            // Check if parameters list exists
+            if (parentMachine.Parameters == null || parentMachine.Parameters.Count == 0)
+                return null;
 
             var requiredType = requiredParam.GetType();
             var requiredName = requiredParam.name.ToLowerInvariant();
@@ -147,6 +151,7 @@ namespace DMotion.Editor
             // First try exact name match with same type
             foreach (var param in parentMachine.Parameters)
             {
+                if (param == null) continue;
                 if (param.GetType() == requiredType &&
                     param.name.ToLowerInvariant() == requiredName)
                 {
@@ -157,6 +162,7 @@ namespace DMotion.Editor
             // Try similar names (e.g., "Speed" matches "MovementSpeed", "WalkSpeed", etc.)
             foreach (var param in parentMachine.Parameters)
             {
+                if (param == null) continue;
                 if (param.GetType() == requiredType)
                 {
                     var paramName = param.name.ToLowerInvariant();

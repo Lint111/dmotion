@@ -91,9 +91,10 @@ namespace DMotion.Authoring
     /// <summary>
     /// Temporary conversion data for building StateMachineBlob.
     /// SubStateMachine states are flattened during conversion - the final blob contains only leaf states.
+    /// NOTE: This struct only holds data references. The actual disposal is managed by the baking system.
     /// </summary>
     [TemporaryBakingType]
-    internal struct StateMachineBlobConverter : IComponentData, IComparer<ClipIndexWithThreshold>, IDisposable
+    internal struct StateMachineBlobConverter : IComponentData, IComparer<ClipIndexWithThreshold>
     {
         internal byte DefaultStateIndex;
         internal UnsafeList<AnimationStateConversionData> States;
@@ -368,7 +369,11 @@ namespace DMotion.Authoring
             return x.Threshold.CompareTo(y.Threshold);
         }
 
-        public unsafe void Dispose()
+        /// <summary>
+        /// Disposes all native collections held by this converter.
+        /// NOTE: This must be called explicitly by the baking system after blob creation.
+        /// </summary>
+        internal unsafe void DisposeNativeCollections()
         {
             DisposeStates();
             DisposeLinearBlendStates();

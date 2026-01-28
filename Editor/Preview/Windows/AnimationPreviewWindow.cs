@@ -15,7 +15,7 @@ namespace DMotion.Editor
     {
         private const string WindowTitle = "Animation Preview";
         private const string UssFileName = "AnimationPreviewWindow";
-        private const float MinInspectorWidth = 250f;
+        private const float MinInspectorWidth = 380f;
         private const float MinPreviewWidth = 200f;
         private const float MinPreviewHeight = 200f;
         private const float DefaultSplitPosition = 300f;
@@ -25,6 +25,9 @@ namespace DMotion.Editor
         #region Serialized State
 
         [SerializeField] private PlayableGraphPreview.CameraState savedCameraState;
+        
+        // Persisted across domain reloads
+        [SerializeField] private StateMachineAsset serializedStateMachine;
         
         // Split position is stored in PreviewSettings singleton for cross-reload persistence
         private float SplitPosition
@@ -61,9 +64,12 @@ namespace DMotion.Editor
         private AnimationStateAsset selectedTransitionTo;
         private bool isAnyStateSelected;
         private SelectionType currentSelectionType = SelectionType.None;
-        
+
         // Base state speed (from Speed slider), used to combine with weighted clip speed
         private float currentStateSpeed = 1f;
+
+        // Store subscribed EditorState instance to handle domain reload correctly
+        private EditorState _subscribedEditorState;
 
         private enum SelectionType
         {
@@ -126,11 +132,12 @@ namespace DMotion.Editor
         private void OnEnable()
         {
             // Subscribe to EditorState events
-            EditorState.Instance.PropertyChanged += OnEditorStatePropertyChanged;
-            EditorState.Instance.StructureChanged += OnEditorStateStructureChanged;
-            EditorState.Instance.PreviewStateChanged += OnPreviewStateChanged;
-            EditorState.Instance.CompositionStateChanged += OnCompositionStatePropertyChanged;
-            EditorState.Instance.CompositionState.LayerChanged += OnCompositionLayerChanged;
+            _subscribedEditorState = EditorState.Instance;
+            _subscribedEditorState.PropertyChanged += OnEditorStatePropertyChanged;
+            _subscribedEditorState.StructureChanged += OnEditorStateStructureChanged;
+            _subscribedEditorState.PreviewStateChanged += OnPreviewStateChanged;
+            _subscribedEditorState.CompositionStateChanged += OnCompositionStatePropertyChanged;
+            _subscribedEditorState.CompositionState.LayerChanged += OnCompositionLayerChanged;
             
             // Create extracted components
             CreateBuilders();
@@ -158,9 +165,11 @@ namespace DMotion.Editor
             var editorState = EditorState.Instance;
             
             // Sync state machine context (use RootStateMachine for proper multi-layer detection)
-            if (editorState.RootStateMachine != null)
+            // Fall back to serialized state machine if EditorState was reset (domain reload)
+            var stateMachine = editorState.RootStateMachine ?? serializedStateMachine;
+            if (stateMachine != null)
             {
-                SetContext(editorState.RootStateMachine);
+                SetContext(stateMachine);
             }
             
             // Sync preview type from EditorState (this is the authoritative source)
@@ -204,12 +213,16 @@ namespace DMotion.Editor
 
         private void OnDisable()
         {
-            // Unsubscribe from EditorState events
-            EditorState.Instance.PropertyChanged -= OnEditorStatePropertyChanged;
-            EditorState.Instance.StructureChanged -= OnEditorStateStructureChanged;
-            EditorState.Instance.PreviewStateChanged -= OnPreviewStateChanged;
-            EditorState.Instance.CompositionStateChanged -= OnCompositionStatePropertyChanged;
-            EditorState.Instance.CompositionState.LayerChanged -= OnCompositionLayerChanged;
+            // Unsubscribe from the stored EditorState instance
+            if (_subscribedEditorState != null)
+            {
+                _subscribedEditorState.PropertyChanged -= OnEditorStatePropertyChanged;
+                _subscribedEditorState.StructureChanged -= OnEditorStateStructureChanged;
+                _subscribedEditorState.PreviewStateChanged -= OnPreviewStateChanged;
+                _subscribedEditorState.CompositionStateChanged -= OnCompositionStatePropertyChanged;
+                _subscribedEditorState.CompositionState.LayerChanged -= OnCompositionLayerChanged;
+                _subscribedEditorState = null;
+            }
 
             // Save camera state before disposing
             if (previewSession != null)
@@ -234,11 +247,18 @@ namespace DMotion.Editor
             root.AddToClassList("preview-window");
             root.focusable = true;
 
-            // Load stylesheet
+            // Load stylesheets
             var styleSheet = FindStyleSheet(UssFileName);
             if (styleSheet != null)
             {
                 root.styleSheets.Add(styleSheet);
+            }
+
+            // Load shared UI element styles (IconButton, etc.)
+            var sharedStyleSheet = FindStyleSheet("StateInspector");
+            if (sharedStyleSheet != null)
+            {
+                root.styleSheets.Add(sharedStyleSheet);
             }
 
             BuildUI(root);
@@ -316,6 +336,13 @@ namespace DMotion.Editor
             {
                 Repaint();
             }
+
+            // Periodically save camera state (every few frames) to ensure persistence
+            // This handles cases where OnDisable isn't called immediately when switching focus
+            if (Time.frameCount % 30 == 0) // Save every 30 frames (~0.5 seconds at 60fps)
+            {
+                SaveCameraState();
+            }
         }
 
         #endregion
@@ -351,8 +378,31 @@ namespace DMotion.Editor
         
         private void OnNavigateToLayerRequested(int layerIndex, LayerStateAsset layerAsset)
         {
-            // Navigate to the layer's state machine in the graph editor
-            EditorState.Instance.EnterLayer(layerAsset, layerIndex);
+            // Get the layer's current selection before navigating
+            var layerState = EditorState.Instance.CompositionState?.GetLayer(layerIndex);
+            var previewState = layerState?.PreviewState;
+
+            if (previewState == null) return;
+
+            // Use the centralized navigation system which handles:
+            // - Finding the containing sub-state machine
+            // - Building the breadcrumb path
+            // - Loading the correct view
+            // - Framing the selection
+            if (previewState.IsTransitionMode && previewState.TransitionFrom != null && previewState.TransitionTo != null)
+            {
+                // Navigate to transition with full hierarchy traversal
+                EditorState.Instance.RequestNavigateToTransition(
+                    layerAsset, layerIndex,
+                    previewState.TransitionFrom, previewState.TransitionTo);
+            }
+            else if (previewState.SelectedState != null)
+            {
+                // Navigate to state with full hierarchy traversal
+                EditorState.Instance.RequestNavigateToState(
+                    layerAsset, layerIndex,
+                    previewState.SelectedState);
+            }
         }
         
         private void OnTransitionTimelineTimeChanged(float time)
@@ -810,6 +860,7 @@ namespace DMotion.Editor
             if (machine != null && machine != currentStateMachine)
             {
                 currentStateMachine = machine;
+                serializedStateMachine = machine; // Persist for domain reload
                 
                 // Check if we're in a multi-layer context by looking at the composition state's root
                 // This handles the case where we're navigating inside layers of a multi-layer machine
@@ -1436,6 +1487,8 @@ namespace DMotion.Editor
             bool stateTimelineDragging = stateInspectorBuilder?.TimelineScrubber?.IsDragging ?? false;
             if (!transitionTimelineDragging && !stateTimelineDragging && previewSession.HandleInput(rect))
             {
+                // Save camera state after user interaction
+                SaveCameraState();
                 Repaint();
             }
         }
@@ -1443,7 +1496,23 @@ namespace DMotion.Editor
         private void OnResetViewClicked()
         {
             previewSession?.ResetCameraView();
+            SaveCameraState();
             Repaint();
+        }
+
+        /// <summary>
+        /// Saves the current camera state for persistence across focus changes and domain reloads.
+        /// </summary>
+        private void SaveCameraState()
+        {
+            if (previewSession != null)
+            {
+                var camState = previewSession.CameraState;
+                if (camState.IsValid)
+                {
+                    savedCameraState = camState;
+                }
+            }
         }
         
         private void OnPreviewModelChanged(ChangeEvent<UnityEngine.Object> evt)

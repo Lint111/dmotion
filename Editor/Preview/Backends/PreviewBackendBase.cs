@@ -300,15 +300,16 @@ namespace DMotion.Editor
         
         /// <summary>
         /// Steps the animation by the given number of frames.
+        /// Uses UnityEditor.AnimationUtility.GetAnimationClipSettings frame rate if available, otherwise defaults to 60fps.
         /// </summary>
-        public virtual void StepFrames(int frameCount, float fps = 30f)
+        public virtual void StepFrames(int frameCount, float fps = 60f)
         {
             if (currentTarget == null) return;
-            
+
             var frameDuration = 1f / fps;
             var totalDuration = currentTarget.Duration;
             if (totalDuration <= 0) return;
-            
+
             var timeStep = (frameDuration * frameCount) / totalDuration;
             timeState.NormalizedTime = math.frac(timeState.NormalizedTime + timeStep);
             OnTimeStateChanged(timeState);

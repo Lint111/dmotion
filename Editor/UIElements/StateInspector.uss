@@ -245,3 +245,64 @@
 }
 
 /* Note: :last-child not supported in Unity USS - use explicit class if needed */
+
+/* ============================================
+   Icon Button
+   ============================================ */
+
+.icon-button {
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    min-height: 20px;
+    padding: 0;
+    margin-left: 2px;
+    margin-right: 2px;
+    -unity-text-align: middle-center;
+    font-size: 12px;
+    background-color: rgba(60, 60, 60, 0.8);
+    border-color: rgb(70, 70, 70);
+    border-width: 1px;
+    border-radius: 2px;
+}
+
+.icon-button:hover {
+    background-color: rgba(80, 80, 80, 0.9);
+    border-color: rgb(100, 100, 100);
+}
+
+.icon-button:active {
+    background-color: rgba(50, 50, 50, 0.9);
+}
+
+.icon-button--small {
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
+    min-height: 16px;
+    font-size: 10px;
+}
+
+.icon-button--large {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    min-height: 24px;
+    font-size: 14px;
+}
+
+/* Semantic variants */
+.icon-button--clear:hover {
+    background-color: rgba(180, 60, 60, 0.6);
+    border-color: rgb(180, 80, 80);
+}
+
+.icon-button--add:hover {
+    background-color: rgba(60, 140, 60, 0.6);
+    border-color: rgb(80, 160, 80);
+}
+
+.icon-button--navigate:hover {
+    background-color: rgba(60, 100, 180, 0.6);
+    border-color: rgb(80, 120, 200);
+}

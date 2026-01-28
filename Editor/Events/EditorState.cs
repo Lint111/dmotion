@@ -18,19 +18,19 @@ namespace DMotion.Editor
     /// ├── PreviewState (single state preview)
     /// └── CompositionState (multi-layer preview)
     /// </code>
-    /// 
+    ///
     /// <para><b>Usage:</b></para>
     /// <code>
     /// // Subscribe to changes
     /// EditorState.Instance.PropertyChanged += OnEditorStateChanged;
     /// EditorState.Instance.PreviewState.PropertyChanged += OnPreviewStateChanged;
-    /// 
+    ///
     /// // Set properties (events fire automatically)
     /// EditorState.Instance.SelectedState = myState;
     /// EditorState.Instance.PreviewState.NormalizedTime = 0.5f;
     /// </code>
     /// </remarks>
-    public class EditorState : ObservableObject
+    public class EditorState : ObservableObject, IDisposable
     {
         #region Singleton
         
@@ -156,7 +156,7 @@ namespace DMotion.Editor
                     // Initialize composition state if multi-layer
                     if (value != null && value.IsMultiLayer)
                     {
-                        _compositionState.Initialize(value);
+                        _compositionState.Initialize(value, this);
                         PreviewType = EditorPreviewType.LayerComposition;
                     }
                     else
@@ -209,13 +209,13 @@ namespace DMotion.Editor
                     _isTransitionSelected = false;
                     _isAnyStateSelected = false;
                     _isExitNodeSelected = false;
-                    
+
                     // Update preview state
                     if (value != null)
                     {
                         _previewState.SelectState(value);
                     }
-                    
+
                     OnPropertiesChanged(SelectionChangedProperties);
                 }
             }
@@ -357,10 +357,10 @@ namespace DMotion.Editor
             _isTransitionSelected = true;
             _isAnyStateSelected = isAnyState && from == null;
             _isExitNodeSelected = false;
-            
+
             // Update preview state
             _previewState.SelectTransition(from, to);
-            
+
             OnPropertiesChanged(AllSelectionProperties);
         }
         
@@ -375,9 +375,9 @@ namespace DMotion.Editor
             _isTransitionSelected = false;
             _isAnyStateSelected = false;
             _isExitNodeSelected = false;
-            
+
             _previewState.ClearSelection();
-            
+
             OnPropertiesChanged(ClearSelectionProperties);
         }
         
@@ -548,11 +548,11 @@ namespace DMotion.Editor
         {
             StructureChanged?.Invoke(this, new StructureChangedEventArgs(StructureChangeType.LayerAdded, layer));
             OnPropertyChanged(nameof(RootStateMachine));
-            
+
             // Reinitialize composition state
             if (RootStateMachine != null && RootStateMachine.IsMultiLayer)
             {
-                _compositionState.Initialize(RootStateMachine);
+                _compositionState.Initialize(RootStateMachine, this);
             }
         }
         
@@ -563,11 +563,11 @@ namespace DMotion.Editor
         {
             StructureChanged?.Invoke(this, new StructureChangedEventArgs(StructureChangeType.LayerRemoved, layer));
             OnPropertyChanged(nameof(RootStateMachine));
-            
+
             // Reinitialize composition state
             if (RootStateMachine != null && RootStateMachine.IsMultiLayer)
             {
-                _compositionState.Initialize(RootStateMachine);
+                _compositionState.Initialize(RootStateMachine, this);
             }
         }
         
@@ -588,10 +588,10 @@ namespace DMotion.Editor
             StructureChanged?.Invoke(this, new StructureChangedEventArgs(StructureChangeType.ConvertedToMultiLayer));
             OnPropertyChanged(nameof(RootStateMachine));
             OnPropertyChanged(nameof(IsMultiLayer));
-            
+
             if (RootStateMachine != null && RootStateMachine.IsMultiLayer)
             {
-                _compositionState.Initialize(RootStateMachine);
+                _compositionState.Initialize(RootStateMachine, this);
                 PreviewType = EditorPreviewType.LayerComposition;
             }
         }
@@ -614,23 +614,115 @@ namespace DMotion.Editor
         }
         
         #endregion
-        
+
+        #region Navigation Events
+
+        /// <summary>
+        /// Fired when navigation to a specific state or transition is requested.
+        /// The state machine editor window handles this to navigate through sub-state machines.
+        /// </summary>
+        public event EventHandler<NavigationRequestedEventArgs> NavigationRequested;
+
+        /// <summary>
+        /// Requests navigation to a specific state within a container.
+        /// The state machine editor window will handle traversing sub-state machines and framing the selection.
+        /// </summary>
+        /// <param name="container">The container (layer or sub-state machine) containing the state.</param>
+        /// <param name="layerIndex">Index of the layer (-1 if not in a layer).</param>
+        /// <param name="targetState">The state to navigate to (may be nested in sub-state machines).</param>
+        public void RequestNavigateToState(INestedStateMachineContainer container, int layerIndex, AnimationStateAsset targetState)
+        {
+            NavigationRequested?.Invoke(this, new NavigationRequestedEventArgs(container, layerIndex, targetState));
+        }
+
+        /// <summary>
+        /// Requests navigation to a specific transition within a container.
+        /// </summary>
+        public void RequestNavigateToTransition(INestedStateMachineContainer container, int layerIndex, AnimationStateAsset fromState, AnimationStateAsset toState)
+        {
+            NavigationRequested?.Invoke(this, new NavigationRequestedEventArgs(container, layerIndex, fromState, toState));
+        }
+
+        #endregion
+
         #region Disposal
-        
+
         /// <summary>
         /// Cleans up the editor state.
         /// </summary>
         public void Dispose()
         {
+            GC.SuppressFinalize(this);
+
+            // Unsubscribe from child state events
             _previewState.PropertyChanged -= OnPreviewStateChanged;
             _compositionState.PropertyChanged -= OnCompositionStateChanged;
             _compositionState.LayerChanged -= OnLayerChanged;
             _compositionState.Clear();
+
+            // Events will be garbage collected when this instance is collected.
+            // Subscribers are responsible for unsubscribing in their own cleanup.
         }
-        
+
         #endregion
     }
-    
+
+    /// <summary>
+    /// Event args for navigation requests.
+    /// </summary>
+    public class NavigationRequestedEventArgs : EventArgs
+    {
+        /// <summary>
+        /// The container (layer or sub-state machine) that holds the target.
+        /// </summary>
+        public INestedStateMachineContainer Container { get; }
+
+        /// <summary>
+        /// Index of the layer (-1 if not navigating within a layer context).
+        /// </summary>
+        public int LayerIndex { get; }
+
+        /// <summary>
+        /// The target state to navigate to.
+        /// </summary>
+        public AnimationStateAsset TargetState { get; }
+
+        /// <summary>
+        /// The source state of a transition (null if not a transition).
+        /// </summary>
+        public AnimationStateAsset TransitionFrom { get; }
+
+        /// <summary>
+        /// The destination state of a transition (null if not a transition).
+        /// </summary>
+        public AnimationStateAsset TransitionTo { get; }
+
+        /// <summary>
+        /// Whether this is a transition navigation request.
+        /// </summary>
+        public bool IsTransition => TransitionFrom != null && TransitionTo != null;
+
+        /// <summary>
+        /// Convenience property to get the container as a LayerStateAsset (if it is one).
+        /// </summary>
+        public LayerStateAsset LayerAsset => Container as LayerStateAsset;
+
+        public NavigationRequestedEventArgs(INestedStateMachineContainer container, int layerIndex, AnimationStateAsset targetState)
+        {
+            Container = container;
+            LayerIndex = layerIndex;
+            TargetState = targetState;
+        }
+
+        public NavigationRequestedEventArgs(INestedStateMachineContainer container, int layerIndex, AnimationStateAsset fromState, AnimationStateAsset toState)
+        {
+            Container = container;
+            LayerIndex = layerIndex;
+            TransitionFrom = fromState;
+            TransitionTo = toState;
+        }
+    }
+
     /// <summary>
     /// Preview mode enumeration.
     /// </summary>

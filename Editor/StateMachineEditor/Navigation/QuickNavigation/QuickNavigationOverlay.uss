@@ -1,0 +1,114 @@
+/* Quick Navigation Overlay Styles */
+
+/* Overlay background (semi-transparent dark) */
+.quick-navigation-overlay {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.7);
+    align-items: center;
+    justify-content: center;
+}
+
+/* Main container panel */
+.quick-nav-container {
+    background-color: rgb(51, 51, 51);
+    border-radius: 8px;
+    min-width: 400px;
+    max-width: 700px;
+    min-height: 200px;
+    max-height: 500px;
+    padding: 10px 15px;
+}
+
+/* Header row */
+.quick-nav-header {
+    flex-direction: row;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.quick-nav-title {
+    font-size: 14px;
+    -unity-font-style: bold;
+}
+
+.quick-nav-hint {
+    color: rgb(153, 153, 153);
+    font-size: 11px;
+}
+
+/* Search bar */
+.quick-nav-search {
+    margin-bottom: 10px;
+}
+
+/* Tree container */
+.quick-nav-tree {
+    flex-grow: 1;
+}
+
+/* Footer */
+.quick-nav-footer {
+    margin-top: 10px;
+    color: rgb(128, 128, 128);
+    font-size: 11px;
+}
+
+/* Tree node row */
+.quick-nav-node {
+    flex-direction: row;
+    align-items: center;
+    padding: 4px 5px;
+    border-radius: 3px;
+}
+
+.quick-nav-node:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Selected node */
+.quick-nav-node--selected {
+    background-color: rgba(77, 128, 204, 0.5);
+}
+
+.quick-nav-node--selected:hover {
+    background-color: rgba(77, 128, 204, 0.6);
+}
+
+/* Matched node (search highlight) */
+.quick-nav-node--match .quick-nav-label {
+    color: rgb(255, 230, 77);
+}
+
+/* Expand/collapse icon */
+.quick-nav-expand {
+    width: 16px;
+    -unity-text-align: middle-center;
+    color: rgb(153, 153, 153);
+}
+
+/* Type icon */
+.quick-nav-icon {
+    margin-right: 5px;
+}
+
+/* Node name label */
+.quick-nav-label {
+    flex-grow: 1;
+}
+
+/* Type hint (Layer 0, SubState, etc.) */
+.quick-nav-type-hint {
+    color: rgb(128, 128, 128);
+    font-size: 10px;
+    margin-left: 10px;
+}
+
+/* Depth indentation - applied via margin-left in code based on depth */
+/* .quick-nav-depth-0 { margin-left: 0; } */
+/* .quick-nav-depth-1 { margin-left: 20px; } */
+/* .quick-nav-depth-2 { margin-left: 40px; } */
+/* etc. - handled dynamically in code */

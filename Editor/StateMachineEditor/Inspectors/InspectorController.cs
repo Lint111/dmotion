@@ -12,6 +12,7 @@ namespace DMotion.Editor
         private readonly StateMachineInspectorView inspectorView;
         private readonly AnimationStateMachineEditorView graphView;
         private StateMachineAsset currentMachine;
+        private EditorState _subscribedEditorState;
 
         public InspectorController(StateMachineInspectorView inspectorView, AnimationStateMachineEditorView graphView)
         {
@@ -24,7 +25,8 @@ namespace DMotion.Editor
         /// </summary>
         public void Subscribe()
         {
-            EditorState.Instance.PropertyChanged += OnEditorStatePropertyChanged;
+            _subscribedEditorState = EditorState.Instance;
+            _subscribedEditorState.PropertyChanged += OnEditorStatePropertyChanged;
         }
 
         /// <summary>
@@ -32,7 +34,11 @@ namespace DMotion.Editor
         /// </summary>
         public void Unsubscribe()
         {
-            EditorState.Instance.PropertyChanged -= OnEditorStatePropertyChanged;
+            if (_subscribedEditorState != null)
+            {
+                _subscribedEditorState.PropertyChanged -= OnEditorStatePropertyChanged;
+                _subscribedEditorState = null;
+            }
         }
 
         /// <summary>
@@ -61,7 +67,10 @@ namespace DMotion.Editor
             }
 
             var state = EditorState.Instance;
-            if (state.RootStateMachine != currentMachine) return;
+            // Only check that we have an active machine context
+            // Note: currentMachine may be a nested machine (layer/sub-state machine)
+            // while RootStateMachine stays constant as the opened root
+            if (currentMachine == null) return;
 
             // State selected
             if (state.SelectedState != null)

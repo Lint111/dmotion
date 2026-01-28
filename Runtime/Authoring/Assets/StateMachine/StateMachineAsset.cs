@@ -83,6 +83,16 @@ namespace DMotion.Authoring
         [SerializeField, HideInInspector]
         private string _rigBindingFingerprint;
 
+        // Cached LINQ results to avoid allocations during baking
+        [SerializeField, HideInInspector]
+        private bool _isMultiLayer;
+
+        [SerializeField, HideInInspector]
+        private int _layerCount;
+
+        [SerializeField, HideInInspector]
+        private int _clipCount;
+
         /// <summary>
         /// The armature data bound to this state machine.
         /// Typically a Unity Avatar, but can be other armature types via adapters.
@@ -310,7 +320,7 @@ namespace DMotion.Authoring
         #endregion
 
         public IEnumerable<AnimationClipAsset> Clips => States.SelectMany(s => s.Clips);
-        public int ClipCount => States.Sum(s => s.ClipCount);
+        public int ClipCount => _clipCount;
 
         #region Multi-Layer Support
 
@@ -318,7 +328,7 @@ namespace DMotion.Authoring
         /// Returns true if this state machine contains layer assets (multi-layer mode).
         /// Single-layer mode has regular states at root; multi-layer has LayerStateAssets.
         /// </summary>
-        public bool IsMultiLayer => States.OfType<LayerStateAsset>().Any();
+        public bool IsMultiLayer => _isMultiLayer;
 
         /// <summary>
         /// Gets all layer assets in this state machine.
@@ -332,7 +342,7 @@ namespace DMotion.Authoring
         /// <summary>
         /// Gets the number of layers. Returns 0 for single-layer state machines.
         /// </summary>
-        public int LayerCount => States.OfType<LayerStateAsset>().Count();
+        public int LayerCount => _layerCount;
 
         /// <summary>
         /// Gets a layer by index. Returns null if index is out of range or not multi-layer.
@@ -771,6 +781,37 @@ namespace DMotion.Authoring
 
             return new Regex($"^{escaped}$", RegexOptions.IgnoreCase);
         }
+
+        #endregion
+
+        #region Editor Validation
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            // Cache LINQ results to avoid allocations during baking
+            _layerCount = 0;
+            _isMultiLayer = false;
+            _clipCount = 0;
+
+            if (States == null) return;
+
+            // Count layers and check if multi-layer
+            foreach (var state in States)
+            {
+                if (state == null)
+                    continue;
+
+                if (state is LayerStateAsset)
+                {
+                    _layerCount++;
+                    _isMultiLayer = true;
+                }
+
+                _clipCount += state.ClipCount;
+            }
+        }
+#endif
 
         #endregion
     }

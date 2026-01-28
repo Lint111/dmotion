@@ -55,7 +55,7 @@ namespace DMotion.Authoring
             {
                 var blob = stateMachineBlobConverter.BuildBlob();
                 result.blob = Unity.Entities.LowLevel.Unsafe.UnsafeUntypedBlobAssetReference.Create(blob);
-                stateMachineBlobConverter.Dispose();
+                stateMachineBlobConverter.DisposeNativeCollections();
             }
         }
     }

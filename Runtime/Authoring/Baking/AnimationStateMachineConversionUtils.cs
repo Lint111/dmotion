@@ -112,7 +112,7 @@ namespace DMotion.Authoring
             }
             finally
             {
-                converter.Dispose();
+                converter.DisposeNativeCollections();
             }
         }
 
@@ -147,7 +147,7 @@ namespace DMotion.Authoring
             catch
             {
                 // Dispose partially-built converter to prevent native memory leaks
-                converter.Dispose();
+                converter.DisposeNativeCollections();
                 throw;
             }
 

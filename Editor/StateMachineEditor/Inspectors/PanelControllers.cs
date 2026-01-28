@@ -14,6 +14,7 @@ namespace DMotion.Editor
         private readonly BreadcrumbBar breadcrumbBar;
         // Retained for domain reload state consistency
         private StateMachineAsset rootMachine;
+        private EditorState _subscribedEditorState;
 
         /// <summary>
         /// Fired when navigation should load a different state machine.
@@ -28,8 +29,9 @@ namespace DMotion.Editor
 
         public void Subscribe()
         {
-            EditorState.Instance.PropertyChanged += OnEditorStatePropertyChanged;
-            
+            _subscribedEditorState = EditorState.Instance;
+            _subscribedEditorState.PropertyChanged += OnEditorStatePropertyChanged;
+
             // Wire up breadcrumb's internal navigation to raise events
             if (breadcrumbBar != null)
             {
@@ -39,8 +41,12 @@ namespace DMotion.Editor
 
         public void Unsubscribe()
         {
-            EditorState.Instance.PropertyChanged -= OnEditorStatePropertyChanged;
-            
+            if (_subscribedEditorState != null)
+            {
+                _subscribedEditorState.PropertyChanged -= OnEditorStatePropertyChanged;
+                _subscribedEditorState = null;
+            }
+
             if (breadcrumbBar != null)
             {
                 breadcrumbBar.OnNavigate -= OnBreadcrumbClicked;
@@ -108,6 +114,7 @@ namespace DMotion.Editor
     {
         private readonly StateMachineInspectorView panelView;
         private StateMachineAsset currentMachine;
+        private EditorState _subscribedEditorState;
 
         public ParametersPanelController(StateMachineInspectorView panelView)
         {
@@ -116,12 +123,15 @@ namespace DMotion.Editor
 
         public void Subscribe()
         {
-            EditorState.Instance.StructureChanged += OnStructureChanged;
+            _subscribedEditorState = EditorState.Instance;
+            _subscribedEditorState.StructureChanged += OnStructureChanged;
         }
 
         public void Unsubscribe()
         {
-            EditorState.Instance.StructureChanged -= OnStructureChanged;
+            if (_subscribedEditorState == null) return; 
+            _subscribedEditorState.StructureChanged -= OnStructureChanged;
+            _subscribedEditorState = null;
         }
 
         public void SetContext(StateMachineAsset machine)
@@ -135,7 +145,8 @@ namespace DMotion.Editor
             if (e.ChangeType == StructureChangeType.ParameterAdded ||
                 e.ChangeType == StructureChangeType.ParameterRemoved)
             {
-                if (EditorState.Instance.RootStateMachine != currentMachine) return;
+                // Only check that we have an active machine context
+                if (currentMachine == null) return;
                 // Panel auto-refreshes via SerializedObject, but we could force refresh here if needed
             }
         }
@@ -159,6 +170,8 @@ namespace DMotion.Editor
     {
         private readonly StateMachineInspectorView panelView;
         private StateMachineAsset currentMachine;
+        private StateMachineAsset rootMachine;
+        private EditorState _subscribedEditorState;
 
         public DependenciesPanelController(StateMachineInspectorView panelView)
         {
@@ -167,23 +180,28 @@ namespace DMotion.Editor
 
         public void Subscribe()
         {
-            EditorState.Instance.StructureChanged += OnStructureChanged;
+            _subscribedEditorState = EditorState.Instance;
+            _subscribedEditorState.StructureChanged += OnStructureChanged;
         }
 
         public void Unsubscribe()
         {
-            EditorState.Instance.StructureChanged -= OnStructureChanged;
+            if (_subscribedEditorState == null) return; 
+            _subscribedEditorState.StructureChanged -= OnStructureChanged;
+            _subscribedEditorState = null;
         }
 
-        public void SetContext(StateMachineAsset machine)
+        public void SetContext(StateMachineAsset machine, StateMachineAsset root = null)
         {
             currentMachine = machine;
+            rootMachine = root ?? machine;
             RefreshPanel();
         }
 
         private void OnStructureChanged(object sender, StructureChangedEventArgs e)
         {
-            if (EditorState.Instance.RootStateMachine != currentMachine) return;
+            // Only respond to events for our root machine context
+            if (rootMachine == null || EditorState.Instance.RootStateMachine != rootMachine) return;
             
             switch (e.ChangeType)
             {
@@ -195,7 +213,9 @@ namespace DMotion.Editor
                     }
                     break;
                     
+                case StructureChangeType.ParameterAdded:
                 case StructureChangeType.ParameterRemoved:
+                case StructureChangeType.ParameterChanged:
                 case StructureChangeType.LayerAdded:
                 case StructureChangeType.LayerRemoved:
                 case StructureChangeType.ConvertedToMultiLayer:
@@ -237,6 +257,7 @@ namespace DMotion.Editor
         private readonly StateMachineInspectorView panelView;
         private StateMachineAsset currentMachine;
         private StateMachineAsset rootMachine;
+        private EditorState _subscribedEditorState;
 
         /// <summary>
         /// Fired when user requests to edit a layer's state machine.
@@ -250,12 +271,15 @@ namespace DMotion.Editor
 
         public void Subscribe()
         {
-            EditorState.Instance.StructureChanged += OnStructureChanged;
+            _subscribedEditorState = EditorState.Instance;
+            _subscribedEditorState.StructureChanged += OnStructureChanged;
         }
 
         public void Unsubscribe()
         {
-            EditorState.Instance.StructureChanged -= OnStructureChanged;
+            if (_subscribedEditorState == null) return;
+            _subscribedEditorState.StructureChanged -= OnStructureChanged;
+            _subscribedEditorState = null;
         }
 
         public void SetContext(StateMachineAsset machine, StateMachineAsset root = null)
