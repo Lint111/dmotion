@@ -16,11 +16,23 @@ namespace DMotion.Editor
     internal class LayerCompositionInspectorBuilder
     {
         #region Constants
-        
+
+        // Weight slider range
         private const float MinWeight = 0f;
         private const float MaxWeight = 1f;
+
+        // UI element widths
         private const float FloatFieldWidth = PreviewEditorConstants.FloatFieldWidth;
-        
+        private const float WeightSliderMinWidth = 60f;
+        private const float BlendFieldMinWidth = 35f;
+        private const float NavigateButtonWidth = 140f;
+
+        // Spacing and margins
+        private const float BaseLayerNameMarginLeft = 10f;
+        private const float HeaderPaddingVertical = 2f;
+        private const float SelectionRowMarginBottom = 5f;
+        private const float TimelineSectionMarginTop = 5f;
+
         #endregion
         
         #region State
@@ -50,15 +62,18 @@ namespace DMotion.Editor
             public Foldout Foldout;
             public VisualElement Content;
             public Toggle EnableToggle;
+            public VisualElement WeightContainer;
             public Slider WeightSlider;
             public Label WeightLabel;
-            public Label BlendModeLabel;
+            public EnumField BlendModeField;
             public Label SelectionLabel;
             public Button NavigateButton;
             public IconButton ClearButton; // Explicit clear assignment button
 
             // Per-layer timeline
             public TimelineScrubber Timeline;
+            public Action<float> TimelineTimeChangedHandler;
+            public Action<bool> TimelinePlayStateChangedHandler;
 
             // State controls
             public VisualElement StateControls;
@@ -194,10 +209,13 @@ namespace DMotion.Editor
             {
                 UnbindBlendSpaceElement(section);
 
+                // Unsubscribe from timeline events using stored delegate references
                 if (section.Timeline != null)
                 {
-                    section.Timeline.OnTimeChanged -= time => OnLayerTimeChanged(section.LayerIndex, time);
-                    section.Timeline.OnPlayStateChanged -= playing => OnLayerPlayStateChanged(section.LayerIndex, playing);
+                    if (section.TimelineTimeChangedHandler != null)
+                        section.Timeline.OnTimeChanged -= section.TimelineTimeChangedHandler;
+                    if (section.TimelinePlayStateChangedHandler != null)
+                        section.Timeline.OnPlayStateChanged -= section.TimelinePlayStateChangedHandler;
                 }
             }
             layerSections.Clear();
@@ -337,7 +355,7 @@ namespace DMotion.Editor
             
             var labelElement = new Label(label);
             labelElement.AddToClassList("property-label");
-            labelElement.style.minWidth = 60;
+            labelElement.style.minWidth = WeightSliderMinWidth;
             row.Add(labelElement);
             
             var valueContainer = new VisualElement();
@@ -352,7 +370,7 @@ namespace DMotion.Editor
             
             var valueLabel = new Label(value.ToString("F2"));
             valueLabel.AddToClassList("value-label");
-            valueLabel.style.minWidth = 35;
+            valueLabel.style.minWidth = BlendFieldMinWidth;
             
             slider.RegisterValueChangedCallback(evt =>
             {
@@ -381,7 +399,7 @@ namespace DMotion.Editor
             playbackRow.AddToClassList("playback-row");
             playbackRow.style.flexDirection = FlexDirection.Row;
             playbackRow.style.alignItems = Align.Center;
-            playbackRow.style.marginBottom = 5;
+            playbackRow.style.marginBottom = SelectionRowMarginBottom;
             
             playButton = new Button(OnPlayButtonClicked) { text = "▶ Play" };
             playButton.AddToClassList("play-button");
@@ -390,7 +408,7 @@ namespace DMotion.Editor
             
             var resetButton = new Button(OnResetButtonClicked) { text = "⟲ Reset" };
             resetButton.AddToClassList("reset-button");
-            resetButton.style.minWidth = 60;
+            resetButton.style.minWidth = WeightSliderMinWidth;
             playbackRow.Add(resetButton);
             
             var spacer = new VisualElement();
@@ -485,12 +503,12 @@ namespace DMotion.Editor
             }
         }
         
-        private LayerSectionData CreateLayerSection(ObservableLayerState layerState, int layerIndex)
+        private LayerSectionData CreateLayerSection(LayerStateAsset layerState, int layerIndex)
         {
             var section = new LayerSectionData
             {
                 LayerIndex = layerIndex,
-                LayerAsset = layerState.LayerAsset
+                LayerAsset = layerState
             };
 
             // Use a wrapper element instead of Foldout to have full control over collapse behavior
@@ -543,14 +561,14 @@ namespace DMotion.Editor
             return section;
         }
         
-        private VisualElement CreateLayerHeader(LayerSectionData section, ObservableLayerState layerState)
+        private VisualElement CreateLayerHeader(LayerSectionData section, LayerStateAsset layerState)
         {
             var header = new VisualElement();
             header.AddToClassList("layer-header");
             header.style.flexDirection = FlexDirection.Row;
             header.style.alignItems = Align.Center;
-            header.style.paddingTop = 2;
-            header.style.paddingBottom = 2;
+            header.style.paddingTop = HeaderPaddingVertical;
+            header.style.paddingBottom = HeaderPaddingVertical;
 
             // No manual arrow needed - Foldout's native checkmark handles collapse indicator
 
@@ -568,52 +586,97 @@ namespace DMotion.Editor
             section.EnableToggle.RegisterCallback<ClickEvent>(evt => evt.StopPropagation());
             header.Add(section.EnableToggle);
 
-            // Layer name
+            // Layer name container
             var nameContainer = new VisualElement();
             nameContainer.style.flexDirection = FlexDirection.Column;
             nameContainer.style.flexGrow = 1;
 
-            var nameLabel = new Label($"Layer {layerState.LayerIndex}: {layerState.Name}");
+            // Base layer: shift name right since we don't have weight slider
+            if (layerState.IsBaseLayer)
+            {
+                nameContainer.style.marginLeft = BaseLayerNameMarginLeft;
+            }
+
+            var nameLabel = new Label($"Layer {layerState.LayerIndex}: {layerState.name}");
             nameLabel.AddToClassList("layer-name");
             nameContainer.Add(nameLabel);
 
-            section.BlendModeLabel = new Label(layerState.BlendMode.ToString());
-            section.BlendModeLabel.AddToClassList("layer-blend-mode");
-            section.BlendModeLabel.style.fontSize = 10;
-            section.BlendModeLabel.style.color = new Color(0.6f, 0.6f, 0.6f);
-            nameContainer.Add(section.BlendModeLabel);
+            // Blend mode control
+            // Base layer: Read-only label (always Override)
+            // Other layers: Editable dropdown
+            if (layerState.IsBaseLayer)
+            {
+                var blendModeLabel = new Label("Override");
+                blendModeLabel.AddToClassList("layer-blend-mode");
+                blendModeLabel.style.fontSize = 10;
+                nameContainer.Add(blendModeLabel);
+            }
+            else
+            {
+                section.BlendModeField = new EnumField(layerState.BlendMode);
+                section.BlendModeField.AddToClassList("layer-blend-mode-field");
+                section.BlendModeField.style.fontSize = 10;
+                section.BlendModeField.style.maxWidth = 80;
+                section.BlendModeField.RegisterValueChangedCallback(evt =>
+                {
+                    if (evt.newValue is LayerBlendMode blendMode)
+                    {
+                        var layer = compositionState?.GetLayer(section.LayerIndex);
+                        if (layer != null)
+                        {
+                            layer.BlendMode = blendMode;
+                            // Refresh to update weight slider visibility
+                            RefreshLayerSection(section);
+                        }
+                    }
+                    evt.StopPropagation();
+                });
+                // Stop click propagation to prevent foldout toggle
+                section.BlendModeField.RegisterCallback<ClickEvent>(evt => evt.StopPropagation());
+                section.BlendModeField.RegisterCallback<PointerDownEvent>(evt => evt.StopPropagation());
+                nameContainer.Add(section.BlendModeField);
+            }
 
             header.Add(nameContainer);
 
-            // Weight slider
-            var weightContainer = new VisualElement();
-            weightContainer.style.flexDirection = FlexDirection.Row;
-            weightContainer.style.alignItems = Align.Center;
-            weightContainer.style.minWidth = 140;
+            // Weight slider - only for non-Layer 0 and Additive blend mode
+            // Base layer weight locked to 1.0
+            // Override blend mode always has effective weight 1.0
+            bool shouldShowWeight = ShouldShowWeightSlider(layerState, layerState.BlendMode);
+
+            section.WeightContainer = new VisualElement();
+            section.WeightContainer.style.flexDirection = FlexDirection.Row;
+            section.WeightContainer.style.alignItems = Align.Center;
+            section.WeightContainer.style.minWidth = NavigateButtonWidth;
+            section.WeightContainer.style.display = shouldShowWeight ? DisplayStyle.Flex : DisplayStyle.None;
 
             var weightLabel = new Label("Weight:");
             weightLabel.style.minWidth = 45;
-            weightContainer.Add(weightLabel);
+            section.WeightContainer.Add(weightLabel);
 
             section.WeightSlider = new Slider(MinWeight, MaxWeight);
             section.WeightSlider.style.flexGrow = 1;
             section.WeightSlider.value = layerState.Weight;
+
             section.WeightSlider.RegisterValueChangedCallback(evt =>
             {
                 var layer = compositionState?.GetLayer(section.LayerIndex);
-                if (layer != null) layer.Weight = evt.newValue;
-                section.WeightLabel.text = evt.newValue.ToString("F2");
+                // Base layer weight is locked (safety check)
+                if (layer != null && layer.CanModifyWeight)
+                    layer.Weight = evt.newValue;
+                if (section.WeightLabel != null)
+                    section.WeightLabel.text = evt.newValue.ToString("F2");
             });
             // Stop click propagation to prevent foldout toggle when interacting with slider
             section.WeightSlider.RegisterCallback<ClickEvent>(evt => evt.StopPropagation());
             section.WeightSlider.RegisterCallback<PointerDownEvent>(evt => evt.StopPropagation());
-            weightContainer.Add(section.WeightSlider);
+            section.WeightContainer.Add(section.WeightSlider);
 
             section.WeightLabel = new Label(layerState.Weight.ToString("F2"));
-            section.WeightLabel.style.minWidth = 35;
-            weightContainer.Add(section.WeightLabel);
+            section.WeightLabel.style.minWidth = BlendFieldMinWidth;
+            section.WeightContainer.Add(section.WeightLabel);
 
-            header.Add(weightContainer);
+            header.Add(section.WeightContainer);
 
             // Clear assignment button (X) - explicit action to unassign layer
             section.ClearButton = IconButton.CreateClearButton(
@@ -626,27 +689,48 @@ namespace DMotion.Editor
 
             return header;
         }
+
+        /// <summary>
+        /// Determines whether the weight slider should be shown for a layer.
+        /// Base layer: Never show (weight locked to 1.0).
+        /// Override blend mode: Never show (weight is effectively 1.0).
+        /// Additive blend mode: Show (weight is variable).
+        /// </summary>
+        private static bool ShouldShowWeightSlider(LayerStateAsset layer, LayerBlendMode blendMode)
+        {
+            // Base layer weight cannot be modified
+            if (!layer.CanModifyWeight) return false;
+
+            // Override mode: weight is effectively 1.0
+            if (blendMode == LayerBlendMode.Override) return false;
+
+            // Additive mode: weight is variable
+            return true;
+        }
         
-        private void BuildLayerContent(LayerSectionData section, ObservableLayerState layerState)
+        private void BuildLayerContent(LayerSectionData section, LayerStateAsset layerState)
         {
             // Current selection
             var selectionRow = new VisualElement();
             selectionRow.style.flexDirection = FlexDirection.Row;
             selectionRow.style.alignItems = Align.Center;
-            selectionRow.style.marginBottom = 5;
-            
+            selectionRow.style.marginBottom = SelectionRowMarginBottom;
+
             section.SelectionLabel = new Label(GetSelectionText(layerState));
             section.SelectionLabel.AddToClassList("selection-label");
             section.SelectionLabel.style.flexGrow = 1;
+            section.SelectionLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
             selectionRow.Add(section.SelectionLabel);
-            
+
+            // Navigation button - only show when layer is assigned
             section.NavigateButton = new Button(() => OnNavigateToLayer?.Invoke(section.LayerIndex, section.LayerAsset))
             {
                 text = "Navigate →"
             };
             section.NavigateButton.AddToClassList("navigate-button");
+            section.NavigateButton.style.display = layerState.IsAssigned ? DisplayStyle.Flex : DisplayStyle.None;
             selectionRow.Add(section.NavigateButton);
-            
+
             section.Content.Add(selectionRow);
             
             // State controls (shown when a state is selected)
@@ -663,7 +747,7 @@ namespace DMotion.Editor
             
             // Per-layer timeline
             var timelineSection = new VisualElement();
-            timelineSection.style.marginTop = 5;
+            timelineSection.style.marginTop = TimelineSectionMarginTop;
             
             section.Timeline = new TimelineScrubber();
             section.Timeline.IsLooping = true;
@@ -672,9 +756,12 @@ namespace DMotion.Editor
             ConfigureLayerTimeline(section, layerState);
             
             // Subscribe to timeline events
+            // Store delegate references for proper unsubscription in Cleanup()
             int layerIdx = section.LayerIndex;
-            section.Timeline.OnTimeChanged += time => OnLayerTimeChanged(layerIdx, time);
-            section.Timeline.OnPlayStateChanged += playing => OnLayerPlayStateChanged(layerIdx, playing);
+            section.TimelineTimeChangedHandler = time => OnLayerTimeChanged(layerIdx, time);
+            section.TimelinePlayStateChangedHandler = playing => OnLayerPlayStateChanged(layerIdx, playing);
+            section.Timeline.OnTimeChanged += section.TimelineTimeChangedHandler;
+            section.Timeline.OnPlayStateChanged += section.TimelinePlayStateChangedHandler;
             
             timelineSection.Add(section.Timeline);
             section.Content.Add(timelineSection);
@@ -683,7 +770,7 @@ namespace DMotion.Editor
             RefreshLayerSection(section);
         }
         
-        private void BuildLayerStateControls(LayerSectionData section, ObservableLayerState layerState)
+        private void BuildLayerStateControls(LayerSectionData section, LayerStateAsset layerState)
         {
             // Blend space visual element container - populated dynamically based on selected state
             section.BlendSpaceContainer = new VisualElement();
@@ -735,11 +822,13 @@ namespace DMotion.Editor
         /// </summary>
         private void BindBlendSpaceElement(LayerSectionData section, AnimationStateAsset selectedState)
         {
-            // Skip if already bound to this state
-            if (section.BoundBlendState == selectedState && section.BlendSpaceElement != null)
+            // Skip if already bound to this state AND element still exists in hierarchy
+            if (section.BoundBlendState == selectedState &&
+                section.BlendSpaceElement != null &&
+                section.BlendSpaceElement.parent != null)
                 return;
 
-            // Cleanup previous element
+            // Cleanup previous element (also clears container defensively)
             UnbindBlendSpaceElement(section);
 
             section.BoundBlendState = selectedState;
@@ -777,6 +866,8 @@ namespace DMotion.Editor
                 };
                 element.OnPreviewPositionChanged += section.CachedPreviewPositionHandler;
 
+                // Defensive: ensure container is clear before adding
+                section.BlendSpaceContainer.Clear();
                 section.BlendSpaceElement = element;
                 section.BlendSpaceContainer.Add(element);
             }
@@ -813,6 +904,8 @@ namespace DMotion.Editor
                 };
                 element.OnPreviewPositionChanged += section.CachedPreviewPositionHandler;
 
+                // Defensive: ensure container is clear before adding
+                section.BlendSpaceContainer.Clear();
                 section.BlendSpaceElement = element;
                 section.BlendSpaceContainer.Add(element);
             }
@@ -849,7 +942,7 @@ namespace DMotion.Editor
             preview?.SetLayerBlendPosition(section.LayerIndex, layer.BlendPosition);
 
             // Persist via PreviewSettings
-            var selectedState = layer.PreviewState.SelectedState;
+            var selectedState = layer.SelectedState;
             if (selectedState is LinearBlendStateAsset)
                 PreviewSettings.instance.SetBlendValue1D(selectedState, value);
             else if (selectedState is Directional2DBlendStateAsset)
@@ -868,7 +961,7 @@ namespace DMotion.Editor
 
             // Visual element already updated by the caller
             // Persist via PreviewSettings
-            var selectedState = layer.PreviewState.SelectedState;
+            var selectedState = layer.SelectedState;
             if (selectedState is Directional2DBlendStateAsset)
                 PreviewSettings.instance.SetBlendValue2D(selectedState, value);
         }
@@ -919,7 +1012,7 @@ namespace DMotion.Editor
             }
         }
         
-        private void BuildLayerTransitionControls(LayerSectionData section, ObservableLayerState layerState)
+        private void BuildLayerTransitionControls(LayerSectionData section, LayerStateAsset layerState)
         {
             // Transition progress
             var progressRow = CreateSliderRow(
@@ -937,7 +1030,7 @@ namespace DMotion.Editor
             section.TransitionControls.Add(progressRow);
         }
         
-        private void ConfigureLayerTimeline(LayerSectionData section, ObservableLayerState layerState)
+        private void ConfigureLayerTimeline(LayerSectionData section, LayerStateAsset layerState)
         {
             var selectedState = layerState.SelectedState;
             if (selectedState == null)
@@ -959,29 +1052,50 @@ namespace DMotion.Editor
         {
             if (compositionState == null || section.LayerIndex >= compositionState.LayerCount)
                 return;
-            
+
             var layerState = compositionState.Layers[section.LayerIndex];
-            
+
             // Update header controls
             section.EnableToggle?.SetValueWithoutNotify(layerState.IsEnabled);
-            section.WeightSlider?.SetValueWithoutNotify(layerState.Weight);
-            if (section.WeightLabel != null)
-                section.WeightLabel.text = layerState.Weight.ToString("F2");
 
-            // Update selection label
-            if (section.SelectionLabel != null)
-                section.SelectionLabel.text = GetSelectionText(layerState);
+            // Update blend mode field
+            section.BlendModeField?.SetValueWithoutNotify(layerState.BlendMode);
+
+            // Update weight slider visibility based on blend mode
+            bool shouldShowWeight = ShouldShowWeightSlider(layerState, layerState.BlendMode);
+            if (section.WeightContainer != null)
+                section.WeightContainer.style.display = shouldShowWeight ? DisplayStyle.Flex : DisplayStyle.None;
+
+            // Update weight values (only if visible)
+            if (shouldShowWeight)
+            {
+                section.WeightSlider?.SetValueWithoutNotify(layerState.Weight);
+                if (section.WeightLabel != null)
+                    section.WeightLabel.text = layerState.Weight.ToString("F2");
+            }
 
             // Check if layer is unassigned
             bool isAssigned = layerState.IsAssigned;
 
+            // Update selection label text
+            if (section.SelectionLabel != null)
+            {
+                section.SelectionLabel.text = GetSelectionText(layerState);
+                section.SelectionLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
+            }
+
+            // Show/hide navigation button based on assignment status
+            if (section.NavigateButton != null)
+                section.NavigateButton.style.display = isAssigned ? DisplayStyle.Flex : DisplayStyle.None;
+
             // Show/hide clear button based on assignment status
             section.ClearButton?.SetVisible(isAssigned);
-            
-            // Disable weight controls for unassigned layers (they don't contribute)
-            section.WeightSlider?.SetEnabled(isAssigned);
+
+            // Enable/disable controls based on assignment
+            if (shouldShowWeight)
+                section.WeightSlider?.SetEnabled(isAssigned);
             section.EnableToggle?.SetEnabled(isAssigned);
-            
+
             if (!isAssigned)
             {
                 // Hide all controls for unassigned layers
@@ -1056,22 +1170,24 @@ namespace DMotion.Editor
             ConfigureLayerTimeline(section, layerState);
         }
         
-        private static string GetSelectionText(ObservableLayerState layerState)
+        private static string GetSelectionText(LayerStateAsset layerState)
         {
             if (layerState.IsTransitionMode)
             {
-                var from = layerState.PreviewState.TransitionFrom?.name ?? "?";
-                var to = layerState.PreviewState.TransitionTo?.name ?? "?";
-                return $"→ {from} → {to}";
+                // Transition: show arrow to indicate flow
+                var from = layerState.TransitionFrom?.name ?? "?";
+                var to = layerState.TransitionTo?.name ?? "?";
+                return $"{from} → {to}";
             }
-            
+
             if (layerState.SelectedState != null)
             {
-                return $"→ {layerState.SelectedState.name}";
+                // Simple state: no arrow needed
+                return layerState.SelectedState.name;
             }
-            
+
             // Layer is unassigned - not contributing to animation
-            return $"⚠ Layer {layerState.LayerIndex} state is unassigned";
+            return "Unassigned";
         }
         
         private void OnLayerTimeChanged(int layerIndex, float time)

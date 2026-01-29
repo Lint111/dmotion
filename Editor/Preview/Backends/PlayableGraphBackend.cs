@@ -71,26 +71,44 @@ namespace DMotion.Editor
         
         public void CreatePreviewForState(AnimationStateAsset state)
         {
+            // Save camera state before clearing
+            var savedCameraState = CameraState;
+
             // Clear layer composition if switching to state preview
             DisposeLayerComposition();
-            
+
             currentState = state;
             transitionFromState = null;
             transitionToState = null;
-            
+
             renderer.CreatePreviewForState(state);
+
+            // Restore camera state after preview creation
+            if (savedCameraState.IsValid)
+            {
+                renderer.CameraState = savedCameraState;
+            }
         }
         
         public void CreateTransitionPreview(AnimationStateAsset fromState, AnimationStateAsset toState, float transitionDuration)
         {
+            // Save camera state before clearing
+            var savedCameraState = CameraState;
+
             // Clear layer composition if switching to transition preview
             DisposeLayerComposition();
-            
+
             currentState = null;
             transitionFromState = fromState;
             transitionToState = toState;
-            
+
             renderer.CreateTransitionPreview(fromState, toState, transitionDuration);
+
+            // Restore camera state after preview creation
+            if (savedCameraState.IsValid)
+            {
+                renderer.CameraState = savedCameraState;
+            }
         }
         
         /// <summary>
@@ -100,25 +118,34 @@ namespace DMotion.Editor
         /// <param name="stateMachine">The multi-layer state machine to preview.</param>
         public void CreateLayerCompositionPreview(StateMachineAsset stateMachine)
         {
+            // Save camera state from current preview before clearing
+            var savedCameraState = CameraState;
+
             // Clear single-state preview
             renderer.Clear();
             currentState = null;
             transitionFromState = null;
             transitionToState = null;
-            
+
             // Create or reuse layer composition preview
             if (layerCompositionPreview == null)
             {
                 layerCompositionPreview = new LayerCompositionPreview();
             }
-            
+
             // Set model if we have one
             if (previewModel != null)
             {
                 layerCompositionPreview.SetPreviewModel(previewModel);
             }
-            
+
             layerCompositionPreview.Initialize(stateMachine);
+
+            // Restore camera state after initialization
+            if (savedCameraState.IsValid)
+            {
+                layerCompositionPreview.CameraState = savedCameraState;
+            }
         }
         
         public void SetPreviewModel(GameObject model)

@@ -252,8 +252,11 @@ namespace DMotion.Editor
         
         public void SetLayerWeight(int layerIndex, float weight)
         {
+            // Layer 0 is always weight 1.0 (base opaque layer)
+            if (layerIndex == 0) return;
+
             if (layerIndex < 0 || layerIndex >= layers.Count) return;
-            
+
             layers[layerIndex].Weight = Mathf.Clamp01(weight);
             UpdateLayerMixerWeights();
         }
@@ -285,12 +288,13 @@ namespace DMotion.Editor
         public void SetLayerState(int layerIndex, AnimationStateAsset state)
         {
             if (layerIndex < 0 || layerIndex >= layers.Count) return;
-            
+
             var layer = layers[layerIndex];
             if (layer.CurrentState == state) return;
-            
+
             layer.CurrentState = state;
             RebuildLayerPlayables(layer);
+            UpdateLayerMixerWeights(); // Ensure unassigned layers don't affect blend
         }
         
         public void SetLayerNormalizedTime(int layerIndex, float normalizedTime)

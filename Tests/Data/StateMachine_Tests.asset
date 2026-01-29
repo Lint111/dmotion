@@ -53,6 +53,9 @@ MonoBehaviour:
   _rigBindingStatus: 0
   _rigBindingSource: 0
   _rigBindingFingerprint: 
+  _isMultiLayer: 0
+  _layerCount: 0
+  _clipCount: 4
   _parameterDependencies: []
   _parameterLinks: []
 --- !u!114 &335224122487346526
@@ -74,7 +77,7 @@ MonoBehaviour:
   - ToState: {fileID: 5953759798062009019}
     HasEndTime: 1
     EndTime: 1.0043378
-    TransitionDuration: 2.0117064
+    TransitionDuration: 2
     Offset: 0
     Conditions:
     - Parameter: {fileID: 9102714923962245846}
@@ -94,8 +97,8 @@ MonoBehaviour:
         inWeight: 0
         outWeight: 0.33333334
       - serializedVersion: 3
-        time: 0.159375
-        value: 0.26
+        time: 0.1375
+        value: 0.2
         inSlope: -1
         outSlope: -1
         tangentMode: 0
@@ -115,7 +118,7 @@ MonoBehaviour:
       m_PostInfinity: 2
       m_RotationOrder: 4
   StateEditorData:
-    GraphPosition: {x: 330, y: 202}
+    GraphPosition: {x: 316.99997, y: 188.99998}
     Guid: 039c0298c5d43d943b7bc7b34f1395c0
   BlendClips:
   - Clip: {fileID: 11400000, guid: 2d8b5b7a11d7f3c418b9a6677c0cc292, type: 2}
@@ -163,7 +166,7 @@ MonoBehaviour:
       m_PostInfinity: 2
       m_RotationOrder: 4
   StateEditorData:
-    GraphPosition: {x: 547.08997, y: 201.9675}
+    GraphPosition: {x: 563, y: 189}
     Guid: e580aeaeb06da5f4399b7ea692e645bb
   Clip: {fileID: 11400000, guid: 2fa5654cbbd35e54f9a7b6cf79f67e1d, type: 2}
 --- !u!114 &9102714923962245846

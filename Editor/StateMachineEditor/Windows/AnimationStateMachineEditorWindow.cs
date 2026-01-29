@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using DMotion.Authoring;
 using Unity.Entities.Editor;
 using UnityEditor;
@@ -161,21 +162,27 @@ namespace DMotion.Editor
         private void OnDestroy()
         {
             EditorApplication.playModeStateChanged -= OnPlaymodeStateChanged;
-            
+
+            // Save view transform before destruction
+            if (lastEditedStateMachine != null && stateMachineEditorView != null)
+            {
+                SaveViewTransform(lastEditedStateMachine);
+            }
+
             // Unsubscribe all panel controllers
             inspectorController?.Unsubscribe();
             parametersPanelController?.Unsubscribe();
             layersPanelController?.Unsubscribe();
             dependenciesPanelController?.Unsubscribe();
             breadcrumbController?.Unsubscribe();
-            
+
             // Cleanup quick navigation overlay
             if (quickNavigationOverlay != null)
             {
                 quickNavigationOverlay.OnNavigate -= OnQuickNavigationRequested;
                 quickNavigationOverlay.OnClosed -= OnQuickNavigationClosed;
             }
-            
+
             // EditorState handles its own cleanup via Dispose pattern
         }
         
@@ -254,6 +261,9 @@ namespace DMotion.Editor
                     
                     // Wire up layer navigation shortcut handler
                     stateMachineEditorView.OnLayerNavigationRequested = OnLayerShortcutNavigation;
+
+                    // Wire up view transform change handler for persistence
+                    stateMachineEditorView.OnViewTransformChanged = OnViewTransformChanged;
                 }
             }
             
@@ -431,6 +441,18 @@ namespace DMotion.Editor
             {
                 stateMachineEditorView?.Focus();
             });
+        }
+
+        /// <summary>
+        /// Handles view transform (pan/zoom) changes.
+        /// Saves the current view transform for the currently loaded state machine.
+        /// </summary>
+        private void OnViewTransformChanged()
+        {
+            if (lastEditedStateMachine != null && stateMachineEditorView != null)
+            {
+                SaveViewTransform(lastEditedStateMachine);
+            }
         }
 
         /// <summary>
@@ -629,32 +651,51 @@ namespace DMotion.Editor
         {
             if (hasRestoredAfterDomainReload) return;
             hasRestoredAfterDomainReload = true;
-            
-            // Restore EditorState.RootStateMachine from serialized field
-            // EditorState singleton is recreated after domain reload, losing RootStateMachine
-            if (rootStateMachine != null && EditorState.Instance.RootStateMachine != rootStateMachine)
-            {
-                EditorState.Instance.RootStateMachine = rootStateMachine;
-            }
-            
-            // Restore breadcrumb navigation state
+
+            // CRITICAL: Restore breadcrumb navigation state BEFORE setting EditorState.RootStateMachine
+            // Setting RootStateMachine triggers PropertyChanged events that update breadcrumb,
+            // which would overwrite the saved navigation state before we restore it
             breadcrumbBar?.RestoreNavigationState();
-            
+
             // Get the current state machine from breadcrumb (which may have been restored)
             var currentFromBreadcrumb = breadcrumbBar?.CurrentStateMachine;
             if (currentFromBreadcrumb != null)
             {
+                // Breadcrumb was restored successfully
+                // Only set EditorState.RootStateMachine without triggering breadcrumb updates
+                // The breadcrumb is already correct, we just need to sync EditorState
+
+                // Temporarily unsubscribe breadcrumb controller to prevent duplicate entries
+                breadcrumbController?.Unsubscribe();
+
+                if (EditorState.Instance.RootStateMachine != rootStateMachine)
+                {
+                    EditorState.Instance.RootStateMachine = rootStateMachine;
+                }
+
                 // Restore CurrentViewStateMachine if we were navigated into a layer/sub-machine
                 if (currentFromBreadcrumb != rootStateMachine)
                 {
                     EditorState.Instance.CurrentViewStateMachine = currentFromBreadcrumb;
                 }
-                
+
+                // Re-subscribe breadcrumb controller
+                breadcrumbController?.Subscribe();
+
                 // Load the current state machine without resetting breadcrumb
                 LoadStateMachineInternal(currentFromBreadcrumb, updateBreadcrumb: false);
+
+                // Restore view transform for the current state machine
+                RestoreViewTransform(currentFromBreadcrumb);
                 return;
             }
-            
+
+            // Breadcrumb restoration failed, fall back to setting EditorState.RootStateMachine
+            if (rootStateMachine != null && EditorState.Instance.RootStateMachine != rootStateMachine)
+            {
+                EditorState.Instance.RootStateMachine = rootStateMachine;
+            }
+             
             // Fall back to serialized references (try lastEdited first, then root)
             if (lastEditedStateMachine != null)
             {
@@ -690,7 +731,13 @@ namespace DMotion.Editor
         private void LoadStateMachine(StateMachineAsset stateMachineAsset)
         {
             if (stateMachineAsset == null) return;
-            
+ 
+            // Save view transform of previous state machine before switching to new root
+            if (lastEditedStateMachine != null && lastEditedStateMachine != stateMachineAsset && stateMachineEditorView != null)
+            {
+                SaveViewTransform(lastEditedStateMachine);
+            }
+
             // This is a new root machine
             rootStateMachine = stateMachineAsset;
             
@@ -717,7 +764,13 @@ namespace DMotion.Editor
         {
             if (stateMachineAsset == null) return;
             if (stateMachineEditorView == null) return;
-            
+
+            // Save view transform of previous state machine before switching
+            if (lastEditedStateMachine != null && lastEditedStateMachine != stateMachineAsset)
+            {
+                SaveViewTransform(lastEditedStateMachine);
+            }
+
             // Persist for domain reload recovery
             lastEditedStateMachine = stateMachineAsset;
             string assetPath = AssetDatabase.GetAssetPath(stateMachineAsset);
@@ -725,19 +778,25 @@ namespace DMotion.Editor
             {
                 lastEditedAssetGuid = AssetDatabase.AssetPathToGUID(assetPath);
             }
-            
+
             // Update all panel controllers with new context
             inspectorController?.SetContext(stateMachineAsset);
             parametersPanelController?.SetContext(stateMachineAsset);
             layersPanelController?.SetContext(stateMachineAsset, rootStateMachine);
             dependenciesPanelController?.SetContext(stateMachineAsset, rootStateMachine);
-            
+
             stateMachineEditorView.PopulateView(new StateMachineEditorViewModel
             {
                 StateMachineAsset = stateMachineAsset,
                 StateNodeXml = StateNodeXml
             });
-            WaitAndFrameAll();
+
+            // Restore view transform for the new state machine (if one exists)
+            // Otherwise fall back to WaitAndFrameAll
+            if (!RestoreViewTransform(stateMachineAsset))
+            {
+                WaitAndFrameAll();
+            }
         }
 
         [OnOpenAsset]
@@ -824,5 +883,60 @@ namespace DMotion.Editor
                 stateMachineEditorView.FrameAll();
             }
         }
+
+        #region View Transform Persistence
+
+        private string GetViewTransformKey(StateMachineAsset stateMachine)
+        {
+            if (stateMachine == null) return null;
+            var globalId = GlobalObjectId.GetGlobalObjectIdSlow(stateMachine);
+            return $"DMotion.ViewTransform.{globalId}";
+        }
+
+        private void SaveViewTransform(StateMachineAsset stateMachine)
+        {
+            if (stateMachine == null || stateMachineEditorView == null) return;
+
+            var key = GetViewTransformKey(stateMachine);
+            if (string.IsNullOrEmpty(key)) return;
+
+            var container = stateMachineEditorView.contentViewContainer;
+            var translate = container.resolvedStyle.translate;
+            var scale = container.resolvedStyle.scale;
+
+            // Use invariant culture for consistent serialization across locales
+            var transformString = string.Format(CultureInfo.InvariantCulture,
+                "{0},{1},{2}", translate.x, translate.y, scale.value.x);
+            SessionState.SetString(key, transformString);
+        }
+ 
+        private bool RestoreViewTransform(StateMachineAsset stateMachine)
+        {
+            if (stateMachine == null || stateMachineEditorView == null) return false;
+
+            var key = GetViewTransformKey(stateMachine);
+            if (string.IsNullOrEmpty(key)) return false;
+
+            var transformString = SessionState.GetString(key, string.Empty);
+            if (string.IsNullOrEmpty(transformString)) return false;
+
+            var parts = transformString.Split(',');
+            if (parts.Length != 3) return false;
+
+            // Use invariant culture for parsing
+            if (float.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x) &&
+                float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y) &&
+                float.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var scale))
+            {
+                var position = new Vector3(x, y, 0f);
+                var scaleVec = new Vector3(scale, scale, 1f);
+                stateMachineEditorView.UpdateViewTransform(position, scaleVec);
+                return true;
+            }
+
+            return false;
+        }
+
+        #endregion
     }
 }

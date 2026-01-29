@@ -172,21 +172,20 @@ namespace DMotion.Editor
                 SessionState.EraseString(NavigationStackSessionKey);
                 return;
             }
-            
-            // Convert to GUIDs for persistence
-            var guids = new List<string>();
+
+            // Convert to GlobalObjectId strings for persistence (handles sub-assets correctly)
+            var globalIds = new List<string>();
             foreach (var machine in navigationStack)
             {
                 if (machine == null) continue;
-                var path = AssetDatabase.GetAssetPath(machine);
-                if (!string.IsNullOrEmpty(path))
+                var globalId = GlobalObjectId.GetGlobalObjectIdSlow(machine);
+                if (globalId.identifierType != 0)
                 {
-                    guids.Add(AssetDatabase.AssetPathToGUID(path));
+                    globalIds.Add(globalId.ToString());
                 }
             }
-            
-            // Store as comma-separated GUIDs
-            SessionState.SetString(NavigationStackSessionKey, string.Join(",", guids));
+
+            SessionState.SetString(NavigationStackSessionKey, string.Join(",", globalIds));
         }
         
         /// <summary>
@@ -195,24 +194,26 @@ namespace DMotion.Editor
         /// </summary>
         internal void RestoreNavigationState()
         {
-            var savedGuids = SessionState.GetString(NavigationStackSessionKey, string.Empty);
-            if (string.IsNullOrEmpty(savedGuids)) return;
-            
-            var guids = savedGuids.Split(',');
+            var savedIds = SessionState.GetString(NavigationStackSessionKey, string.Empty);
+            if (string.IsNullOrEmpty(savedIds)) return;
+
+            var globalIdStrings = savedIds.Split(',');
             navigationStack.Clear();
-            
-            foreach (var guid in guids)
+
+            foreach (var globalIdString in globalIdStrings)
             {
-                if (string.IsNullOrEmpty(guid)) continue;
-                var path = AssetDatabase.GUIDToAssetPath(guid);
-                if (string.IsNullOrEmpty(path)) continue;
-                var machine = AssetDatabase.LoadAssetAtPath<StateMachineAsset>(path);
-                if (machine != null)
+                if (string.IsNullOrEmpty(globalIdString)) continue;
+
+                if (GlobalObjectId.TryParse(globalIdString, out var globalId))
                 {
-                    navigationStack.Add(machine);
+                    var machine = GlobalObjectId.GlobalObjectIdentifierToObjectSlow(globalId) as StateMachineAsset;
+                    if (machine != null)
+                    {
+                        navigationStack.Add(machine);
+                    }
                 }
             }
-            
+
             Rebuild();
         }
         

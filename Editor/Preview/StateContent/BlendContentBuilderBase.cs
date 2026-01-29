@@ -41,7 +41,10 @@ namespace DMotion.Editor
         protected Action<Vector2> cachedPreviewPositionHandler;
         protected Action<int> cachedClipSelectedHandler;
         protected Action<bool> cachedEditModeHandler;
-        
+
+        // Subscription tracking to prevent duplicate event handlers
+        protected bool isSubscribedToEditorState;
+
         #endregion
         
         #region Properties
@@ -113,8 +116,25 @@ namespace DMotion.Editor
         {
             state = context.State as TState;
             if (state == null) return;
-            
+
             serializedObject = context.SerializedObject;
+
+            // Unsubscribe old handlers before creating new ones to prevent duplicate subscriptions
+            if (blendSpaceElement != null)
+            {
+                if (cachedPreviewPositionHandler != null)
+                {
+                    blendSpaceElement.OnPreviewPositionChanged -= cachedPreviewPositionHandler;
+                }
+                if (cachedClipSelectedHandler != null)
+                {
+                    blendSpaceElement.OnClipSelectedForPreview -= cachedClipSelectedHandler;
+                }
+                if (cachedEditModeHandler != null)
+                {
+                    blendSpaceElement.OnEditModeChanged -= cachedEditModeHandler;
+                }
+            }
             
             // Load stylesheet if not already loaded
             var uss = AssetDatabase.LoadAssetAtPath<StyleSheet>(UssPath);
@@ -130,9 +150,15 @@ namespace DMotion.Editor
             
             // Initialize blend space visual element (UIToolkit-based)
             blendSpaceElement = GetOrCreateVisualElement();
+
+            // Temporarily hide during reconfiguration to prevent flicker
+            blendSpaceElement.style.display = DisplayStyle.None;
+
+            // Set all display properties atomically to prevent flicker during state transitions
             blendSpaceElement.ShowPreviewIndicator = true;
-            blendSpaceElement.EditMode = false;
-            
+            blendSpaceElement.ShowModeToggle = false; // Hide edit mode toggle button in preview
+            blendSpaceElement.EditMode = false; // Ensure edit mode is off
+
             // Preview sliders (abstract - implemented by subclasses)
             var slidersContainer = BuildPreviewSliders(context);
             blendSection.Add(slidersContainer);
@@ -152,7 +178,10 @@ namespace DMotion.Editor
             // Add blend space visual element directly (no IMGUIContainer wrapper needed)
             blendSpaceElement.AddToClassList(BlendSpacePreviewClass);
             blendSection.Add(blendSpaceElement);
-            
+
+            // Show element now that all properties are configured
+            blendSpaceElement.style.display = DisplayStyle.Flex;
+
             // Help text (pure UIToolkit Label)
             var helpLabel = CreateHelpTextLabel();
             blendSection.Add(helpLabel);
@@ -192,7 +221,12 @@ namespace DMotion.Editor
             scrubber.SetEventMarkers(null); // Blend states don't show events from individual clips
             
             // Subscribe to EditorState preview changes for automatic duration updates
-            EditorState.Instance.PreviewStateChanged += OnPreviewStateChangedForTimeline;
+            // Only subscribe once to prevent duplicate event handlers
+            if (!isSubscribedToEditorState)
+            {
+                EditorState.Instance.PreviewStateChanged += OnPreviewStateChangedForTimeline;
+                isSubscribedToEditorState = true;
+            }
         }
         
         private void OnPreviewStateChangedForTimeline(object sender, ObservablePropertyChangedEventArgs e)
@@ -213,8 +247,12 @@ namespace DMotion.Editor
         public void Cleanup()
         {
             // Unsubscribe from EditorState events
-            EditorState.Instance.PreviewStateChanged -= OnPreviewStateChangedForTimeline;
-            
+            if (isSubscribedToEditorState)
+            {
+                EditorState.Instance.PreviewStateChanged -= OnPreviewStateChangedForTimeline;
+                isSubscribedToEditorState = false;
+            }
+
             if (blendSpaceElement != null)
             {
                 if (cachedPreviewPositionHandler != null)

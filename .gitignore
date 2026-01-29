@@ -86,6 +86,7 @@ consolelog.txt*
 AUDIT-*.md
 AUDIT-*.md.meta
 .claude/
+.cache/
 
 # Memory bank (Claude Code session context)
 memory-bank~/

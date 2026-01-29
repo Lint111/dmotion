@@ -70,9 +70,12 @@ namespace DMotion.Editor
         
         // Layer nodes (multi-layer mode only)
         private readonly Dictionary<LayerStateAsset, LayerStateNodeView> layerToView = new();
-        
+
         // Cached list for deletion operations (avoids allocation per delete)
         private readonly List<GraphElement> _deleteElementsCache = new();
+
+        // Callback invoked when view transform (pan/zoom) changes
+        internal Action OnViewTransformChanged;
 
         // Search window for creating new states (opened with Space)
         private StateSearchWindowProvider searchWindowProvider;
@@ -102,14 +105,26 @@ namespace DMotion.Editor
             
             // Centralized keyboard handling for all nodes
             RegisterCallback<KeyDownEvent>(OnKeyDown);
-            
+
             // Clear inspector when clicking on empty space (background)
             RegisterCallback<PointerDownEvent>(OnPointerDown);
-            
+
             // Prevent deletion of special nodes (Any State, Exit)
             deleteSelection = OnDeleteSelection;
+
+            // Register for view transform changes (pan/zoom)
+            viewTransformChanged += OnGraphViewTransformChanged;
         }
-        
+
+        /// <summary>
+        /// Called when the view transform (pan/zoom) changes.
+        /// Invokes the callback to notify the window to persist the transform.
+        /// </summary>
+        private void OnGraphViewTransformChanged(GraphView _)
+        {
+            OnViewTransformChanged?.Invoke();
+        }
+
         private void OnDeleteSelection(string operationName, AskUser askUser)
         {
             // Filter selection to exclude non-deletable special nodes
@@ -460,11 +475,10 @@ namespace DMotion.Editor
                 // Use schedule to allow the default selection behavior to complete first
                 schedule.Execute(() =>
                 {
-                    // Only clear if nothing is selected after the click
-                    if (selection.Count == 0)
-                    {
-                        EditorState.Instance.ClearSelection();
-                    }
+                    // Note: Don't clear EditorState selection when graph selection is empty
+                    // This allows preview windows to maintain their selection when clicking
+                    // on empty space or non-selectable elements
+                    // Selection will be cleared only when explicitly selecting something else
                 });
             }
         }

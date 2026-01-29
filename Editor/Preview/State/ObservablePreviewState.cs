@@ -221,6 +221,10 @@ namespace DMotion.Editor
         /// </summary>
         public void SelectState(AnimationStateAsset state)
         {
+            // Only update if state actually changed to prevent unnecessary notifications
+            if (SelectedState == state && !IsTransitionMode)
+                return;
+
             using (SuppressNotifications())
             {
                 IsTransitionMode = false;
@@ -228,7 +232,7 @@ namespace DMotion.Editor
                 TransitionTo = null;
                 TransitionProgress = 0f;
             }
-            
+
             SelectedState = state;
             ResetPlayback();
         }

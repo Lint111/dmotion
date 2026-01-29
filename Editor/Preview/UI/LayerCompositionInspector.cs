@@ -271,12 +271,12 @@ namespace DMotion.Editor
             layersContainer?.Clear();
         }
         
-        private LayerSection CreateLayerSection(ObservableLayerState layerState)
+        private LayerSection CreateLayerSection(LayerStateAsset layerState)
         {
             var section = new LayerSection
             {
                 LayerIndex = layerState.LayerIndex,
-                LayerAsset = layerState.LayerAsset
+                LayerAsset = layerState
             };
 
             // Create foldout with custom header
@@ -322,7 +322,7 @@ namespace DMotion.Editor
             return section;
         }
         
-        private VisualElement CreateLayerHeader(LayerSection section, ObservableLayerState layerState)
+        private VisualElement CreateLayerHeader(LayerSection section, LayerStateAsset layerState)
         {
             var header = new VisualElement();
             header.AddToClassList(LayerHeaderClassName);
@@ -348,7 +348,7 @@ namespace DMotion.Editor
             nameContainer.style.flexGrow = 1;
             nameContainer.style.flexDirection = FlexDirection.Column;
 
-            var nameLabel = new Label($"Layer {layerState.LayerIndex}: {layerState.Name}");
+            var nameLabel = new Label($"Layer {layerState.LayerIndex}: {layerState.name}");
             nameLabel.AddToClassList("layer-name");
             nameContainer.Add(nameLabel);
 
@@ -398,7 +398,7 @@ namespace DMotion.Editor
             return header;
         }
         
-        private void BuildLayerContent(LayerSection section, ObservableLayerState layerState)
+        private void BuildLayerContent(LayerSection section, LayerStateAsset layerState)
         {
             // Current selection display
             var selectionRow = new VisualElement();
@@ -532,8 +532,7 @@ namespace DMotion.Editor
                 return;
                 
             var layerState = compositionState.Layers[section.LayerIndex];
-            var previewState = layerState.PreviewState;
-            
+
             // Update header controls
             section.EnableToggle?.SetValueWithoutNotify(layerState.IsEnabled);
             section.WeightSlider?.SetValueWithoutNotify(layerState.Weight);
@@ -551,53 +550,50 @@ namespace DMotion.Editor
                 section.StateControls.style.display = DisplayStyle.None;
                 section.TransitionControls.style.display = DisplayStyle.None;
                 section.TriggerTransitionButton.style.display = DisplayStyle.None;
-                
+
                 // Disable weight controls for unassigned layers (they don't contribute)
                 section.WeightSlider.SetEnabled(false);
                 section.EnableToggle.SetEnabled(false);
                 return;
             }
-            
+
             // Layer is assigned - enable controls and restore normal color
             section.CurrentSelectionLabel.style.color = StyleKeyword.Null;
             section.WeightSlider.SetEnabled(true);
             section.EnableToggle.SetEnabled(true);
             section.TriggerTransitionButton.style.display = DisplayStyle.Flex;
-            
+
             // Update selection display
-            if (previewState.IsTransitionMode)
+            if (layerState.IsTransitionMode)
             {
-                section.CurrentSelectionLabel.text = $"→ {previewState.TransitionFrom?.name ?? "?"} → {previewState.TransitionTo?.name ?? "?"}";
+                section.CurrentSelectionLabel.text = $"→ {layerState.TransitionFrom?.name ?? "?"} → {layerState.TransitionTo?.name ?? "?"}";
                 section.StateControls.style.display = DisplayStyle.None;
                 section.TransitionControls.style.display = DisplayStyle.Flex;
-                
+
                 // Update transition controls with persisted blend values
-                section.TransitionProgressSlider?.SetValueWithoutNotify(previewState.TransitionProgress);
+                section.TransitionProgressSlider?.SetValueWithoutNotify(layerState.TransitionProgress);
 
                 // Restore from state blend from PreviewSettings
-                var fromBlend = PreviewSettings.GetBlendPosition(previewState.TransitionFrom);
+                var fromBlend = PreviewSettings.GetBlendPosition(layerState.TransitionFrom);
                 section.FromBlendSlider?.SetValueWithoutNotify(fromBlend.x);
-                if (System.Math.Abs(previewState.BlendPosition.x - fromBlend.x) > 0.0001f)
+                if (System.Math.Abs(layerState.BlendPosition.x - fromBlend.x) > 0.0001f)
                 {
                     layerState.BlendPosition = new Unity.Mathematics.float2(fromBlend.x, fromBlend.y);
                 }
 
                 // Restore to state blend from PreviewSettings
-                var toBlend = PreviewSettings.GetBlendPosition(previewState.TransitionTo);
+                var toBlend = PreviewSettings.GetBlendPosition(layerState.TransitionTo);
                 section.ToBlendSlider?.SetValueWithoutNotify(toBlend.x);
-                if (System.Math.Abs(previewState.ToBlendPosition.x - toBlend.x) > 0.0001f)
-                {
-                    previewState.ToBlendPosition = new Unity.Mathematics.float2(toBlend.x, toBlend.y);
-                }
+                // Note: ToBlendPosition was removed - using main BlendPosition for transitions
             }
-            else if (previewState.SelectedState != null)
+            else if (layerState.SelectedState != null)
             {
-                section.CurrentSelectionLabel.text = $"→ {previewState.SelectedState?.name ?? "(None)"}";
+                section.CurrentSelectionLabel.text = $"→ {layerState.SelectedState?.name ?? "(None)"}";
                 section.StateControls.style.display = DisplayStyle.Flex;
                 section.TransitionControls.style.display = DisplayStyle.None;
 
                 // Show blend controls only for blend state types
-                var selectedState = previewState.SelectedState;
+                var selectedState = layerState.SelectedState;
                 bool isBlendState = selectedState is LinearBlendStateAsset || selectedState is Directional2DBlendStateAsset;
 
                 var blendRow = section.StateControls?.Q<VisualElement>("blend-row");
@@ -610,8 +606,8 @@ namespace DMotion.Editor
                     var persistedBlend = PreviewSettings.GetBlendPosition(selectedState);
                     section.BlendSlider?.SetValueWithoutNotify(persistedBlend.x);
 
-                    // Sync to observable state if different
-                    if (System.Math.Abs(previewState.BlendPosition.x - persistedBlend.x) > 0.0001f)
+                    // Sync to asset if different
+                    if (System.Math.Abs(layerState.BlendPosition.x - persistedBlend.x) > 0.0001f)
                     {
                         layerState.BlendPosition = new Unity.Mathematics.float2(persistedBlend.x, persistedBlend.y);
                     }
@@ -620,7 +616,7 @@ namespace DMotion.Editor
             }
         }
         
-        private void UpdateClipWeightsDisplay(LayerSection section, ObservableLayerState layerState)
+        private void UpdateClipWeightsDisplay(LayerSection section, LayerStateAsset layerState)
         {
             section.ClipWeights.Clear();
             
@@ -678,7 +674,7 @@ namespace DMotion.Editor
             layerState.BlendPosition = new Unity.Mathematics.float2(value, 0);
 
             // Persist to PreviewSettings based on state type
-            var selectedState = layerState.PreviewState.SelectedState;
+            var selectedState = layerState.SelectedState;
             if (selectedState is LinearBlendStateAsset)
             {
                 PreviewSettings.instance.SetBlendValue1D(selectedState, value);
@@ -706,7 +702,7 @@ namespace DMotion.Editor
             layerState.BlendPosition = new Unity.Mathematics.float2(value, layerState.BlendPosition.y);
 
             // Persist to PreviewSettings for the 'from' state
-            var fromState = layerState.PreviewState.TransitionFrom;
+            var fromState = layerState.TransitionFrom;
             if (fromState is LinearBlendStateAsset)
             {
                 PreviewSettings.instance.SetBlendValue1D(fromState, value);
@@ -716,17 +712,19 @@ namespace DMotion.Editor
                 PreviewSettings.instance.SetBlendValue2D(fromState, new UnityEngine.Vector2(value, 0));
             }
         }
-        
+
         private void OnToBlendPositionChanged(LayerSection section, float value)
         {
             var layerState = compositionState?.GetLayer(section.LayerIndex);
-            var previewState = layerState?.PreviewState;
-            if (previewState == null) return;
+            if (layerState == null) return;
 
-            previewState.ToBlendPosition = new Unity.Mathematics.float2(value, previewState.ToBlendPosition.y);
+            // Note: ToBlendPosition was a property on the old PreviewState for transition blending
+            // This needs to be implemented if transition blend position is needed
+            // For now, just update the main BlendPosition
+            layerState.BlendPosition = new Unity.Mathematics.float2(value, layerState.BlendPosition.y);
 
             // Persist to PreviewSettings for the 'to' state
-            var toState = previewState.TransitionTo;
+            var toState = layerState.TransitionTo;
             if (toState is LinearBlendStateAsset)
             {
                 PreviewSettings.instance.SetBlendValue1D(toState, value);

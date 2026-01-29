@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using DMotion;
 using UnityEngine;
 
 namespace DMotion.Authoring
@@ -515,6 +516,166 @@ namespace DMotion.Authoring
             }
 
             UnityEditor.EditorUtility.SetDirty(this);
+            return true;
+        }
+
+        /// <summary>
+        /// Move a layer from one index to another with validation.
+        /// Layer 0 (base layer) cannot be moved.
+        /// Override layers must stay before Additive layers.
+        /// </summary>
+        /// <param name="fromIndex">Source layer index</param>
+        /// <param name="toIndex">Destination layer index</param>
+        /// <returns>True if move was successful, false if validation failed</returns>
+        public bool MoveLayer(int fromIndex, int toIndex)
+        {
+            var layers = GetLayers().ToList();
+
+            // Validate indices
+            if (fromIndex < 0 || fromIndex >= layers.Count) return false;
+            if (toIndex < 0 || toIndex >= layers.Count) return false;
+            if (fromIndex == toIndex) return false;
+
+            // Layer 0 (base layer) cannot be moved
+            if (fromIndex == 0 || toIndex == 0) return false;
+
+            var movingLayer = layers[fromIndex];
+
+            // Validate blend mode constraints
+            // Cannot move Additive layer to Override zone (before last Override)
+            if (movingLayer.BlendMode == LayerBlendMode.Additive)
+            {
+                // Find last Override layer index
+                int lastOverrideIndex = -1;
+                for (int i = 0; i < layers.Count; i++)
+                {
+                    if (layers[i].BlendMode == LayerBlendMode.Override)
+                        lastOverrideIndex = i;
+                }
+
+                // Cannot move Additive layer before or at last Override position
+                if (lastOverrideIndex >= 0 && toIndex <= lastOverrideIndex)
+                    return false;
+            }
+
+            // Cannot move Override layer to Additive zone (after first Additive)
+            if (movingLayer.BlendMode == LayerBlendMode.Override)
+            {
+                // Find first Additive layer index
+                int firstAdditiveIndex = -1;
+                for (int i = 0; i < layers.Count; i++)
+                {
+                    if (layers[i].BlendMode == LayerBlendMode.Additive)
+                    {
+                        firstAdditiveIndex = i;
+                        break;
+                    }
+                }
+
+                // Cannot move Override layer to or after first Additive position
+                if (firstAdditiveIndex >= 0 && toIndex >= firstAdditiveIndex)
+                    return false;
+            }
+
+            // Perform the move in the States list
+            // Find actual indices in States list (which may contain non-layer states)
+            int actualFromIndex = States.IndexOf(movingLayer);
+            if (actualFromIndex < 0) return false;
+
+            var targetLayer = layers[toIndex];
+            int actualToIndex = States.IndexOf(targetLayer);
+            if (actualToIndex < 0) return false;
+
+            // Remove from old position
+            States.RemoveAt(actualFromIndex);
+
+            // Recalculate target index after removal
+            if (actualToIndex > actualFromIndex)
+                actualToIndex--;
+
+            // Insert at new position
+            States.Insert(actualToIndex, movingLayer);
+
+            UnityEditor.EditorUtility.SetDirty(this);
+            UnityEditor.AssetDatabase.SaveAssets();
+
+            return true;
+        }
+
+        /// <summary>
+        /// Validates if a layer can be moved to a target index.
+        /// Used for drag preview feedback.
+        /// </summary>
+        /// <param name="fromIndex">Source layer index</param>
+        /// <param name="toIndex">Destination layer index</param>
+        /// <param name="errorMessage">Descriptive error if validation fails</param>
+        /// <returns>True if move would be valid</returns>
+        public bool CanMoveLayer(int fromIndex, int toIndex, out string errorMessage)
+        {
+            errorMessage = null;
+            var layers = GetLayers().ToList();
+
+            // Validate indices
+            if (fromIndex < 0 || fromIndex >= layers.Count || toIndex < 0 || toIndex >= layers.Count)
+            {
+                errorMessage = "Invalid layer index.";
+                return false;
+            }
+
+            if (fromIndex == toIndex) return true; // No-op is valid
+
+            // Layer 0 cannot be moved
+            if (fromIndex == 0)
+            {
+                errorMessage = "Base layer (Layer 0) cannot be moved.";
+                return false;
+            }
+
+            if (toIndex == 0)
+            {
+                errorMessage = "Cannot move a layer to the base layer position.";
+                return false;
+            }
+
+            var movingLayer = layers[fromIndex];
+
+            // Additive layer constraints
+            if (movingLayer.BlendMode == LayerBlendMode.Additive)
+            {
+                int lastOverrideIndex = -1;
+                for (int i = 0; i < layers.Count; i++)
+                {
+                    if (layers[i].BlendMode == LayerBlendMode.Override)
+                        lastOverrideIndex = i;
+                }
+
+                if (lastOverrideIndex >= 0 && toIndex <= lastOverrideIndex)
+                {
+                    errorMessage = "Additive layers must stay after all Override layers.";
+                    return false;
+                }
+            }
+
+            // Override layer constraints
+            if (movingLayer.BlendMode == LayerBlendMode.Override)
+            {
+                int firstAdditiveIndex = -1;
+                for (int i = 0; i < layers.Count; i++)
+                {
+                    if (layers[i].BlendMode == LayerBlendMode.Additive)
+                    {
+                        firstAdditiveIndex = i;
+                        break;
+                    }
+                }
+
+                if (firstAdditiveIndex >= 0 && toIndex >= firstAdditiveIndex)
+                {
+                    errorMessage = "Override layers must stay before all Additive layers.";
+                    return false;
+                }
+            }
+
             return true;
         }
         #endif
