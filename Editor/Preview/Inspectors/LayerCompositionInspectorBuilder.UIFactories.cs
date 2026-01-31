@@ -1,4 +1,5 @@
 using System;
+using DMotion;
 using DMotion.Authoring;
 using Unity.Mathematics;
 using UnityEngine.UIElements;
@@ -132,7 +133,13 @@ namespace DMotion.Editor
         
         /// <summary>
         /// Creates a TransitionStateConfig for the given from/to states with their blend positions.
+        /// Uses TransitionStateCalculator for proper timing calculation.
         /// </summary>
+        /// <param name="fromState">Source state</param>
+        /// <param name="toState">Target state</param>
+        /// <param name="fromBlendPos">Blend position for from state</param>
+        /// <param name="toBlendPos">Blend position for to state</param>
+        /// <param name="includeGhostBars">If false, ghost bar durations are zeroed out</param>
         private static TransitionStateConfig CreateTransitionConfig(
             AnimationStateAsset fromState, 
             AnimationStateAsset toState, 
@@ -141,16 +148,16 @@ namespace DMotion.Editor
             bool includeGhostBars = true)
         {
             var transition = FindTransition(fromState, toState);
+            var config = TransitionStateCalculator.CreateConfig(fromState, toState, transition, fromBlendPos, toBlendPos);
             
-            var config = new TransitionStateConfig
+            // If ghost bars should be excluded, zero them out
+            if (!includeGhostBars)
             {
-                FromState = fromState,
-                ToState = toState,
-                Transition = transition,
-                FromBlendPosition = fromBlendPos,
-                ToBlendPosition = toBlendPos,
-                IncludeGhostBars = includeGhostBars
-            };
+                var timing = config.Timing;
+                timing.GhostFromDuration = 0f;
+                timing.GhostToDuration = 0f;
+                config.Timing = timing;
+            }
             
             return config;
         }
