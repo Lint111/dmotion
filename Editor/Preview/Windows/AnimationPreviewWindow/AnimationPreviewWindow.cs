@@ -94,6 +94,15 @@ namespace DMotion.Editor
             SingleState,
             LayerComposition
         }
+        
+        private enum InitializationState
+        {
+            Pending,                    // Waiting for CreateGUI
+            WaitingForDependencies,     // UI ready, waiting for CompositionState (if LayerComposition mode)
+            Ready                       // Fully initialized
+        }
+        
+        private InitializationState _initState = InitializationState.Pending;
 
         #endregion
 
@@ -140,6 +149,7 @@ namespace DMotion.Editor
 
         private void OnEnable()
         {
+            _initState = InitializationState.Pending;
             
             // Subscribe to Play mode changes to handle preview rebuild
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
@@ -150,22 +160,6 @@ namespace DMotion.Editor
             _subscribedEditorState.StructureChanged += OnEditorStateStructureChanged;
             _subscribedEditorState.PreviewStateChanged += OnPreviewStateChanged;
             _subscribedEditorState.CompositionStateChanged += OnCompositionStatePropertyChanged;
-
-            // Subscribe to CompositionState.LayerChanged if initialized (has layers)
-            // After domain reload, CompositionState might not be initialized yet
-            // It will be initialized when RootStateMachine is set, triggering a re-subscription via OnCompositionStatePropertyChanged
-            var compositionState = _subscribedEditorState.CompositionState;
-            int layerCount = compositionState?.LayerCount ?? 0;
-            LogDebug($"OnEnable: CompositionState={compositionState?.GetType().Name ?? "null"}, LayerCount={layerCount}");
-            if (compositionState != null && layerCount > 0)
-            {
-                compositionState.LayerChanged += OnCompositionLayerChanged;
-                LogDebug("OnEnable: Subscribed to LayerChanged");
-            }
-            else
-            {
-                LogWarning($"OnEnable: NOT subscribing to LayerChanged (CompositionState={compositionState != null}, LayerCount={layerCount})");
-            }
 
             // Create extracted components
             CreateBuilders();
@@ -180,8 +174,8 @@ namespace DMotion.Editor
                 previewSession.CameraState = savedCameraState;
             }
             
-            // Sync with current EditorState (window may open after state machine is already set)
-            SyncWithEditorState();
+            // Note: Full initialization is deferred to TryCompleteInitialization()
+            // Called from CreateGUI and Update to handle async dependency resolution
         }
         
         /// <summary>
@@ -375,12 +369,56 @@ namespace DMotion.Editor
             // Register window-level keyboard handler for consistent shortcuts
             root.RegisterCallback<KeyDownEvent>(OnWindowKeyDown);
             
-            // Load saved preview model for current state machine (if any)
-            LoadPreviewModelPreference();
-            
-            UpdateSelectionUI();
-            
             lastUpdateTime = EditorApplication.timeSinceStartup;
+            
+            // Start deferred initialization - UI is ready, now wait for dependencies
+            _initState = InitializationState.WaitingForDependencies;
+            TryCompleteInitialization();
+        }
+        
+        /// <summary>
+        /// Attempts to complete initialization by checking if all dependencies are ready.
+        /// Called from CreateGUI and Update until initialization completes.
+        /// </summary>
+        private void TryCompleteInitialization()
+        {
+            if (_initState == InitializationState.Ready) return;
+            if (_initState == InitializationState.Pending) return; // UI not ready yet
+            
+            // Sync basic state from EditorState
+            var editorState = EditorState.Instance;
+            var editorPreviewType = editorState.PreviewType;
+            currentPreviewType = editorPreviewType == EditorPreviewType.LayerComposition 
+                ? PreviewType.LayerComposition 
+                : PreviewType.SingleState;
+            
+            // For LayerComposition mode, check if CompositionState is ready
+            if (currentPreviewType == PreviewType.LayerComposition)
+            {
+                var compositionState = editorState.CompositionState;
+                bool compositionReady = compositionState?.RootStateMachine != null && compositionState.LayerCount > 0;
+                
+                if (!compositionReady)
+                {
+                    // Still waiting - will retry in next Update
+                    LogDebug("TryCompleteInitialization: Waiting for CompositionState...");
+                    return;
+                }
+                
+                // Subscribe to LayerChanged now that CompositionState is ready
+                compositionState.LayerChanged -= OnCompositionLayerChanged; // Prevent double-subscribe
+                compositionState.LayerChanged += OnCompositionLayerChanged;
+                LogDebug("TryCompleteInitialization: CompositionState ready, subscribed to LayerChanged");
+            }
+            
+            // All dependencies ready - complete initialization
+            _initState = InitializationState.Ready;
+            LogDebug("TryCompleteInitialization: Initialization complete");
+            
+            // Now perform full sync
+            SyncWithEditorState();
+            LoadPreviewModelPreference();
+            UpdateSelectionUI();
         }
 
         private void Update()
@@ -389,6 +427,14 @@ namespace DMotion.Editor
             var currentTime = EditorApplication.timeSinceStartup;
             var deltaTime = (float)(currentTime - lastUpdateTime);
             lastUpdateTime = currentTime;
+            
+            // Continue initialization if waiting for dependencies
+            if (_initState == InitializationState.WaitingForDependencies)
+            {
+                TryCompleteInitialization();
+                // Don't process updates until fully initialized
+                if (_initState != InitializationState.Ready) return;
+            }
 
             bool needsRepaint = false;
 

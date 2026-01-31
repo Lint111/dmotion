@@ -11,11 +11,14 @@ namespace DMotion.Editor
         
         private void OnCompositionStatePropertyChanged(object sender, ObservablePropertyChangedEventArgs e)
         {
+            // Skip event processing during deferred initialization - TryCompleteInitialization handles it
+            if (_initState != InitializationState.Ready) return;
+            
             switch (e.PropertyName)
             {
                 case nameof(ObservableCompositionState.RootStateMachine):
                     // CompositionState was (re-)initialized with a new state machine
-                    // Re-subscribe to LayerChanged to handle domain reload restoration
+                    // Re-subscribe to LayerChanged
                     LogDebug("OnCompositionStatePropertyChanged: RootStateMachine changed");
                     if (_subscribedEditorState?.CompositionState != null)
                     {
@@ -29,21 +32,11 @@ namespace DMotion.Editor
                         }
                     }
                     
-                    // IMPORTANT: Create backend preview BEFORE rebuilding the builder UI
-                    // This ensures the builder gets a valid preview reference for state sync
+                    // Rebuild UI when state machine changes
                     if (currentPreviewType == PreviewType.LayerComposition)
                     {
-                        EnsureLayerCompositionPreview();
+                        UpdateSelectionUI();
                     }
-                    
-                    // Rebuild layer composition UI with the now-valid preview
-                    var backend = previewSession?.Backend as PlayableGraphBackend;
-                    var layerPreview = backend?.LayerComposition;
-                    layerCompositionBuilder?.Build(
-                        CompositionState?.RootStateMachine,
-                        CompositionState,
-                        layerPreview,
-                        _logger);  // Pass parent logger for hierarchical logging
                     Repaint();
                     break;
             }
@@ -71,6 +64,9 @@ namespace DMotion.Editor
         
         private void OnCompositionLayerChanged(object sender, LayerPropertyChangedEventArgs e)
         {
+            // Skip event processing during deferred initialization
+            if (_initState != InitializationState.Ready) return;
+            
             LogTrace($"OnCompositionLayerChanged: Property={e.PropertyName}, LayerIndex={e.LayerIndex}, PreviewType={currentPreviewType}");
             
             if (currentPreviewType != PreviewType.LayerComposition)
@@ -285,6 +281,9 @@ namespace DMotion.Editor
         
         private void OnEditorStatePropertyChanged(object sender, ObservablePropertyChangedEventArgs e)
         {
+            // Skip event processing during deferred initialization
+            if (_initState != InitializationState.Ready) return;
+            
             switch (e.PropertyName)
             {
                 case nameof(EditorState.RootStateMachine):
@@ -374,6 +373,9 @@ namespace DMotion.Editor
         
         private void OnEditorStateStructureChanged(object sender, StructureChangedEventArgs e)
         {
+            // Skip event processing during deferred initialization
+            if (_initState != InitializationState.Ready) return;
+            
             if (e.ChangeType == StructureChangeType.GeneralChange && 
                 EditorState.Instance.RootStateMachine == currentStateMachine)
             {
@@ -384,6 +386,8 @@ namespace DMotion.Editor
         
         private void OnPreviewStateChanged(object sender, ObservablePropertyChangedEventArgs e)
         {
+            // Skip event processing during deferred initialization
+            if (_initState != InitializationState.Ready) return;
             var previewState = EditorState.Instance.PreviewState;
             
             switch (e.PropertyName)
