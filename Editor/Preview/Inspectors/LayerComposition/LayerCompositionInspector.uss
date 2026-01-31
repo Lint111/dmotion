@@ -14,6 +14,18 @@
 }
 
 /* ============================================
+   Utility Classes
+   ============================================ */
+
+.flex-grow {
+    flex-grow: 1;
+}
+
+.hidden {
+    display: none;
+}
+
+/* ============================================
    Playback Controls
    ============================================ */
 
@@ -54,6 +66,11 @@
     padding-bottom: 2px;
 }
 
+.layer-name-container {
+    flex-direction: column;
+    flex-grow: 1;
+}
+
 .layer-name {
     flex-grow: 1;
     -unity-font-style: bold;
@@ -91,6 +108,10 @@
     min-width: 35px;
 }
 
+.weight-field {
+    min-width: 35px;
+}
+
 /* ============================================
    Selection Row
    ============================================ */
@@ -125,7 +146,39 @@
     min-width: 60px;
 }
 
+.blend-value-container {
+    flex-direction: row;
+    flex-grow: 1;
+}
+
 .blend-slider {
+    flex-grow: 1;
+}
+
+.blend-field {
+    min-width: 35px;
+}
+
+/* Property rows (shared pattern) */
+.property-row {
+    flex-direction: row;
+    align-items: center;
+}
+
+.property-label {
+    min-width: 60px;
+}
+
+.property-slider {
+    flex-grow: 1;
+}
+
+.property-float-field {
+    min-width: 35px;
+}
+
+.slider-value-container {
+    flex-direction: row;
     flex-grow: 1;
 }
 
@@ -158,6 +211,16 @@
     -unity-font-style: bold;
     margin-top: 5px;
     color: rgb(180, 180, 180);
+}
+
+.transition-from-label {
+    -unity-font-style: bold;
+    margin-top: 5px;
+}
+
+.transition-to-label {
+    -unity-font-style: bold;
+    margin-top: 10px;
 }
 
 .progress-row {

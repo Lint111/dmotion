@@ -60,23 +60,22 @@ namespace DMotion.Editor
                     var toggleContainer = checkmark.parent;
                     var defaultLabel = toggle.Q<Label>(className: "unity-foldout__text");
                     if (defaultLabel != null)
-                        defaultLabel.style.display = DisplayStyle.None;
+                        defaultLabel.AddToClassList("hidden");
 
                     toggleContainer.Add(header);
-                    header.style.flexGrow = 1;
+                    header.AddToClassList("flex-grow");
                 }
                 else
                 {
                     // Fallback: add header directly to toggle
                     toggle.Add(header);
-                    header.style.flexGrow = 1;
+                    header.AddToClassList("flex-grow");
                 }
             }
 
             // Content area - this goes into the Foldout's collapsible section
             section.Content = new VisualElement();
             section.Content.AddToClassList("layer-content");
-            section.Content.style.paddingLeft = 15;
 
             BuildLayerContent(section, layerState);
 
@@ -89,18 +88,13 @@ namespace DMotion.Editor
         {
             var header = new VisualElement();
             header.AddToClassList("layer-header");
-            header.style.flexDirection = FlexDirection.Row;
-            header.style.alignItems = Align.Center;
-            header.style.paddingTop = HeaderPaddingVertical;
-            header.style.paddingBottom = HeaderPaddingVertical;
 
             // No manual arrow needed - Foldout's native checkmark handles collapse indicator
 
             // Enable toggle
             section.EnableToggle = new Toggle();
+            section.EnableToggle.AddToClassList("layer-enable-toggle");
             section.EnableToggle.value = layerState.IsEnabled;
-            section.EnableToggle.style.marginRight = 5;
-            section.EnableToggle.style.marginLeft = 5;
             section.EnableToggle.RegisterValueChangedCallback(evt =>
             {
                 var layer = compositionState?.GetLayer(section.LayerIndex);
@@ -112,13 +106,12 @@ namespace DMotion.Editor
 
             // Layer name container
             var nameContainer = new VisualElement();
-            nameContainer.style.flexDirection = FlexDirection.Column;
-            nameContainer.style.flexGrow = 1;
+            nameContainer.AddToClassList("layer-name-container");
 
             // Base layer: shift name right since we don't have weight slider
             if (layerState.IsBaseLayer)
             {
-                nameContainer.style.marginLeft = BaseLayerNameMarginLeft;
+                nameContainer.AddToClassList("base-layer-name");
             }
 
             var nameLabel = new Label($"Layer {layerState.LayerIndex}: {layerState.name}");
@@ -132,15 +125,12 @@ namespace DMotion.Editor
             {
                 var blendModeLabel = new Label("Override");
                 blendModeLabel.AddToClassList("layer-blend-mode");
-                blendModeLabel.style.fontSize = 10;
                 nameContainer.Add(blendModeLabel);
             }
             else
             {
                 section.BlendModeField = new EnumField(layerState.BlendMode);
                 section.BlendModeField.AddToClassList("layer-blend-mode-field");
-                section.BlendModeField.style.fontSize = 10;
-                section.BlendModeField.style.maxWidth = 80;
                 section.BlendModeField.RegisterValueChangedCallback(evt =>
                 {
                     if (evt.newValue is LayerBlendMode blendMode)
@@ -169,17 +159,15 @@ namespace DMotion.Editor
             bool shouldShowWeight = ShouldShowWeightSlider(layerState, layerState.BlendMode);
 
             section.WeightContainer = new VisualElement();
-            section.WeightContainer.style.flexDirection = FlexDirection.Row;
-            section.WeightContainer.style.alignItems = Align.Center;
-            section.WeightContainer.style.minWidth = WeightContainerMinWidth;
+            section.WeightContainer.AddToClassList("weight-container");
             section.WeightContainer.style.display = shouldShowWeight ? DisplayStyle.Flex : DisplayStyle.None;
 
             var weightLabel = new Label("Weight:");
-            weightLabel.style.minWidth = 45;
+            weightLabel.AddToClassList("weight-label");
             section.WeightContainer.Add(weightLabel);
 
             section.WeightSlider = new Slider(MinWeight, MaxWeight);
-            section.WeightSlider.style.flexGrow = 1;
+            section.WeightSlider.AddToClassList("weight-slider");
             section.WeightSlider.value = layerState.Weight;
 
             section.WeightSlider.RegisterValueChangedCallback(evt =>
@@ -197,7 +185,7 @@ namespace DMotion.Editor
             section.WeightContainer.Add(section.WeightSlider);
 
             section.WeightLabel = new Label(layerState.Weight.ToString("F2"));
-            section.WeightLabel.style.minWidth = BlendFieldMinWidth;
+            section.WeightLabel.AddToClassList("weight-field");
             section.WeightContainer.Add(section.WeightLabel);
 
             header.Add(section.WeightContainer);
@@ -208,7 +196,7 @@ namespace DMotion.Editor
                     () => OnNavigateToLayer?.Invoke(section.LayerIndex, section.LayerAsset))
                 .StopClickPropagation()
                 .SetVisible(layerState.IsAssigned);
-            section.NavigateButton.style.marginLeft = 5;
+            section.NavigateButton.AddToClassList("header-navigate-button");
             header.Add(section.NavigateButton);
             
             // Clear assignment button (X) - explicit action to unassign layer
@@ -217,7 +205,7 @@ namespace DMotion.Editor
                     () => compositionState?.ClearLayerSelection(section.LayerIndex))
                 .StopClickPropagation()
                 .SetVisible(layerState.IsAssigned);
-            section.ClearButton.style.marginLeft = 2;
+            section.ClearButton.AddToClassList("header-clear-button");
             header.Add(section.ClearButton);
 
             return header;
@@ -245,14 +233,10 @@ namespace DMotion.Editor
         {
             // Current selection
             var selectionRow = new VisualElement();
-            selectionRow.style.flexDirection = FlexDirection.Row;
-            selectionRow.style.alignItems = Align.Center;
-            selectionRow.style.marginBottom = SelectionRowMarginBottom;
+            selectionRow.AddToClassList("selection-row");
 
             section.SelectionLabel = new Label(GetSelectionText(layerState));
             section.SelectionLabel.AddToClassList("selection-label");
-            section.SelectionLabel.style.flexGrow = 1;
-            section.SelectionLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
             selectionRow.Add(section.SelectionLabel);
 
             // Note: Navigate button moved to header row (next to clear button)
@@ -273,7 +257,7 @@ namespace DMotion.Editor
             
             // Per-layer timeline
             var timelineSection = new VisualElement();
-            timelineSection.style.marginTop = TimelineSectionMarginTop;
+            timelineSection.AddToClassList("timeline-section");
             
             section.Timeline = new TimelineScrubber();
             section.Timeline.IsLooping = true;
@@ -312,17 +296,13 @@ namespace DMotion.Editor
 
             var blendLabel = new Label("Blend");
             blendLabel.AddToClassList("property-label");
-            blendLabel.style.minWidth = 60;
             blendRow.Add(blendLabel);
 
             var valueContainer = new VisualElement();
             valueContainer.AddToClassList("slider-value-container");
-            valueContainer.style.flexDirection = FlexDirection.Row;
-            valueContainer.style.flexGrow = 1;
 
             section.BlendSlider = new Slider(0f, 1f);
             section.BlendSlider.AddToClassList("property-slider");
-            section.BlendSlider.style.flexGrow = 1;
             section.BlendSlider.RegisterValueChangedCallback(evt =>
             {
                 SetLayerBlendValue(section, evt.newValue);
@@ -331,7 +311,6 @@ namespace DMotion.Editor
 
             section.BlendField = new FloatField();
             section.BlendField.AddToClassList("property-float-field");
-            section.BlendField.style.minWidth = FloatFieldWidth;
             section.BlendField.RegisterValueChangedCallback(evt =>
             {
                 SetLayerBlendValue(section, evt.newValue);
@@ -615,14 +594,11 @@ namespace DMotion.Editor
             // Unified controls row with mode dropdown and action button
             var controlsRow = new VisualElement();
             controlsRow.name = "transition-controls-row";
-            controlsRow.style.flexDirection = FlexDirection.Row;
-            controlsRow.style.alignItems = Align.Center;
-            controlsRow.style.marginBottom = 5;
+            controlsRow.AddToClassList("transition-controls-row");
             
             // Loop mode dropdown - compact, no label (button provides context)
             section.LoopModeField = new EnumField(layerState.TransitionLoopMode);
-            section.LoopModeField.style.minWidth = 120;
-            section.LoopModeField.style.maxWidth = 140;
+            section.LoopModeField.AddToClassList("loop-mode-field");
             section.LoopModeField.RegisterValueChangedCallback(evt =>
             {
                 if (evt.newValue is TransitionLoopMode mode)
@@ -642,10 +618,8 @@ namespace DMotion.Editor
             // e.g., "▶ FROM | Trigger →" or "⟳ Blending..." or "▶ TO | ↺ Reset"
             var capturedSection = section;
             section.TriggerButton = new Button(() => OnTriggerButtonClicked(capturedSection));
+            section.TriggerButton.AddToClassList("trigger-button");
             section.TriggerButton.text = GetUnifiedButtonText(layerState);
-            section.TriggerButton.style.marginLeft = 8;
-            section.TriggerButton.style.minWidth = 140;
-            section.TriggerButton.style.flexGrow = 1;
             controlsRow.Add(section.TriggerButton);
             
             // PlayStateLabel no longer used - state shown in button
@@ -655,9 +629,7 @@ namespace DMotion.Editor
             
             // "From" state section
             var fromLabel = new Label("From State");
-            fromLabel.AddToClassList("transition-state-label");
-            fromLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
-            fromLabel.style.marginTop = 5;
+            fromLabel.AddToClassList("transition-from-label");
             section.TransitionControls.Add(fromLabel);
 
             // From blend space container
@@ -685,14 +657,12 @@ namespace DMotion.Editor
                 out section.TransitionProgressSlider,
                 out _);
             progressRow.name = "progress-row";
-            progressRow.style.marginTop = 10;
+            progressRow.AddToClassList("progress-row");
             section.TransitionControls.Add(progressRow);
 
             // "To" state section
             var toLabel = new Label("To State");
-            toLabel.AddToClassList("transition-state-label");
-            toLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
-            toLabel.style.marginTop = 10;
+            toLabel.AddToClassList("transition-to-label");
             section.TransitionControls.Add(toLabel);
 
             // To blend space container
@@ -992,7 +962,6 @@ namespace DMotion.Editor
             if (section.SelectionLabel != null)
             {
                 section.SelectionLabel.text = GetSelectionText(layerState);
-                section.SelectionLabel.style.unityTextAlign = TextAnchor.MiddleLeft;
             }
 
             // Show/hide navigation and clear buttons based on assignment status
