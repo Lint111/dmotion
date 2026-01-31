@@ -1,0 +1,222 @@
+/* Layer Composition Inspector Styles */
+/* Extends AnimationPreviewWindow.uss - import that first */
+
+/* ============================================
+   Layer Composition Container
+   ============================================ */
+
+.layer-composition-inspector {
+    flex-grow: 1;
+}
+
+.layers-container {
+    flex-grow: 1;
+}
+
+/* ============================================
+   Playback Controls
+   ============================================ */
+
+.playback-row {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.play-button {
+    min-width: 70px;
+}
+
+.reset-button {
+    min-width: 60px;
+}
+
+.sync-toggle {
+    margin-left: auto;
+}
+
+/* ============================================
+   Layer Section
+   ============================================ */
+
+.layer-section {
+    margin-bottom: 4px;
+}
+
+.layer-content {
+    padding-left: 15px;
+}
+
+.layer-header {
+    flex-direction: row;
+    align-items: center;
+    padding-top: 2px;
+    padding-bottom: 2px;
+}
+
+.layer-name {
+    flex-grow: 1;
+    -unity-font-style: bold;
+}
+
+.layer-blend-mode {
+    font-size: 10px;
+    color: rgb(150, 150, 150);
+}
+
+.layer-blend-mode-field {
+    font-size: 10px;
+    max-width: 80px;
+}
+
+/* ============================================
+   Weight Controls
+   ============================================ */
+
+.weight-container {
+    flex-direction: row;
+    align-items: center;
+    min-width: 140px;
+}
+
+.weight-label {
+    min-width: 45px;
+}
+
+.weight-slider {
+    flex-grow: 1;
+}
+
+.weight-value {
+    min-width: 35px;
+}
+
+/* ============================================
+   Selection Row
+   ============================================ */
+
+.selection-row {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+/* Override from parent for layer composition context */
+.layer-content .selection-label {
+    flex-grow: 1;
+    -unity-text-align: middle-left;
+    font-size: 11px;
+}
+
+/* ============================================
+   State Controls
+   ============================================ */
+
+.state-controls {
+    margin-bottom: 4px;
+}
+
+.blend-row {
+    flex-direction: row;
+    align-items: center;
+}
+
+.blend-label {
+    min-width: 60px;
+}
+
+.blend-slider {
+    flex-grow: 1;
+}
+
+/* ============================================
+   Transition Controls
+   ============================================ */
+
+.transition-controls {
+    margin-bottom: 4px;
+}
+
+.transition-controls-row {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.loop-mode-field {
+    min-width: 120px;
+    max-width: 140px;
+}
+
+.trigger-button {
+    margin-left: 8px;
+    min-width: 140px;
+    flex-grow: 1;
+}
+
+.transition-state-label {
+    -unity-font-style: bold;
+    margin-top: 5px;
+    color: rgb(180, 180, 180);
+}
+
+.progress-row {
+    margin-top: 10px;
+}
+
+/* ============================================
+   Blend Space Containers
+   ============================================ */
+
+#blend-space-container,
+#from-blend-space-container,
+#to-blend-space-container {
+    margin-bottom: 4px;
+}
+
+/* ============================================
+   Timeline Section
+   ============================================ */
+
+.timeline-section {
+    margin-top: 5px;
+}
+
+/* ============================================
+   Button Margins (for header buttons)
+   ============================================ */
+
+.header-navigate-button {
+    margin-left: 5px;
+}
+
+.header-clear-button {
+    margin-left: 2px;
+}
+
+/* ============================================
+   Enable Toggle Spacing
+   ============================================ */
+
+.layer-enable-toggle {
+    margin-right: 5px;
+    margin-left: 5px;
+}
+
+/* ============================================
+   Base Layer Name Offset
+   ============================================ */
+
+.base-layer-name {
+    margin-left: 10px;
+}
+
+/* ============================================
+   Value Labels
+   ============================================ */
+
+.value-label {
+    min-width: 35px;
+    color: rgb(180, 180, 180);
+    font-size: 11px;
+}
