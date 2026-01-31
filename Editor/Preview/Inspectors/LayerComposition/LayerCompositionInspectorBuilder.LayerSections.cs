@@ -80,6 +80,9 @@ namespace DMotion.Editor
         {
             var header = new VisualElement();
             header.AddToClassList("layer-header");
+            // Inline styles as fallback - Unity's Foldout has complex internal styling
+            header.style.flexDirection = FlexDirection.Row;
+            header.style.alignItems = Align.Center;
 
             // Enable toggle
             section.EnableToggle = new Toggle();

@@ -244,6 +244,20 @@ namespace DMotion.Editor
             var container = new VisualElement();
             container.AddToClassList("layer-composition-inspector");
             
+            // Load stylesheet
+            var guids = AssetDatabase.FindAssets("t:StyleSheet LayerCompositionInspector");
+            foreach (var guid in guids)
+            {
+                var path = AssetDatabase.GUIDToAssetPath(guid);
+                if (path.EndsWith("LayerCompositionInspector.uss"))
+                {
+                    var uss = AssetDatabase.LoadAssetAtPath<StyleSheet>(path);
+                    if (uss != null)
+                        container.styleSheets.Add(uss);
+                    break;
+                }
+            }
+            
             // Header with logger icon
             var header = CreateSectionHeader("Layer Composition", stateMachine?.name ?? "");
             if (_logger != null)
