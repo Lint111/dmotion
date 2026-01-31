@@ -9,9 +9,10 @@ using UnityEngine.UIElements;
 namespace DMotion.Editor
 {
     /// <summary>
-    /// Inspector UI for multi-layer animation composition preview.
-    /// Provides collapsible layer sections with state/transition controls.
+    /// DEPRECATED: Use LayerCompositionInspectorBuilder instead.
+    /// This class is no longer used and will be removed in a future version.
     /// </summary>
+    [Obsolete("Use LayerCompositionInspectorBuilder in Editor/Preview/Inspectors/LayerComposition/ instead.")]
     internal class LayerCompositionInspector : VisualElement
     {
         #region Constants
