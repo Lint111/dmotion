@@ -127,15 +127,18 @@ namespace DMotion.Editor
                 return;
             }
             
+            // Calculate durations from state assets
+            var fromBlendVec = new Vector2(fromBlendPosition.x, fromBlendPosition.y);
+            var toBlendVec = new Vector2(toBlendPosition.x, toBlendPosition.y);
+            float fromDuration = fromState != null ? AnimationStateUtils.GetEffectiveDuration(fromState, fromBlendVec) : 0f;
+            float toDuration = AnimationStateUtils.GetEffectiveDuration(toState, toBlendVec);
+            
             // Calculate timing using shared utility
-            var timingInput = TransitionTimingInput.FromStates(
+            var timing = TransitionTimingCalculator.Calculate(
                 fromState, toState,
-                new Vector2(fromBlendPosition.x, fromBlendPosition.y),
-                new Vector2(toBlendPosition.x, toBlendPosition.y),
+                fromBlendVec, toBlendVec,
                 transition?.EndTime ?? 0f,
                 transition?.TransitionDuration ?? 0.25f);
-            
-            var timing = TransitionTimingCalculator.Calculate(timingInput);
             
             // Get speeds for animation playback
             float fromSpeed = fromState != null ? GetStateSpeed(fromState, fromBlendPosition) : 1f;
@@ -146,12 +149,12 @@ namespace DMotion.Editor
             {
                 FromState = StateNode.Create(
                     fromIndex >= 0 ? (ushort)fromIndex : (ushort)0,
-                    timingInput.FromStateDuration,
+                    fromDuration,
                     fromSpeed,
                     fromBlendPosition),
                 ToState = StateNode.Create(
                     (ushort)toIndex,
-                    timingInput.ToStateDuration,
+                    toDuration,
                     toSpeed,
                     toBlendPosition),
                 Sections = new TransitionSectionDurations

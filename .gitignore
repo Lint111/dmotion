@@ -93,3 +93,6 @@ memory-bank~/
 memory-bank~.meta
 temp_check/
 temp_check.meta
+
+.drift/
+.drift.meta

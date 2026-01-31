@@ -12,7 +12,8 @@
     "com.latios.latiosframework": "https://github.com/Dreaming381/Latios-Framework.git",
     "com.unity.shadergraph": "17.0.3",
     "com.unity.test-framework": "1.4.5",
-    "com.unity.testtools.codecoverage": "1.2.6"
+    "com.unity.testtools.codecoverage": "1.2.6",
+    "com.llnt.convenientlogger": "1.0.0"
   },
   "unityRelease": "39f1",
   "keywords": [

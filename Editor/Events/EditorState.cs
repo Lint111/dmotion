@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using DMotion.Authoring;
+using UnityEditor;
 
 namespace DMotion.Editor
 {
@@ -49,6 +49,12 @@ namespace DMotion.Editor
             _instance?.Dispose();
             _instance = null;
         }
+        
+        #endregion
+        
+        #region Constants
+        
+        private const string PreviewTypePrefKey = "DMotion.Editor.PreviewType";
         
         #endregion
         
@@ -118,10 +124,19 @@ namespace DMotion.Editor
         
         private EditorState()
         {
+            // Load saved preview type preference
+            _previewType = LoadSavedPreviewType();
+            
             // Forward child state changes
             _previewState.PropertyChanged += OnPreviewStateChanged;
             _compositionState.PropertyChanged += OnCompositionStateChanged;
             _compositionState.LayerChanged += OnLayerChanged;
+        }
+        
+        private static EditorPreviewType LoadSavedPreviewType()
+        {
+            var saved = EditorPrefs.GetInt(PreviewTypePrefKey, (int)EditorPreviewType.SingleState);
+            return (EditorPreviewType)saved;
         }
         
         #endregion
@@ -157,12 +172,17 @@ namespace DMotion.Editor
                     if (value != null && value.IsMultiLayer)
                     {
                         _compositionState.Initialize(value, this);
-                        PreviewType = EditorPreviewType.LayerComposition;
+                        // Respect user's saved preference for multi-layer assets
+                        // (both SingleState and LayerComposition are valid)
                     }
                     else
                     {
                         _compositionState.Clear();
-                        PreviewType = EditorPreviewType.SingleState;
+                        // Single-layer assets must use SingleState preview
+                        if (_previewType == EditorPreviewType.LayerComposition)
+                        {
+                            PreviewType = EditorPreviewType.SingleState;
+                        }
                     }
                 }
             }
@@ -319,12 +339,18 @@ namespace DMotion.Editor
         #region Preview Properties
         
         /// <summary>
-        /// Current preview mode.
+        /// Current preview mode. Persisted to EditorPrefs.
         /// </summary>
         public EditorPreviewType PreviewType
         {
             get => _previewType;
-            set => SetProperty(ref _previewType, value);
+            set
+            {
+                if (SetProperty(ref _previewType, value))
+                {
+                    EditorPrefs.SetInt(PreviewTypePrefKey, (int)value);
+                }
+            }
         }
         
         /// <summary>
@@ -461,16 +487,14 @@ namespace DMotion.Editor
         /// </summary>
         public event EventHandler<LayerPropertyChangedEventArgs> LayerStateChanged;
         
-        private void OnPreviewStateChanged(object sender, PropertyChangedEventArgs e)
+        private void OnPreviewStateChanged(object sender, ObservablePropertyChangedEventArgs e)
         {
-            var args = e as ObservablePropertyChangedEventArgs ?? new ObservablePropertyChangedEventArgs(e.PropertyName);
-            PreviewStateChanged?.Invoke(this, args);
+            PreviewStateChanged?.Invoke(this, e);
         }
-        
-        private void OnCompositionStateChanged(object sender, PropertyChangedEventArgs e)
+
+        private void OnCompositionStateChanged(object sender, ObservablePropertyChangedEventArgs e)
         {
-            var args = e as ObservablePropertyChangedEventArgs ?? new ObservablePropertyChangedEventArgs(e.PropertyName);
-            CompositionStateChanged?.Invoke(this, args);
+            CompositionStateChanged?.Invoke(this, e);
         }
         
         private void OnLayerChanged(object sender, LayerPropertyChangedEventArgs e)

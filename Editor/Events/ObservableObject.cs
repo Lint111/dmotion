@@ -1,13 +1,19 @@
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using DMotion; // For ISuppressable
 
 namespace DMotion.Editor
 {
     /// <summary>
+    /// Delegate for property changed events.
+    /// </summary>
+    public delegate void PropertyChangedEventHandler(object sender, ObservablePropertyChangedEventArgs e);
+
+    /// <summary>
     /// Base class for objects that support property change notifications.
     /// Provides automatic PropertyChanged events when properties are set via SetProperty.
+    /// Implements ISuppressable for batched notification support.
     /// </summary>
     /// <remarks>
     /// <para><b>Usage:</b></para>
@@ -21,21 +27,26 @@ namespace DMotion.Editor
     ///         set => SetProperty(ref _time, value);
     ///     }
     /// }
-    /// 
+    ///
     /// // Subscribe to changes
     /// myState.PropertyChanged += (sender, e) =>
     /// {
-    ///     if (e is ObservablePropertyChangedEventArgs args)
-    ///     {
-    ///         Debug.Log($"{e.PropertyName}: {args.OldValue} -> {args.NewValue}");
-    ///     }
+    ///     Debug.Log($"{e.PropertyName}: {e.OldValue} -> {e.NewValue}");
     /// };
-    /// 
+    ///
     /// // Setting property automatically fires event
     /// myState.Time = 0.5f;
+    /// 
+    /// // Batch multiple changes - only fires consolidated events at end
+    /// using (myState.SuppressNotifications())
+    /// {
+    ///     myState.Time = 0.5f;
+    ///     myState.Speed = 1.0f;
+    ///     myState.Time = 0.75f; // Same property changed twice - only notified once
+    /// }
     /// </code>
     /// </remarks>
-    public abstract class ObservableObject : INotifyPropertyChanged
+    public abstract class ObservableObject : ISuppressable
     {
         /// <summary>
         /// Fired when any property changes.
@@ -80,8 +91,20 @@ namespace DMotion.Editor
         /// </summary>
         protected virtual void OnPropertyChanged(string propertyName, object oldValue = null, object newValue = null)
         {
-            if (_suppressNotifications)
+            if (_suppressionDepth > 0)
+            {
+                // Queue notification - track first old value and latest new value
+                if (!_pendingNotifications.TryGetValue(propertyName, out var pending))
+                {
+                    _pendingNotifications[propertyName] = (oldValue, newValue);
+                }
+                else
+                {
+                    // Keep original old value, update to latest new value
+                    _pendingNotifications[propertyName] = (pending.OldValue, newValue);
+                }
                 return;
+            }
 
             PropertyChanged?.Invoke(this, new ObservablePropertyChangedEventArgs(propertyName, oldValue, newValue));
         }
@@ -91,77 +114,121 @@ namespace DMotion.Editor
         /// </summary>
         protected void OnPropertiesChanged(params string[] propertyNames)
         {
-            if (_suppressNotifications)
-                return;
-
             foreach (var name in propertyNames)
             {
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+                OnPropertyChanged(name);
             }
         }
         
         /// <summary>
+        /// Whether notifications are currently suppressed.
+        /// </summary>
+        public bool IsSuppressed => _suppressionDepth > 0;
+        
+        /// <summary>
         /// Suppresses property change notifications during a batch update.
         /// </summary>
-        protected IDisposable SuppressNotifications()
+        /// <param name="flushOnEnd">
+        /// If true (default): fires consolidated events when outermost scope ends.
+        /// If false: discards all queued events (silent suppression).
+        /// </param>
+        public IDisposable SuppressNotifications(bool flushOnEnd = true)
         {
-            return new NotificationSuppressor(this);
+            return new NotificationSuppressor(this, flushOnEnd);
         }
         
-        private bool _suppressNotifications;
+        /// <summary>
+        /// Called when suppression ends. Override to customize flush behavior.
+        /// </summary>
+        protected virtual void OnFlushPendingNotifications()
+        {
+            // Default: fire all pending notifications
+            foreach (var kvp in _pendingNotifications)
+            {
+                PropertyChanged?.Invoke(this, new ObservablePropertyChangedEventArgs(
+                    kvp.Key, kvp.Value.OldValue, kvp.Value.NewValue));
+            }
+        }
+        
+        private int _suppressionDepth;
+        private bool _flushOnEnd = true;
+        private readonly Dictionary<string, (object OldValue, object NewValue)> _pendingNotifications = new();
         
         private class NotificationSuppressor : IDisposable
         {
             private readonly ObservableObject _owner;
-            private readonly bool _previousState;
+            private readonly bool _wasOutermost;
             
-            public NotificationSuppressor(ObservableObject owner)
+            public NotificationSuppressor(ObservableObject owner, bool flushOnEnd)
             {
                 _owner = owner;
-                _previousState = owner._suppressNotifications;
-                owner._suppressNotifications = true;
+                _wasOutermost = owner._suppressionDepth == 0;
+                
+                // Outermost scope sets the flush behavior
+                if (_wasOutermost)
+                {
+                    owner._flushOnEnd = flushOnEnd;
+                }
+                
+                owner._suppressionDepth++;
             }
             
             public void Dispose()
             {
-                _owner._suppressNotifications = _previousState;
+                _owner._suppressionDepth--;
+                
+                // Only process when we exit the outermost suppression scope
+                if (_owner._suppressionDepth == 0 && _owner._pendingNotifications.Count > 0)
+                {
+                    if (_owner._flushOnEnd)
+                    {
+                        _owner.OnFlushPendingNotifications();
+                    }
+                    _owner._pendingNotifications.Clear();
+                    _owner._flushOnEnd = true; // Reset for next use
+                }
             }
         }
     }
     
     /// <summary>
-    /// Extended PropertyChangedEventArgs that includes old and new values.
+    /// Event args for property changed events, includes old and new values.
     /// </summary>
-    public class ObservablePropertyChangedEventArgs : PropertyChangedEventArgs
+    public class ObservablePropertyChangedEventArgs : EventArgs
     {
+        /// <summary>
+        /// The name of the property that changed.
+        /// </summary>
+        public string PropertyName { get; }
+
         /// <summary>
         /// The previous value of the property.
         /// </summary>
         public object OldValue { get; }
-        
+
         /// <summary>
         /// The new value of the property.
         /// </summary>
         public object NewValue { get; }
-        
+
         /// <summary>
         /// Timestamp when the change occurred.
         /// </summary>
         public DateTime Timestamp { get; }
-        
+
         public ObservablePropertyChangedEventArgs(string propertyName, object oldValue = null, object newValue = null)
-            : base(propertyName)
         {
+            PropertyName = propertyName;
             OldValue = oldValue;
             NewValue = newValue;
             Timestamp = DateTime.UtcNow;
         }
-        
+
         /// <summary>
         /// Gets the old value as a specific type.
         /// </summary>
         public T GetOldValue<T>() => OldValue is T value ? value : default;
-        
+
         /// <summary>
         /// Gets the new value as a specific type.
         /// </summary>

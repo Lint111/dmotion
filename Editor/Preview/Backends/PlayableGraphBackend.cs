@@ -1,6 +1,7 @@
 using System;
 using DMotion.Authoring;
 using Unity.Mathematics;
+using UnityEditor;
 using UnityEngine;
 
 namespace DMotion.Editor
@@ -23,6 +24,8 @@ namespace DMotion.Editor
         private float normalizedTime;
         private float2 blendPosition;
         private GameObject previewModel;
+        private bool needsRebuildAfterPlayMode;
+        private StateMachineAsset cachedStateMachineForRebuild;
         
         #endregion
         
@@ -31,6 +34,46 @@ namespace DMotion.Editor
         public PlayableGraphBackend()
         {
             renderer = new PreviewRenderer();
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+        }
+        
+        private void OnPlayModeStateChanged(PlayModeStateChange state)
+        {
+            switch (state)
+            {
+                case PlayModeStateChange.ExitingEditMode:
+                    // About to enter Play mode - cache what we need to rebuild
+                    if (layerCompositionPreview != null)
+                    {
+                        cachedStateMachineForRebuild = layerCompositionPreview.StateMachine;
+                        needsRebuildAfterPlayMode = true;
+                    }
+                    else if (currentState != null)
+                    {
+                        needsRebuildAfterPlayMode = true;
+                    }
+                    break;
+                    
+                case PlayModeStateChange.EnteredEditMode:
+                    // Exited Play mode - rebuild if needed
+                    if (needsRebuildAfterPlayMode)
+                    {
+                        needsRebuildAfterPlayMode = false;
+                        
+                        // The preview model reference is now invalid (destroyed during play mode)
+                        // Clear it so SetPreviewModel will recreate
+                        previewModel = null;
+                        
+                        // LayerCompositionPreview needs to be recreated
+                        // The caller (AnimationPreviewWindow) should detect IsInitialized=false and rebuild
+                        layerCompositionPreview?.Dispose();
+                        layerCompositionPreview = null;
+                        
+                        // PreviewRenderer also needs cleanup
+                        renderer.Dispose();
+                    }
+                    break;
+            }
         }
         
         #endregion
@@ -341,6 +384,7 @@ namespace DMotion.Editor
         
         public void Dispose()
         {
+            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
             renderer.Dispose();
             DisposeLayerComposition();
         }

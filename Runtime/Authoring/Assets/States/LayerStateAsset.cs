@@ -8,6 +8,51 @@ using UnityEngine;
 namespace DMotion.Authoring
 {
     /// <summary>
+    /// Defines how the transition preview loops.
+    /// </summary>
+    public enum TransitionLoopMode
+    {
+        /// <summary>
+        /// Loop FROM state, trigger plays transition, then returns to FROM loop.
+        /// Best for repeated transition testing.
+        /// </summary>
+        FromLoop,
+        
+        /// <summary>
+        /// Loop FROM state, trigger plays transition, then loops TO state.
+        /// Trigger again to reset back to FROM loop.
+        /// </summary>
+        ToLoop,
+        
+        /// <summary>
+        /// Continuously loop the entire transition (current behavior).
+        /// FROM→TO blend repeats automatically.
+        /// </summary>
+        TransitionLoop
+    }
+    
+    /// <summary>
+    /// Current playback state during transition preview.
+    /// </summary>
+    public enum TransitionPlayState
+    {
+        /// <summary>
+        /// Playing the FROM state on loop, waiting for trigger.
+        /// </summary>
+        LoopingFrom,
+        
+        /// <summary>
+        /// Playing the transition animation (FROM→TO blend).
+        /// </summary>
+        Transitioning,
+        
+        /// <summary>
+        /// Playing the TO state on loop (only in ToLoop mode).
+        /// </summary>
+        LoopingTo
+    }
+    
+    /// <summary>
     /// Represents an animation layer within a multi-layer state machine.
     /// Unlike SubStateMachineStateAsset (visual-only, flattened at bake),
     /// LayerStateAsset creates a separate runtime blob for pose blending.
@@ -20,7 +65,7 @@ namespace DMotion.Authoring
     /// - Runtime preview state ([NonSerialized]) for animation playback
     /// </summary>
     [CreateAssetMenu(fileName = "NewLayer", menuName = "DMotion/Animation Layer")]
-    public class LayerStateAsset : AnimationStateAsset, INestedStateMachineContainer, ILayerBoneMask
+    public class LayerStateAsset : AnimationStateAsset, INestedStateMachineContainer, ILayerBoneMask, ISuppressable
     {
         #region Persistent State (Serialized)
 
@@ -57,6 +102,11 @@ namespace DMotion.Authoring
         [NonSerialized] private float _transitionProgress;
         [NonSerialized] private float2 _blendPosition;
         [NonSerialized] private bool _isPlaying;
+        
+        // Transition preview mode
+        [NonSerialized] private TransitionLoopMode _transitionLoopMode = TransitionLoopMode.FromLoop;
+        [NonSerialized] private TransitionPlayState _transitionPlayState = TransitionPlayState.LoopingFrom;
+        [NonSerialized] private bool _transitionPending; // Trigger queued, waiting for loop to complete
 
         #endregion
 
@@ -67,6 +117,30 @@ namespace DMotion.Authoring
         /// Unity-native pattern avoiding System.ComponentModel dependency.
         /// </summary>
         public event Action<LayerStateAsset, string> PropertyChanged;
+        
+        // Suppression helper for batching notifications
+        [NonSerialized] private SuppressionHelper _suppression;
+        
+        private SuppressionHelper Suppression => _suppression ??= new SuppressionHelper(FlushPropertyChanged);
+        
+        /// <summary>
+        /// Whether property change notifications are currently suppressed.
+        /// </summary>
+        public bool IsSuppressed => _suppression?.IsSuppressed ?? false;
+        
+        /// <summary>
+        /// Suppresses property change notifications during a batch update.
+        /// </summary>
+        /// <param name="flushOnEnd">
+        /// If true (default): fires consolidated events when scope ends.
+        /// If false: discards all queued events (silent suppression).
+        /// </param>
+        public IDisposable SuppressNotifications(bool flushOnEnd = true) => Suppression.Begin(flushOnEnd);
+        
+        private void FlushPropertyChanged(string propertyName, object oldValue, object newValue)
+        {
+            PropertyChanged?.Invoke(this, propertyName);
+        }
 
         /// <summary>
         /// Sets a property value and raises PropertyChanged if the value changed.
@@ -76,6 +150,7 @@ namespace DMotion.Authoring
             if (EqualityComparer<T>.Default.Equals(field, value))
                 return false;
 
+            var oldValue = field;
             field = value;
 
             #if UNITY_EDITOR
@@ -85,15 +160,19 @@ namespace DMotion.Authoring
             }
             #endif
 
-            OnPropertyChanged(propertyName);
+            OnPropertyChanged(propertyName, oldValue, value);
             return true;
         }
 
         /// <summary>
         /// Raises PropertyChanged for the specified property.
         /// </summary>
-        protected virtual void OnPropertyChanged(string propertyName)
+        protected virtual void OnPropertyChanged(string propertyName, object oldValue = null, object newValue = null)
         {
+            // Queue if suppressed, fire immediately otherwise
+            if (Suppression.TryQueue(propertyName, oldValue, newValue))
+                return;
+            
             PropertyChanged?.Invoke(this, propertyName);
         }
 
@@ -235,6 +314,33 @@ namespace DMotion.Authoring
         }
 
         /// <summary>
+        /// How the transition preview loops.
+        /// </summary>
+        public TransitionLoopMode TransitionLoopMode
+        {
+            get => _transitionLoopMode;
+            set => SetProperty(ref _transitionLoopMode, value);
+        }
+
+        /// <summary>
+        /// Current playback state during transition preview.
+        /// </summary>
+        public TransitionPlayState TransitionPlayState
+        {
+            get => _transitionPlayState;
+            set => SetProperty(ref _transitionPlayState, value);
+        }
+
+        /// <summary>
+        /// Whether a transition trigger is pending, waiting for the current loop to complete.
+        /// </summary>
+        public bool TransitionPending
+        {
+            get => _transitionPending;
+            set => SetProperty(ref _transitionPending, value);
+        }
+
+        /// <summary>
         /// Whether in transition mode.
         /// </summary>
         public bool IsTransitionMode => _transitionFrom != null && _transitionTo != null;
@@ -243,6 +349,155 @@ namespace DMotion.Authoring
         /// Whether this layer has an assigned state or transition.
         /// </summary>
         public bool IsAssigned => _selectedState != null || IsTransitionMode;
+
+        #endregion
+
+        #region Batch Update Methods
+
+        /// <summary>
+        /// Sets a state selection, clearing any transition selection.
+        /// Fires a single PropertyChanged event for SelectedState.
+        /// </summary>
+        public void SetStateSelection(AnimationStateAsset state)
+        {
+            _transitionFrom = null;
+            _transitionTo = null;
+            _selectedState = state; 
+            OnPropertyChanged(nameof(SelectedState)); 
+        }
+
+        /// <summary>
+        /// Sets a transition selection, clearing any state selection.
+        /// Resets the transition play state to LoopingFrom.
+        /// Fires a single PropertyChanged event for TransitionFrom.
+        /// </summary>
+        public void SetTransitionSelection(AnimationStateAsset from, AnimationStateAsset to)
+        {
+            _selectedState = null;
+            _transitionFrom = from;
+            _transitionTo = to;
+            // Reset transition preview state
+            _transitionPlayState = TransitionPlayState.LoopingFrom;
+            _transitionProgress = 0f;
+            _normalizedTime = 0f;
+            OnPropertyChanged(nameof(TransitionFrom));
+        }
+
+        /// <summary>
+        /// Clears all selection (state and transition).
+        /// Fires a single PropertyChanged event.
+        /// </summary>
+        public void ClearSelection()
+        {
+            _selectedState = null;
+            _transitionFrom = null;
+            _transitionTo = null;
+            OnPropertyChanged(nameof(SelectedState));
+        }
+
+        /// <summary>
+        /// Triggers the transition animation based on current loop mode.
+        /// In FromLoop/ToLoop: queues a pending transition that starts when the current loop completes.
+        /// In TransitionLoop: no effect (always looping).
+        /// </summary>
+        public void TriggerTransition()
+        {
+            if (!IsTransitionMode) return;
+            
+            switch (_transitionLoopMode)
+            {
+                case TransitionLoopMode.FromLoop:
+                case TransitionLoopMode.ToLoop:
+                    if (_transitionPlayState == TransitionPlayState.LoopingFrom)
+                    {
+                        // Queue the transition to start when the current loop completes
+                        // This prevents jarring mid-animation jumps
+                        _transitionPending = true;
+                        OnPropertyChanged(nameof(TransitionPending));
+                    }
+                    else if (_transitionPlayState == TransitionPlayState.LoopingTo)
+                    {
+                        // Queue reset back to FROM loop (only valid in ToLoop mode)
+                        _transitionPending = true;
+                        OnPropertyChanged(nameof(TransitionPending));
+                    }
+                    break;
+                    
+                case TransitionLoopMode.TransitionLoop:
+                    // No trigger needed - always looping
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Called by the tick system when a pending trigger should execute.
+        /// This happens when the loop completes (normalized time wraps).
+        /// </summary>
+        internal void ExecutePendingTransition()
+        {
+            if (!_transitionPending) return;
+            
+            _transitionPending = false;
+            
+            if (_transitionPlayState == TransitionPlayState.LoopingFrom)
+            {
+                // Start the full transition timeline
+                _transitionPlayState = TransitionPlayState.Transitioning;
+                _transitionProgress = 0f;
+                _normalizedTime = 0f;
+                OnPropertyChanged(nameof(TransitionPlayState));
+            }
+            else if (_transitionPlayState == TransitionPlayState.LoopingTo)
+            {
+                // Reset back to FROM loop
+                _transitionPlayState = TransitionPlayState.LoopingFrom;
+                _transitionProgress = 0f;
+                _normalizedTime = 0f;
+                OnPropertyChanged(nameof(TransitionPlayState));
+            }
+        }
+
+        /// <summary>
+        /// Resets the transition preview to initial state (LoopingFrom).
+        /// Also clears any pending trigger.
+        /// </summary>
+        public void ResetTransition()
+        {
+            _transitionPending = false;
+            _transitionPlayState = TransitionPlayState.LoopingFrom;
+            _transitionProgress = 0f;
+            _normalizedTime = 0f;
+            OnPropertyChanged(nameof(TransitionPlayState));
+        }
+
+        /// <summary>
+        /// Called when transition completes. Handles state change based on loop mode.
+        /// </summary>
+        public void OnTransitionComplete()
+        {
+            switch (_transitionLoopMode)
+            {
+                case TransitionLoopMode.FromLoop:
+                    // Return to FROM loop
+                    _transitionPlayState = TransitionPlayState.LoopingFrom;
+                    _transitionProgress = 0f;
+                    _normalizedTime = 0f;
+                    OnPropertyChanged(nameof(TransitionPlayState));
+                    break;
+                    
+                case TransitionLoopMode.ToLoop:
+                    // Switch to TO loop
+                    _transitionPlayState = TransitionPlayState.LoopingTo;
+                    _normalizedTime = 0f;
+                    OnPropertyChanged(nameof(TransitionPlayState));
+                    break;
+                    
+                case TransitionLoopMode.TransitionLoop:
+                    // Loop continues - reset progress
+                    _transitionProgress = 0f;
+                    break;
+            }
+        }
 
         #endregion
 

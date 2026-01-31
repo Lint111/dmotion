@@ -26,7 +26,7 @@ namespace DMotion.Editor
         /// <summary>Whether this layer has a bone mask (partial body).</summary>
         public bool HasBoneMask;
         
-        /// <summary>Current state being previewed in this layer.</summary>
+        /// <summary>Current state being previewed in this layer (null if in transition mode).</summary>
         public AnimationStateAsset CurrentState;
         
         /// <summary>Normalized time for this layer's animation (0-1).</summary>
@@ -34,6 +34,18 @@ namespace DMotion.Editor
         
         /// <summary>Blend position for this layer (for blend states).</summary>
         public float2 BlendPosition;
+        
+        /// <summary>Whether this layer is currently showing a transition.</summary>
+        public bool IsTransitionMode;
+        
+        /// <summary>From state in transition mode (null if not in transition).</summary>
+        public AnimationStateAsset TransitionFromState;
+        
+        /// <summary>To state in transition mode (null if not in transition).</summary>
+        public AnimationStateAsset TransitionToState;
+        
+        /// <summary>Transition progress (0 = fully from, 1 = fully to).</summary>
+        public float TransitionProgress;
     }
     
     /// <summary>
@@ -44,6 +56,7 @@ namespace DMotion.Editor
     /// - How weight affects layer influence
     /// - How bone masks create partial-body animation
     /// - How override vs additive layers interact
+    /// - How transitions crossfade between states within a layer
     /// </summary>
     public interface ILayerCompositionPreview : IAnimationPreview
     {
@@ -103,22 +116,68 @@ namespace DMotion.Editor
         
         #endregion
         
-        #region Per-Layer Animation Control
+        #region Per-Layer Single State Control
         
         /// <summary>
         /// Sets which state to preview in a specific layer.
+        /// Clears any active transition for this layer.
         /// </summary>
         void SetLayerState(int layerIndex, AnimationStateAsset state);
         
         /// <summary>
         /// Sets the normalized time for a specific layer's animation.
+        /// In transition mode, this sets the time for both from and to states.
         /// </summary>
         void SetLayerNormalizedTime(int layerIndex, float normalizedTime);
         
         /// <summary>
         /// Sets the blend position for a specific layer (for blend states).
+        /// In single-state mode, sets the blend position for the current state.
+        /// In transition mode, use SetLayerTransitionBlendPositions instead.
         /// </summary>
         void SetLayerBlendPosition(int layerIndex, float2 position);
+        
+        #endregion
+        
+        #region Per-Layer Transition Control
+        
+        /// <summary>
+        /// Sets up a transition preview for a specific layer.
+        /// The layer will blend between fromState and toState based on transition progress.
+        /// </summary>
+        /// <param name="layerIndex">Layer index.</param>
+        /// <param name="fromState">State transitioning from (can be null for Any State).</param>
+        /// <param name="toState">State transitioning to.</param>
+        void SetLayerTransition(int layerIndex, AnimationStateAsset fromState, AnimationStateAsset toState);
+        
+        /// <summary>
+        /// Sets the transition progress for a layer in transition mode.
+        /// </summary>
+        /// <param name="layerIndex">Layer index.</param>
+        /// <param name="progress">Progress from 0 (fully from) to 1 (fully to).</param>
+        void SetLayerTransitionProgress(int layerIndex, float progress);
+        
+        /// <summary>
+        /// Sets the blend positions for both states in a transition.
+        /// </summary>
+        /// <param name="layerIndex">Layer index.</param>
+        /// <param name="fromBlendPosition">Blend position for the from state.</param>
+        /// <param name="toBlendPosition">Blend position for the to state.</param>
+        void SetLayerTransitionBlendPositions(int layerIndex, float2 fromBlendPosition, float2 toBlendPosition);
+        
+        /// <summary>
+        /// Sets the normalized times for both states in a transition independently.
+        /// Allows from and to states to be at different points in their animations.
+        /// </summary>
+        /// <param name="layerIndex">Layer index.</param>
+        /// <param name="fromNormalizedTime">Normalized time for the from state (0-1).</param>
+        /// <param name="toNormalizedTime">Normalized time for the to state (0-1).</param>
+        void SetLayerTransitionNormalizedTimes(int layerIndex, float fromNormalizedTime, float toNormalizedTime);
+        
+        /// <summary>
+        /// Clears any active transition for a layer, returning to single-state mode.
+        /// </summary>
+        void ClearLayerTransition(int layerIndex);
         
         #endregion
         

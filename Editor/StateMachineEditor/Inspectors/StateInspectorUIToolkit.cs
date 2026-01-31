@@ -268,13 +268,9 @@ namespace DMotion.Editor
             // Add reset button to toolbar
             blendSpaceFoldout.AddToolbarButton("Reset", "Reset view", () => blendSpace1D?.ResetView());
             
-            // Create blend space element
-            blendSpace1D = new BlendSpace1DVisualElement();
-            blendSpace1D.AddToClassList("blend-space-inspector-1d");
-            blendSpace1D.SetTarget(state);
-            blendSpace1D.EditMode = true;
-            blendSpace1D.ShowModeToggle = false;
-            blendSpace1D.ShowPreviewIndicator = false;
+            // Create blend space element using builder
+            var result = BlendSpaceUIBuilder.CreateForEdit(state);
+            blendSpace1D = result.Element as BlendSpace1DVisualElement;
             
             blendSpace1D.OnClipThresholdChanged += (index, threshold) =>
             {
@@ -376,13 +372,9 @@ namespace DMotion.Editor
             // Add reset button to toolbar
             blendSpaceFoldout.AddToolbarButton("Reset", "Reset view", () => blendSpace2D?.ResetView());
             
-            // Create blend space element
-            blendSpace2D = new BlendSpace2DVisualElement();
-            blendSpace2D.AddToClassList("blend-space-inspector-2d");
-            blendSpace2D.SetTarget(state);
-            blendSpace2D.EditMode = true;
-            blendSpace2D.ShowModeToggle = false;
-            blendSpace2D.ShowPreviewIndicator = false;
+            // Create blend space element using builder
+            var result = BlendSpaceUIBuilder.CreateForEdit(state);
+            blendSpace2D = result.Element as BlendSpace2DVisualElement;
             
             blendSpace2D.OnClipPositionChanged += (index, position) =>
             {

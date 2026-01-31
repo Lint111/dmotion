@@ -108,7 +108,7 @@ namespace DMotion
         /// <param name="keyframes">Packed keyframes array. Null or empty = linear blend.</param>
         /// <param name="t">Normalized time [0, 1]</param>
         /// <returns>Blend weight for the "To" state [0, 1]</returns>
-        internal static float EvaluateCurveManaged(CurveKeyframe[] keyframes, float t)
+        public static float EvaluateCurveManaged(CurveKeyframe[] keyframes, float t)
         {
             // Fast-path: null or empty keyframes = linear blend
             if (keyframes == null || keyframes.Length == 0)
@@ -137,7 +137,7 @@ namespace DMotion
         /// </summary>
         /// <param name="curve">Unity AnimationCurve to convert</param>
         /// <returns>Packed keyframes array, or null if curve is linear (fast-path)</returns>
-        internal static CurveKeyframe[] ConvertAnimationCurveManaged(AnimationCurve curve)
+        public static CurveKeyframe[] ConvertAnimationCurveManaged(AnimationCurve curve)
         {
             if (curve == null || IsLinearCurve(curve))
                 return null;
@@ -158,6 +158,82 @@ namespace DMotion
             }
             
             return keyframes;
+        }
+        
+        /// <summary>
+        /// Converts a Unity AnimationCurve to fixed-size BlendCurve for transition calculation.
+        /// Returns BlendCurve.Linear for linear curves (fast-path).
+        /// 
+        /// Both Unity and BlendCurve use FROM weight convention:
+        /// - Implicit start: (t=0, fromWeight=1) - 100% FROM
+        /// - Implicit end: (t=1, fromWeight=0) - 0% FROM (100% TO)
+        /// 
+        /// Only interior keyframes are stored (up to 4). Endpoints are implicit.
+        /// </summary>
+        public static BlendCurve ConvertToBlendCurve(AnimationCurve curve)
+        {
+            if (curve == null || IsLinearCurve(curve))
+                return BlendCurve.Linear;
+            
+            var keys = curve.keys;
+            
+            // Filter to interior keyframes only (exclude endpoints at t=0 and t=1)
+            // and limit to MaxKeyframes
+            var result = new BlendCurve();
+            int count = 0;
+            
+            for (int i = 0; i < keys.Length && count < BlendCurve.MaxKeyframes; i++)
+            {
+                var key = keys[i];
+                
+                // Skip endpoints (they're implicit)
+                if (key.time <= 0.001f || key.time >= 0.999f)
+                    continue;
+                
+                // No inversion needed - both use FROM weight convention
+                var kf = CurveKeyframe.Create(
+                    key.time,
+                    key.value,
+                    key.inTangent,
+                    key.outTangent);
+                
+                switch (count)
+                {
+                    case 0: result.K0 = kf; break;
+                    case 1: result.K1 = kf; break;
+                    case 2: result.K2 = kf; break;
+                    case 3: result.K3 = kf; break;
+                }
+                count++;
+            }
+            
+            // If no interior keyframes but curve has custom tangents, create approximation
+            if (count == 0 && keys.Length >= 2)
+            {
+                var k0 = keys[0];
+                var k1 = keys[keys.Length - 1];
+                
+                // Check if tangents differ from default linear (slope = -1 for (0,1)→(1,0))
+                bool hasCustomTangents = 
+                    Mathf.Abs(k0.outTangent - (-1f)) > LinearCurveEpsilon ||
+                    Mathf.Abs(k1.inTangent - (-1f)) > LinearCurveEpsilon;
+                
+                if (hasCustomTangents)
+                {
+                    // Sample curve at midpoint to approximate the shape
+                    float midValue = curve.Evaluate(0.5f);
+                    
+                    // Linear would give 0.5, only add point if significantly different
+                    if (Mathf.Abs(midValue - 0.5f) > 0.01f)
+                    {
+                        result.K0 = CurveKeyframe.Create(0.5f, midValue, 0f, 0f);
+                        count = 1;
+                    }
+                }
+            }
+            
+            result.KeyframeCount = (byte)count;
+            return result;
         }
         
         /// <summary>

@@ -118,7 +118,7 @@ MonoBehaviour:
       m_PostInfinity: 2
       m_RotationOrder: 4
   StateEditorData:
-    GraphPosition: {x: 316.99997, y: 188.99998}
+    GraphPosition: {x: 305.9546, y: 189.00009}
     Guid: 039c0298c5d43d943b7bc7b34f1395c0
   BlendClips:
   - Clip: {fileID: 11400000, guid: 2d8b5b7a11d7f3c418b9a6677c0cc292, type: 2}
@@ -166,7 +166,7 @@ MonoBehaviour:
       m_PostInfinity: 2
       m_RotationOrder: 4
   StateEditorData:
-    GraphPosition: {x: 563, y: 189}
+    GraphPosition: {x: 565.99994, y: 188.99998}
     Guid: e580aeaeb06da5f4399b7ea692e645bb
   Clip: {fileID: 11400000, guid: 2fa5654cbbd35e54f9a7b6cf79f67e1d, type: 2}
 --- !u!114 &9102714923962245846

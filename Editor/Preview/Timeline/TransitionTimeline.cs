@@ -90,6 +90,13 @@ namespace DMotion.Editor
         // Cached timing result from TransitionTimingCalculator
         private TransitionTimingResult cachedTimingResult;
         
+        // Cached TransitionStateConfig for calculator (updated when timing changes)
+        private TransitionStateConfig cachedTransitionConfig;
+        
+        // Cached snapshot for current frame (invalidated when NormalizedTime changes)
+        private TransitionStateSnapshot cachedSnapshot;
+        private float cachedSnapshotNormalizedTime = -1f;
+        
         #endregion
         
         #region UI Elements
@@ -281,6 +288,13 @@ namespace DMotion.Editor
             set
             {
                 blendCurve = value ?? AnimationCurve.Linear(0f, 1f, 1f, 0f);
+                
+                // Update the cached config's curve so calculations use the new curve
+                cachedTransitionConfig.Curve = CurveUtils.ConvertToBlendCurve(blendCurve);
+                
+                // Invalidate cached snapshot to force recalculation with new curve
+                cachedSnapshotNormalizedTime = -1f;
+                
                 blendCurveElement?.MarkDirtyRepaint();
             }
         }
@@ -316,123 +330,55 @@ namespace DMotion.Editor
         }
         
         /// <summary>
-        /// Gets the current transition progress (0 before exit, 0-1 during transition, 1 after).
-        /// Uses MAX(visualOverlap, transitionDuration) so:
-        /// - When transitionDuration is small, blend fills the visual overlap (prevents jump to high %)
-        /// - When visualOverlap is small, blend takes the configured transition time (prevents too-fast transition)
+        /// Gets the current transition state snapshot using the unified calculator.
+        /// Cached per-frame to avoid recalculating multiple times.
         /// </summary>
-        public float TransitionProgress
+        private TransitionStateSnapshot CurrentSnapshot
         {
             get
             {
-                float totalDuration = GetTotalTimelineDuration();
-                float currentSeconds = NormalizedTime * totalDuration;
+                // Return cached snapshot if NormalizedTime hasn't changed
+                if (Mathf.Approximately(cachedSnapshotNormalizedTime, NormalizedTime))
+                    return cachedSnapshot;
                 
-                // Calculate effective exit time on the timeline
-                // - Duration shrink ghost: use requestedExitTime directly
-                // - Context ghost or no ghost: use ghostOffset + exitTime
-                float effectiveExitTime;
-                if (IsFromGhostDurationShrink)
-                {
-                    effectiveExitTime = requestedExitTime;
-                }
-                else
-                {
-                    float fromGhostOffset = (FromVisualCycles - 1) * fromStateDuration;
-                    effectiveExitTime = fromGhostOffset + exitTime;
-                }
-                
-                // Progress is 0 before exit time, then ramps 0-1 during transition
-                if (currentSeconds < effectiveExitTime)
-                    return 0f;
-                
-                // Calculate VISUAL overlap duration (same calculation as UpdateLayout)
-                // Total from-bar end = all cycles * duration
-                float totalFromEnd = FromVisualCycles * fromStateDuration;
-                float toBarEnd = effectiveExitTime + toStateDuration;
-                float visualOverlapDuration = Mathf.Min(totalFromEnd, toBarEnd) - effectiveExitTime;
-                
-                // Use MAX of visual overlap and configured transition duration:
-                // - This ensures blend fills the visual overlap (prevents jump to high %)
-                // - But also respects configured transition time (prevents too-fast when overlap shrinks)
-                float effectiveTransitionDuration = Mathf.Max(visualOverlapDuration, requestedTransitionDuration);
-                
-                if (effectiveTransitionDuration <= 0.001f)
-                    return currentSeconds >= effectiveExitTime ? 1f : 0f;
-                
-                float progress = (currentSeconds - effectiveExitTime) / effectiveTransitionDuration;
-                return Mathf.Clamp01(progress);
+                // Calculate new snapshot using Runtime calculator (curve already applied)
+                cachedSnapshot = TransitionCalculator.CalculateState(in cachedTransitionConfig, NormalizedTime);
+                cachedSnapshotNormalizedTime = NormalizedTime;
+                return cachedSnapshot;
             }
         }
+        
+        /// <summary>
+        /// Gets the current transition progress (0 before exit, 0-1 during transition, 1 after).
+        /// Uses the unified TransitionStateCalculator for consistent behavior across all preview systems.
+        /// </summary>
+        public float TransitionProgress => CurrentSnapshot.RawProgress;
         
         /// <summary>
         /// Gets the normalized time (0-1) within the "from" state's clip.
         /// This is the position the from-state animation should be sampled at.
-        /// Accounts for ghost bars - scrubber in ghost region shows animation wrapping.
+        /// Uses the unified TransitionStateCalculator for consistent behavior.
         /// </summary>
-        public float FromStateNormalizedTime
-        {
-            get
-            {
-                if (fromStateDuration <= 0.001f) return 0f;
-                
-                float totalDuration = GetTotalTimelineDuration();
-                float currentSeconds = NormalizedTime * totalDuration;
-                
-                // Clamp to total from cycles (ghost + main)
-                float totalFromTime = FromVisualCycles * fromStateDuration;
-                float timeInFromCycles = Mathf.Min(currentSeconds, totalFromTime);
-                
-                // Use shared utility for consistent wrapping
-                return AnimationTimeUtils.CalculateNormalizedTime(timeInFromCycles, fromStateDuration);
-            }
-        }
+        public float FromStateNormalizedTime => CurrentSnapshot.FromStateNormalizedTime;
         
         /// <summary>
         /// Gets the normalized time (0-1) within the "to" state's clip.
         /// This is the position the to-state animation should be sampled at.
-        /// Accounts for transition offset and TO ghost bars.
+        /// Uses the unified TransitionStateCalculator for consistent behavior.
         /// </summary>
-        public float ToStateNormalizedTime
-        {
-            get
-            {
-                if (toStateDuration <= 0.001f) return 0f;
-                
-                float totalDuration = GetTotalTimelineDuration();
-                float currentSeconds = NormalizedTime * totalDuration;
-                
-                // Calculate effective exit time on the timeline (same logic as TransitionProgress)
-                float toStateStartInTimeline;
-                if (IsFromGhostDurationShrink)
-                {
-                    toStateStartInTimeline = requestedExitTime;
-                }
-                else
-                {
-                    float fromGhostOffset = (FromVisualCycles - 1) * fromStateDuration;
-                    toStateStartInTimeline = fromGhostOffset + exitTime;
-                }
-                
-                float toStateElapsed = currentSeconds - toStateStartInTimeline;
-                
-                if (toStateElapsed < 0) return transitionOffset; // Before transition, at offset position
-                
-                // Time into the to-state clip = offset + elapsed time since transition start
-                float toClipTime = transitionOffset * toStateDuration + toStateElapsed;
-                
-                // Handle TO ghost bars - wrap if we exceed single cycle
-                if (ToVisualCycles > 1)
-                {
-                    float totalToTime = ToVisualCycles * toStateDuration;
-                    toClipTime = Mathf.Min(toClipTime, totalToTime);
-                    // Use shared utility for consistent wrapping
-                    return AnimationTimeUtils.CalculateNormalizedTime(toClipTime, toStateDuration);
-                }
-                
-                return Mathf.Clamp01(toClipTime / toStateDuration);
-            }
-        }
+        public float ToStateNormalizedTime => CurrentSnapshot.ToStateNormalizedTime;
+        
+        /// <summary>
+        /// Gets the blend weight (0-1) with curve applied.
+        /// 0 = fully "from" state, 1 = fully "to" state.
+        /// Uses the unified TransitionStateCalculator for consistent behavior.
+        /// </summary>
+        public float BlendWeight => CurrentSnapshot.BlendWeight;
+        
+        /// <summary>
+        /// Gets the current section of the transition timeline.
+        /// </summary>
+        public TransitionSection CurrentSection => (TransitionSection)CurrentSnapshot.CurrentSection;
         
         #endregion
         
@@ -651,6 +597,7 @@ namespace DMotion.Editor
         
         /// <summary>
         /// Recalculates the cached timing result using TransitionTimingCalculator.
+        /// Also updates the TransitionStateConfig for the unified calculator.
         /// Should be called whenever timing values change.
         /// </summary>
         private void RecalculateTimingResult()
@@ -666,6 +613,21 @@ namespace DMotion.Editor
             };
             
             cachedTimingResult = TransitionTimingCalculator.Calculate(input);
+            
+            // Update TransitionStateConfig for the unified calculator
+            cachedTransitionConfig = new TransitionStateConfig
+            {
+                FromStateDuration = fromStateDuration,
+                ToStateDuration = toStateDuration,
+                ExitTime = requestedExitTime,
+                TransitionDuration = requestedTransitionDuration,
+                TransitionOffset = transitionOffset,
+                Timing = cachedTimingResult,
+                Curve = CurveUtils.ConvertToBlendCurve(blendCurve)
+            };
+            
+            // Invalidate cached snapshot since config changed
+            cachedSnapshotNormalizedTime = -1f;
         }
         
         /// <summary>
@@ -1265,10 +1227,8 @@ namespace DMotion.Editor
 
             if (blendLabel == null) return;
 
-            // Apply blend curve: curve Y is "from" weight, so "to" weight = 1 - curve
-            float progress = TransitionProgress;
-            float curveValue = blendCurve?.Evaluate(progress) ?? (1f - progress);
-            float blendWeight = 1f - curveValue; // Convert from "from weight" to "to weight"
+            // Use the unified calculator's blend weight (already has curve applied)
+            float blendWeight = CurrentSnapshot.BlendWeight;
 
             // Only update if value changed (avoid string allocations)
             if (Mathf.Abs(blendWeight - cachedBlendWeight) <= 0.005f) return; 

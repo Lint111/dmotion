@@ -94,6 +94,20 @@ namespace DMotion.Editor
                 UpdateFrameTicks();
             }
         }
+        
+        /// <summary>
+        /// Whether to show the play/pause button.
+        /// Set to false for timelines that are externally controlled.
+        /// </summary>
+        public bool ShowPlayButton
+        {
+            get => playButton?.style.display != DisplayStyle.None;
+            set
+            {
+                if (playButton != null)
+                    playButton.style.display = value ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+        }
 
         #endregion
 

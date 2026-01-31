@@ -17,6 +17,7 @@ namespace DMotion.Editor
         public const string UssLargeClassName = "icon-button--large";
         public const string UssClearClassName = "icon-button--clear";
         public const string UssNavigateClassName = "icon-button--navigate";
+        public const string UssPingClassName = "icon-button--ping";
         public const string UssAddClassName = "icon-button--add";
         public const string UssRemoveClassName = "icon-button--remove";
         public const string UssMenuClassName = "icon-button--menu";
@@ -31,6 +32,9 @@ namespace DMotion.Editor
 
         /// <summary>Unicode right arrow (→)</summary>
         public const string IconNavigate = "\u2192";
+        
+        /// <summary>Unicode north-east arrow (↗) - for "go to" / "ping" actions</summary>
+        public const string IconPing = "\u2197";
 
         /// <summary>Unicode plus (+)</summary>
         public const string IconAdd = "\u002B";
@@ -127,6 +131,16 @@ namespace DMotion.Editor
         {
             var button = new IconButton(IconNavigate, tooltip, onClick, size);
             button.AddToClassList(UssNavigateClassName);
+            return button;
+        }
+        
+        /// <summary>
+        /// Creates a ping/go-to button (↗ icon) - Unity convention for jumping to an asset.
+        /// </summary>
+        public static IconButton CreatePingButton(string tooltip, Action onClick, Size size = Size.Standard)
+        {
+            var button = new IconButton(IconPing, tooltip, onClick, size);
+            button.AddToClassList(UssPingClassName);
             return button;
         }
 

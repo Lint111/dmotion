@@ -97,32 +97,22 @@ namespace DMotion.Editor
         }
         
         /// <summary>
-        /// Master time when layers are synchronized.
+        /// Master time in seconds (unbounded game time).
+        /// When SyncLayers is true, each layer calculates its own normalized time from this value.
         /// </summary>
         public float MasterTime
         {
             get => _masterTime;
             set
             {
-                if (SetProperty(ref _masterTime, Mathf.Clamp01(value)))
+                // No clamping - MasterTime is unbounded game time in seconds
+                // Each layer handles its own looping based on clip/transition duration
+                if (SetProperty(ref _masterTime, Mathf.Max(0f, value)))
                 {
-                    // Propagate to all layers if synced
-                    // Use batch updating to avoid event storm (one LayerChanged per layer)
-                    if (SyncLayers)
-                    {
-                        _isBatchUpdating = true;
-                        try
-                        {
-                            foreach (var layer in _layers)
-                            {
-                                layer.NormalizedTime = value;
-                            }
-                        }
-                        finally
-                        {
-                            _isBatchUpdating = false;
-                        }
-                    }
+                    // Note: We no longer propagate MasterTime directly to layer.NormalizedTime
+                    // Instead, LayerCompositionInspectorBuilder.Tick() calculates each layer's
+                    // normalized time from MasterTime based on the layer's timeline duration.
+                    // This allows layers with different durations to loop at different rates.
                 }
             }
         }
@@ -158,7 +148,10 @@ namespace DMotion.Editor
             Clear();
 
             _parentEditorState = parentEditorState;
-            RootStateMachine = stateMachine;
+            
+            // Store reference WITHOUT firing PropertyChanged yet
+            // We need to add layers first so LayerCount > 0 when listeners receive the event
+            _rootStateMachine = stateMachine;
 
             int layerIndex = 0;
             foreach (var layerAsset in stateMachine.GetLayers())
@@ -186,6 +179,9 @@ namespace DMotion.Editor
             MasterTime = 0f;
             IsPlaying = false;
             SyncLayers = true;
+            
+            // NOW fire PropertyChanged for RootStateMachine - layers are ready, LayerCount > 0
+            OnPropertyChanged(nameof(RootStateMachine));
         }
 
         /// <summary>
@@ -198,7 +194,8 @@ namespace DMotion.Editor
             foreach (var layer in _layers)
             {
                 var saved = PreviewSettings.instance.GetLayerSelection(RootStateMachine, layer.LayerIndex);
-                if (!saved.HasValue) continue;
+                if (!saved.HasValue)
+                    continue;
 
                 var (selectedState, transitionFrom, transitionTo, weight, enabled) = saved.Value;
 
@@ -208,7 +205,11 @@ namespace DMotion.Editor
 
                 // Restore selection directly on asset with validation
                 var stateMachine = layer.NestedStateMachine;
-                if (stateMachine == null) continue;
+                if (stateMachine == null)
+                {
+                    Debug.LogWarning($"[CompositionState] Layer {layer.LayerIndex}: NestedStateMachine is null!");
+                    continue;
+                }
 
                 if (transitionFrom != null && transitionTo != null)
                 {
@@ -225,9 +226,11 @@ namespace DMotion.Editor
 
                     if (fromExists && toExists)
                     {
-                        layer.TransitionFrom = transitionFrom;
-                        layer.TransitionTo = transitionTo;
-                        layer.SelectedState = null;
+                        layer.SetTransitionSelection(transitionFrom, transitionTo);
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[CompositionState] Layer {layer.LayerIndex}: Transition states not found in hierarchy (from={fromExists}, to={toExists})");
                     }
                 }
                 else if (selectedState != null)
@@ -237,9 +240,11 @@ namespace DMotion.Editor
 
                     if (stateExists)
                     {
-                        layer.SelectedState = selectedState;
-                        layer.TransitionFrom = null;
-                        layer.TransitionTo = null;
+                        layer.SetStateSelection(selectedState);
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[CompositionState] Layer {layer.LayerIndex}: State {selectedState.name} not found in hierarchy");
                     }
                 }
             }
@@ -341,9 +346,7 @@ namespace DMotion.Editor
                 var defaultState = layer.NestedStateMachine?.DefaultState;
                 if (defaultState != null)
                 {
-                    layer.SelectedState = defaultState;
-                    layer.TransitionFrom = null;
-                    layer.TransitionTo = null;
+                    layer.SetStateSelection(defaultState);
                 }
             }
         }
@@ -413,85 +416,105 @@ namespace DMotion.Editor
         /// Only assigns new selections - never clears implicitly.
         /// Use ClearLayerSelection() for explicit clearing via UI.
         /// </summary>
-        private void OnEditorStatePropertyChanged(object sender, PropertyChangedEventArgs e)
+        private void OnEditorStatePropertyChanged(object sender, ObservablePropertyChangedEventArgs e)
         {
             if (_parentEditorState == null) return;
-
-            // Only sync when viewing inside a layer
-            if (!_parentEditorState.IsInLayer) return;
-
-            var layerIndex = _parentEditorState.CurrentLayerIndex;
-            if (layerIndex < 0 || layerIndex >= _layers.Count) return;
-
-            var layer = _layers[layerIndex];
 
             switch (e.PropertyName)
             {
                 case nameof(EditorState.SelectedState):
-                    // Sync state selection to the active layer (only when selecting, not clearing)
-                    var selectedState = _parentEditorState.SelectedState;
-                    if (selectedState != null)
-                    {
-                        // Validate: state must exist in the layer's nested state machine (including sub-state-machines)
-                        var nestedStateMachine = layer.NestedStateMachine;
-                        bool stateExists = false;
-                        if (nestedStateMachine != null)
-                        {
-                            foreach (var stateWithPath in nestedStateMachine.GetAllLeafStates())
-                            {
-                                if (stateWithPath.State == selectedState)
-                                {
-                                    stateExists = true;
-                                    break; // Early exit
-                                }
-                            }
-                        }
-
-                        if (stateExists)
-                        {
-                            layer.SelectedState = selectedState;
-                            layer.TransitionFrom = null;
-                            layer.TransitionTo = null;
-                        }
-                    }
-                    // Note: Don't clear on null - user must explicitly clear via ClearLayerSelection()
+                    SyncStateSelection();
                     break;
 
                 case nameof(EditorState.IsTransitionSelected):
-                    // Sync transition selection to the active layer
-                    if (_parentEditorState.IsTransitionSelected)
-                    {
-                        var fromState = _parentEditorState.SelectedTransitionFrom;
-                        var toState = _parentEditorState.SelectedTransitionTo;
-
-                        // Validate: both transition states must exist in the layer's nested state machine (including sub-state-machines)
-                        var nestedStateMachine = layer.NestedStateMachine;
-                        if (nestedStateMachine != null)
-                        {
-                            bool fromExists = false;
-                            bool toExists = false;
-
-                            foreach (var stateWithPath in nestedStateMachine.GetAllLeafStates())
-                            {
-                                if (stateWithPath.State == fromState) fromExists = true;
-                                if (stateWithPath.State == toState) toExists = true;
-                                if (fromExists && toExists) break; // Early exit
-                            }
-
-                            if (fromExists && toExists)
-                            {
-                                layer.TransitionFrom = fromState;
-                                layer.TransitionTo = toState;
-                                layer.SelectedState = null;
-                            }
-                        }
-                    }
+                    SyncTransitionSelection();
                     break;
 
                 // Note: HasSelection=false is intentionally NOT handled
                 // Clicking on grid/any-state/exit should NOT clear the layer assignment
                 // Use ClearLayerSelection() for explicit clearing
             }
+        }
+
+        /// <summary>
+        /// Syncs state selection from EditorState to the appropriate layer.
+        /// Works both when inside a layer and when viewing from root level.
+        /// Uses batch update to fire a single PropertyChanged event.
+        /// </summary>
+        private void SyncStateSelection()
+        {
+            var selectedState = _parentEditorState.SelectedState;
+            if (selectedState == null) return;
+
+            // Find the layer containing this state
+            var layer = FindLayerContainingState(selectedState);
+            if (layer == null) return;
+
+            // Use batch update to set state and clear transition atomically
+            layer.SetStateSelection(selectedState);
+        }
+
+        /// <summary>
+        /// Syncs transition selection from EditorState to the appropriate layer.
+        /// Works both when inside a layer and when viewing from root level.
+        /// Uses batch update to fire a single PropertyChanged event.
+        /// </summary>
+        private void SyncTransitionSelection()
+        {
+            if (!_parentEditorState.IsTransitionSelected) return;
+
+            var fromState = _parentEditorState.SelectedTransitionFrom;
+            var toState = _parentEditorState.SelectedTransitionTo;
+            if (fromState == null || toState == null) return;
+
+            // Find the layer containing both states (they must be in the same layer)
+            var layer = FindLayerContainingState(fromState);
+            if (layer == null) return;
+
+            // Verify toState is also in this layer
+            bool toExists = false;
+            var nestedStateMachine = layer.NestedStateMachine;
+            if (nestedStateMachine != null)
+            {
+                foreach (var stateWithPath in nestedStateMachine.GetAllLeafStates())
+                {
+                    if (stateWithPath.State == toState)
+                    {
+                        toExists = true;
+                        break;
+                    }
+                }
+            }
+
+            if (toExists)
+            {
+                // Use batch update to set transition and clear state atomically
+                layer.SetTransitionSelection(fromState, toState);
+            }
+        }
+
+        /// <summary>
+        /// Finds which layer contains the given state.
+        /// </summary>
+        private LayerStateAsset FindLayerContainingState(AnimationStateAsset state)
+        {
+            if (state == null) return null;
+
+            foreach (var layer in _layers)
+            {
+                var nestedStateMachine = layer.NestedStateMachine;
+                if (nestedStateMachine == null) continue;
+
+                foreach (var stateWithPath in nestedStateMachine.GetAllLeafStates())
+                {
+                    if (stateWithPath.State == state)
+                    {
+                        return layer;
+                    }
+                }
+            }
+
+            return null;
         }
 
         /// <summary>
@@ -503,9 +526,7 @@ namespace DMotion.Editor
             if (layerIndex < 0 || layerIndex >= _layers.Count) return;
 
             var layer = _layers[layerIndex];
-            layer.SelectedState = null;
-            layer.TransitionFrom = null;
-            layer.TransitionTo = null;
+            layer.ClearSelection();
         }
 
         #endregion

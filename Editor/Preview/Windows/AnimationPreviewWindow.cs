@@ -1,5 +1,9 @@
 using System;
+using ConvenientLogger;
+using ConvenientLogger.Editor;
 using DMotion.Authoring;
+using CLogger = ConvenientLogger.Logger;
+using Unity.Mathematics;
 using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine;
@@ -59,17 +63,22 @@ namespace DMotion.Editor
         #region State
 
         private StateMachineAsset currentStateMachine;
-        private AnimationStateAsset selectedState;
-        private AnimationStateAsset selectedTransitionFrom;
-        private AnimationStateAsset selectedTransitionTo;
-        private bool isAnyStateSelected;
-        private SelectionType currentSelectionType = SelectionType.None;
+        
+        // Selection state - serialized to survive domain reload
+        [SerializeField] private AnimationStateAsset selectedState;
+        [SerializeField] private AnimationStateAsset selectedTransitionFrom;
+        [SerializeField] private AnimationStateAsset selectedTransitionTo;
+        [SerializeField] private bool isAnyStateSelected;
+        [SerializeField] private SelectionType currentSelectionType = SelectionType.None;
 
         // Base state speed (from Speed slider), used to combine with weighted clip speed
         private float currentStateSpeed = 1f;
 
         // Store subscribed EditorState instance to handle domain reload correctly
         private EditorState _subscribedEditorState;
+        
+        // Logging - initialized via toolbar.AddLogger() in BuildUI
+        private CLogger _logger;
 
         private enum SelectionType
         {
@@ -131,6 +140,10 @@ namespace DMotion.Editor
 
         private void OnEnable()
         {
+            
+            // Subscribe to Play mode changes to handle preview rebuild
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+            
             // Subscribe to EditorState events
             _subscribedEditorState = EditorState.Instance;
             _subscribedEditorState.PropertyChanged += OnEditorStatePropertyChanged;
@@ -141,10 +154,17 @@ namespace DMotion.Editor
             // Subscribe to CompositionState.LayerChanged if initialized (has layers)
             // After domain reload, CompositionState might not be initialized yet
             // It will be initialized when RootStateMachine is set, triggering a re-subscription via OnCompositionStatePropertyChanged
-            if (_subscribedEditorState.CompositionState != null &&
-                _subscribedEditorState.CompositionState.LayerCount > 0)
+            var compositionState = _subscribedEditorState.CompositionState;
+            int layerCount = compositionState?.LayerCount ?? 0;
+            LogDebug($"OnEnable: CompositionState={compositionState?.GetType().Name ?? "null"}, LayerCount={layerCount}");
+            if (compositionState != null && layerCount > 0)
             {
-                _subscribedEditorState.CompositionState.LayerChanged += OnCompositionLayerChanged;
+                compositionState.LayerChanged += OnCompositionLayerChanged;
+                LogDebug("OnEnable: Subscribed to LayerChanged");
+            }
+            else
+            {
+                LogWarning($"OnEnable: NOT subscribing to LayerChanged (CompositionState={compositionState != null}, LayerCount={layerCount})");
             }
 
             // Create extracted components
@@ -172,6 +192,14 @@ namespace DMotion.Editor
         {
             var editorState = EditorState.Instance;
             
+            // IMPORTANT: Sync preview type BEFORE SetContext() because SetContext has auto-switch logic
+            // that checks currentPreviewType. If we sync after, the saved preference would be ignored.
+            var editorPreviewType = editorState.PreviewType;
+            currentPreviewType = editorPreviewType == EditorPreviewType.LayerComposition 
+                ? PreviewType.LayerComposition 
+                : PreviewType.SingleState;
+            UpdatePreviewTypeDropdownText();
+            
             // Sync state machine context (use RootStateMachine for proper multi-layer detection)
             // Fall back to serialized state machine if EditorState was reset (domain reload)
             var stateMachine = editorState.RootStateMachine ?? serializedStateMachine;
@@ -180,16 +208,10 @@ namespace DMotion.Editor
                 SetContext(stateMachine);
             }
             
-            // Sync preview type from EditorState (this is the authoritative source)
-            var editorPreviewType = editorState.PreviewType;
-            currentPreviewType = editorPreviewType == EditorPreviewType.LayerComposition 
-                ? PreviewType.LayerComposition 
-                : PreviewType.SingleState;
-            UpdatePreviewTypeDropdownText();
-            
-            // Sync selection
+            // Sync selection - EditorState takes priority, then fall back to serialized selection
             if (editorState.IsTransitionSelected)
             {
+                // EditorState has a selection - use it
                 selectedState = null;
                 selectedTransitionFrom = editorState.SelectedTransitionFrom;
                 selectedTransitionTo = editorState.SelectedTransitionTo;
@@ -198,6 +220,7 @@ namespace DMotion.Editor
             }
             else if (editorState.SelectedState != null)
             {
+                // EditorState has a state selection - use it
                 selectedState = editorState.SelectedState;
                 selectedTransitionFrom = null;
                 selectedTransitionTo = null;
@@ -207,18 +230,38 @@ namespace DMotion.Editor
             }
             else if (editorState.IsAnyStateSelected)
             {
+                // EditorState has AnyState selected
                 selectedState = null;
                 selectedTransitionFrom = null;
                 selectedTransitionTo = null;
                 isAnyStateSelected = true;
                 currentSelectionType = SelectionType.AnyState;
             }
-            // Note: If nothing is selected in EditorState, keep the current preview selection
-            // This allows the preview to maintain state when clicking on non-selectable elements
+            else if (selectedState != null || selectedTransitionFrom != null || selectedTransitionTo != null)
+            {
+                // EditorState is empty (domain reload), but we have serialized selection - restore to EditorState
+                if (currentSelectionType == SelectionType.State && selectedState != null)
+                {
+                    editorState.SelectedState = selectedState;
+                    currentStateSpeed = selectedState.Speed > 0 ? selectedState.Speed : 1f;
+                }
+                else if (currentSelectionType == SelectionType.Transition && selectedTransitionFrom != null && selectedTransitionTo != null)
+                {
+                    editorState.SelectTransition(selectedTransitionFrom, selectedTransitionTo, false);
+                }
+                else if (currentSelectionType == SelectionType.AnyStateTransition && selectedTransitionTo != null)
+                {
+                    editorState.SelectTransition(null, selectedTransitionTo, true); 
+                }
+            }
+            // Note: If nothing is selected anywhere, keep currentSelectionType as None
         }
 
         private void OnDisable()
         {
+            // Unsubscribe from Play mode changes
+            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+            
             // Unsubscribe from the stored EditorState instance
             if (_subscribedEditorState != null)
             {
@@ -251,6 +294,60 @@ namespace DMotion.Editor
             transitionInspectorBuilder?.Cleanup();
             layerCompositionBuilder?.Cleanup();
             previewSession?.Dispose();
+        }
+        
+        #endregion
+        
+        #region Logging
+        
+        // Logging convenience methods - logger is initialized in BuildUI via extension method
+        private void LogTrace(string message) => _logger?.Trace(message);
+        private void LogDebug(string message) => _logger?.Debug(message);
+        private void LogInfo(string message) => _logger?.Info(message);
+        private void LogWarning(string message) => _logger?.Warning(message);
+        private void LogError(string message) => _logger?.Error(message);
+        
+        #endregion
+        
+        #region Play Mode Handling
+        
+        private void OnPlayModeStateChanged(PlayModeStateChange state)
+        {
+            if (state == PlayModeStateChange.EnteredEditMode)
+            {
+                // Exited Play mode - preview needs to be rebuilt
+                // The backend's preview resources were destroyed during Play mode
+                LogInfo("Exited Play mode - rebuilding preview");
+                
+                // Re-sync with EditorState to rebuild preview
+                // Use delay to ensure Unity has finished restoring editor state
+                EditorApplication.delayCall += () =>
+                {
+                    if (this == null) return; // Window might have been closed
+                    
+                    // Dispose and recreate preview session to ensure clean state
+                    var savedCamState = previewSession?.CameraState ?? savedCameraState;
+                    previewSession?.Dispose();
+                    
+                    var savedMode = LoadSavedPreviewMode();
+                    previewSession = new PreviewSession(savedMode);
+                    
+                    if (savedCamState.IsValid)
+                    {
+                        previewSession.CameraState = savedCamState;
+                    }
+                    
+                    // Re-sync with EditorState to restore context
+                    SyncWithEditorState();
+                    
+                    // Reload preview model
+                    LoadPreviewModelPreference();
+                    
+                    // Update UI
+                    UpdateSelectionUI();
+                    Repaint();
+                };
+            }
         }
 
         private void CreateGUI()
@@ -478,6 +575,9 @@ namespace DMotion.Editor
             selectionLabel = new Label("No Selection");
             selectionLabel.AddToClassList("selection-label");
             toolbar.Add(selectionLabel);
+            
+            // Logger icon - one line setup!
+            _logger = toolbar.AddLogger("DMotion/AnimationPreview");
 
             root.Add(toolbar);
 
@@ -647,12 +747,18 @@ namespace DMotion.Editor
                 
                 if (!isMultiLayerContext)
                 {
-                    Debug.LogWarning("[AnimationPreview] Layer Composition preview requires a multi-layer state machine.");
+                    LogWarning("Layer Composition preview requires a multi-layer state machine.");
                     return;
                 }
             }
             
             currentPreviewType = type;
+            
+            // Persist to EditorState (which saves to EditorPrefs)
+            EditorState.Instance.PreviewType = type == PreviewType.LayerComposition 
+                ? EditorPreviewType.LayerComposition 
+                : EditorPreviewType.SingleState;
+            
             UpdatePreviewTypeDropdownText();
             
             // Note: CompositionState is managed by EditorState - it's automatically initialized
@@ -696,23 +802,36 @@ namespace DMotion.Editor
                 case nameof(ObservableCompositionState.RootStateMachine):
                     // CompositionState was (re-)initialized with a new state machine
                     // Re-subscribe to LayerChanged to handle domain reload restoration
+                    LogDebug("OnCompositionStatePropertyChanged: RootStateMachine changed");
                     if (_subscribedEditorState?.CompositionState != null)
                     {
                         _subscribedEditorState.CompositionState.LayerChanged -= OnCompositionLayerChanged;
-                        if (_subscribedEditorState.CompositionState.LayerCount > 0)
+                        int count = _subscribedEditorState.CompositionState.LayerCount;
+                        LogDebug($"OnCompositionStatePropertyChanged: LayerCount={count}");
+                        if (count > 0)
                         {
                             _subscribedEditorState.CompositionState.LayerChanged += OnCompositionLayerChanged;
+                            LogDebug("OnCompositionStatePropertyChanged: Subscribed to LayerChanged");
                         }
                     }
-                    // Rebuild layer composition UI
+                    
+                    // IMPORTANT: Create backend preview BEFORE rebuilding the builder UI
+                    // This ensures the builder gets a valid preview reference for state sync
+                    if (currentPreviewType == PreviewType.LayerComposition)
+                    {
+                        EnsureLayerCompositionPreview();
+                    }
+                    
+                    // Rebuild layer composition UI with the now-valid preview
                     var backend = previewSession?.Backend as PlayableGraphBackend;
                     var layerPreview = backend?.LayerComposition;
                     layerCompositionBuilder?.Build(
                         CompositionState?.RootStateMachine,
                         CompositionState,
-                        layerPreview);
+                        layerPreview,
+                        _logger);  // Pass parent logger for hierarchical logging
                     Repaint();
-                    break; 
+                    break;
             }
 
             if (currentPreviewType != PreviewType.LayerComposition) return; 
@@ -738,12 +857,39 @@ namespace DMotion.Editor
         
         private void OnCompositionLayerChanged(object sender, LayerPropertyChangedEventArgs e)
         {
-            if (currentPreviewType != PreviewType.LayerComposition) return;
+            LogTrace($"OnCompositionLayerChanged: Property={e.PropertyName}, LayerIndex={e.LayerIndex}, PreviewType={currentPreviewType}");
+            
+            if (currentPreviewType != PreviewType.LayerComposition)
+            {
+                LogTrace($"OnCompositionLayerChanged: Skipping - PreviewType is {currentPreviewType}");
+                return;
+            }
 
             // Get the backend's layer composition preview to propagate changes
             var backend = previewSession?.Backend as PlayableGraphBackend;
             var layerPreview = backend?.LayerComposition;
+            
+            // Ensure preview exists before trying to update it
+            // This handles cases where LayerChanged fires before the preview is created
+            if (layerPreview == null)
+            {
+                EnsureLayerCompositionPreview();
+                // Re-fetch backend AND layerPreview after ensuring preview exists
+                backend = previewSession?.Backend as PlayableGraphBackend;
+                layerPreview = backend?.LayerComposition;
+            }
+            
             var layer = CompositionState?.GetLayer(e.LayerIndex);
+
+            // Debug: Log if we have valid references
+            if (layerPreview == null)
+            {
+                LogWarning($"OnCompositionLayerChanged: layerPreview is null for property {e.PropertyName}");
+            }
+            if (layer == null)
+            {
+                LogWarning($"OnCompositionLayerChanged: layer is null for index {e.LayerIndex}");
+            }
 
             if (layer != null && layerPreview != null)
             {
@@ -759,12 +905,67 @@ namespace DMotion.Editor
                         break;
 
                     case nameof(LayerStateAsset.SelectedState):
+                        // Update backend state - handles both state selection and clearing
+                        // When SelectedState is null (cleared or in transition mode), 
+                        // SetLayerState with null will zero the layer's weight in the mixer
+                        LogDebug($"OnCompositionLayerChanged: Setting layer {e.LayerIndex} state to {layer.SelectedState?.name ?? "null"}");
+                        layerPreview.SetLayerState(e.LayerIndex, layer.SelectedState);
+                        
+                        // Also sync blend position for the new state
                         if (layer.SelectedState != null)
-                            layerPreview.SetLayerState(e.LayerIndex, layer.SelectedState);
+                        {
+                            var blendPos = PreviewSettings.GetBlendPosition(layer.SelectedState);
+                            layer.BlendPosition = new Unity.Mathematics.float2(blendPos.x, blendPos.y);
+                            layerPreview.SetLayerBlendPosition(e.LayerIndex, layer.BlendPosition);
+                        }
+                        break;
+
+                    case nameof(LayerStateAsset.TransitionFrom):
+                    case nameof(LayerStateAsset.TransitionTo):
+                        // Transition mode: use the new transition API for proper crossfade preview
+                        if (layer.IsTransitionMode && layer.TransitionTo != null)
+                        {
+                            LogDebug($"OnCompositionLayerChanged: Setting layer {e.LayerIndex} transition from {layer.TransitionFrom?.name ?? "null"} to {layer.TransitionTo?.name}");
+                            layerPreview.SetLayerTransition(e.LayerIndex, layer.TransitionFrom, layer.TransitionTo);
+                            
+                            // Sync blend positions for both states
+                            var fromBlendPos = layer.TransitionFrom != null 
+                                ? PreviewSettings.GetBlendPosition(layer.TransitionFrom) 
+                                : Vector2.zero;
+                            var toBlendPos = PreviewSettings.GetBlendPosition(layer.TransitionTo);
+                            layerPreview.SetLayerTransitionBlendPositions(
+                                e.LayerIndex, 
+                                new Unity.Mathematics.float2(fromBlendPos.x, fromBlendPos.y),
+                                new Unity.Mathematics.float2(toBlendPos.x, toBlendPos.y));
+                            
+                            // Sync initial transition progress
+                            layerPreview.SetLayerTransitionProgress(e.LayerIndex, layer.TransitionProgress);
+                        }
+                        break;
+
+                    case nameof(LayerStateAsset.TransitionProgress):
+                        // Update transition progress in backend
+                        if (layer.IsTransitionMode)
+                        {
+                            layerPreview.SetLayerTransitionProgress(e.LayerIndex, layer.TransitionProgress);
+                        }
                         break;
 
                     case nameof(LayerStateAsset.BlendPosition):
-                        layerPreview.SetLayerBlendPosition(e.LayerIndex, layer.BlendPosition);
+                        if (layer.IsTransitionMode)
+                        {
+                            // In transition mode, BlendPosition is used for the "from" state
+                            // The "to" state blend position is managed separately
+                            // For now, update both with the same position
+                            layerPreview.SetLayerTransitionBlendPositions(
+                                e.LayerIndex, 
+                                layer.BlendPosition,
+                                layer.BlendPosition);
+                        }
+                        else
+                        {
+                            layerPreview.SetLayerBlendPosition(e.LayerIndex, layer.BlendPosition);
+                        }
                         break;
                 }
             }
@@ -773,6 +974,7 @@ namespace DMotion.Editor
             switch (e.PropertyName)
             {
                 case nameof(LayerStateAsset.SelectedState):
+                case nameof(LayerStateAsset.TransitionFrom):
                 case nameof(LayerStateAsset.Weight):
                 case nameof(LayerStateAsset.IsEnabled):
                 case nameof(LayerStateAsset.BlendPosition):
@@ -787,19 +989,35 @@ namespace DMotion.Editor
         /// <summary>
         /// Ensures the layer composition preview exists in the backend.
         /// Must be called BEFORE building the inspector UI.
-        /// Syncs initial state selections from CompositionState to the backend.
+        /// Only syncs initial state on FIRST creation (or when state machine changes) to avoid 
+        /// overwriting state changes from ObservableCompositionState during selection updates.
+        /// Also updates the builder's preview reference for playback time propagation.
         /// </summary>
         private void EnsureLayerCompositionPreview()
         {
             if (currentPreviewType != PreviewType.LayerComposition) return;
             if (CompositionState?.RootStateMachine == null) return;
 
-            // Create layer composition preview in the backend
             var backend = previewSession?.Backend as PlayableGraphBackend;
-            backend?.CreateLayerCompositionPreview(CompositionState.RootStateMachine);
+            var targetStateMachine = CompositionState.RootStateMachine;
+            
+            // Check if preview already exists FOR THE SAME STATE MACHINE
+            var existingPreview = backend?.LayerComposition as LayerCompositionPreview;
+            if (existingPreview != null && existingPreview.IsInitialized && 
+                existingPreview.StateMachine == targetStateMachine)
+            {
+                // Preview already exists for this state machine - don't re-sync state 
+                // (would overwrite correct state with stale data during selection changes)
+                // Just ensure the builder has the reference
+                layerCompositionBuilder?.SetPreviewBackend(existingPreview);
+                return;
+            }
+            
+            // Create/recreate layer composition preview in the backend
+            // This happens on first creation OR when switching to a different state machine
+            backend?.CreateLayerCompositionPreview(targetStateMachine);
 
             // Sync initial state selections from composition state to backend
-            // This ensures the preview shows the correct animations when first opened
             var layerPreview = backend?.LayerComposition;
             if (layerPreview != null && CompositionState != null)
             {
@@ -808,34 +1026,66 @@ namespace DMotion.Editor
                     var layer = CompositionState.GetLayer(i);
                     if (layer == null) continue;
 
-                    // Sync state selection (most important for correct animation display)
-                    if (layer.SelectedState != null)
+                    if (layer.IsTransitionMode && layer.TransitionTo != null)
                     {
+                        // Transition mode: use the transition API for proper crossfade preview
+                        layerPreview.SetLayerTransition(i, layer.TransitionFrom, layer.TransitionTo);
+                        
+                        // Sync blend positions for both states
+                        var fromBlendPos = layer.TransitionFrom != null 
+                            ? PreviewSettings.GetBlendPosition(layer.TransitionFrom) 
+                            : Vector2.zero;
+                        var toBlendPos = PreviewSettings.GetBlendPosition(layer.TransitionTo);
+                        layerPreview.SetLayerTransitionBlendPositions(
+                            i, 
+                            new float2(fromBlendPos.x, fromBlendPos.y),
+                            new float2(toBlendPos.x, toBlendPos.y));
+                        
+                        // Sync transition progress
+                        layerPreview.SetLayerTransitionProgress(i, layer.TransitionProgress);
+                    }
+                    else if (layer.SelectedState != null)
+                    {
+                        // Single-state mode: play the selected state
                         layerPreview.SetLayerState(i, layer.SelectedState);
+                        
+                        // Sync blend position from persisted settings
+                        var blendPos = PreviewSettings.GetBlendPosition(layer.SelectedState);
+                        layer.BlendPosition = new float2(blendPos.x, blendPos.y);
+                        layerPreview.SetLayerBlendPosition(i, layer.BlendPosition);
                     }
 
                     // Sync weight and enabled state
                     layerPreview.SetLayerWeight(i, layer.Weight);
                     layerPreview.SetLayerEnabled(i, layer.IsEnabled);
-
-                    // Sync blend position for blend states
-                    layerPreview.SetLayerBlendPosition(i, layer.BlendPosition);
                 }
             }
+            
+            // Update the builder's preview reference so Tick() can propagate time
+            layerCompositionBuilder?.SetPreviewBackend(layerPreview);
         }
         
         #endregion
         
         #region EditorState Event Handlers
         
-        private void OnEditorStatePropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+        private void OnEditorStatePropertyChanged(object sender, ObservablePropertyChangedEventArgs e)
         {
             switch (e.PropertyName)
             {
                 case nameof(EditorState.RootStateMachine):
-                    // Root state machine changed - new asset opened
-                    SetContext(EditorState.Instance.RootStateMachine);
-                    ClearSelection();
+                    // Root state machine changed
+                    var newRootMachine = EditorState.Instance.RootStateMachine;
+                    bool isSameMachine = newRootMachine == currentStateMachine;
+                    
+                    SetContext(newRootMachine);
+                    
+                    // Only clear selection when switching to a DIFFERENT state machine
+                    // On domain reload, the same machine is re-set - preserve restored selection
+                    if (!isSameMachine)
+                    {
+                        ClearSelection();
+                    } 
                     UpdateSelectionUI();
                     break;
                     
@@ -931,7 +1181,18 @@ namespace DMotion.Editor
                     break;
                     
                 case nameof(ObservablePreviewState.BlendPosition):
-                    OnBlendPositionChanged(previewState.SelectedState, previewState.BlendPosition);
+                    // BlendPosition is used for both single-state preview and transition FROM state
+                    if (currentSelectionType == SelectionType.Transition || currentSelectionType == SelectionType.AnyStateTransition)
+                    {
+                        // In transition mode, this is the FROM state's blend position
+                        OnTransitionFromBlendPositionChangedInternal(previewState.TransitionFrom,
+                            new UnityEngine.Vector2(previewState.BlendPosition.x, previewState.BlendPosition.y));
+                    }
+                    else
+                    {
+                        // Single state mode
+                        OnBlendPositionChanged(previewState.SelectedState, previewState.BlendPosition);
+                    }
                     break;
                     
                 case nameof(ObservablePreviewState.ToBlendPosition):
@@ -1074,7 +1335,7 @@ namespace DMotion.Editor
         {
             UpdateSelectionLabel();
             
-            // Handle preview creation based on preview type
+            // Handle preview creation based on preview type 
             // IMPORTANT: Create backend preview BEFORE building inspector UI
             if (currentPreviewType == PreviewType.LayerComposition)
             {
@@ -1230,15 +1491,67 @@ namespace DMotion.Editor
             var backend = previewSession?.Backend as PlayableGraphBackend;
             var layerPreview = backend?.LayerComposition;
             
+            // Sync backend state from CompositionState (restores selections after domain reload)
+            SyncLayerPreviewFromCompositionState(layerPreview);
+            
             // Build the inspector UI using the builder pattern
             var content = layerCompositionBuilder.Build(
                 CompositionState?.RootStateMachine ?? currentStateMachine,
                 CompositionState,
-                layerPreview);
+                layerPreview,
+                _logger);  // Pass parent logger for hierarchical logging
             
             if (content != null)
             {
                 inspectorContent.Add(content);
+            }
+        }
+        
+        /// <summary>
+        /// Syncs the layer preview backend state from ObservableCompositionState.
+        /// Called after domain reload or play mode exit to restore layer selections.
+        /// </summary>
+        private void SyncLayerPreviewFromCompositionState(ILayerCompositionPreview layerPreview)
+        {
+            if (layerPreview == null || CompositionState == null) return;
+            
+            int layerCount = Math.Min(layerPreview.LayerCount, CompositionState.LayerCount);
+            LogDebug($"SyncLayerPreviewFromCompositionState: Syncing {layerCount} layers");
+            
+            for (int i = 0; i < layerCount; i++)
+            {
+                var layerState = CompositionState.GetLayer(i);
+                if (layerState == null) continue;
+                
+                // Sync enabled state and weight
+                layerPreview.SetLayerEnabled(i, layerState.IsEnabled);
+                layerPreview.SetLayerWeight(i, layerState.Weight);
+                
+                if (layerState.IsTransitionMode)
+                {
+                    // Restore transition mode
+                    LogDebug($"  Layer {i}: Restoring transition {layerState.TransitionFrom?.name} -> {layerState.TransitionTo?.name}");
+                    layerPreview.SetLayerTransition(i, layerState.TransitionFrom, layerState.TransitionTo);
+                    layerPreview.SetLayerTransitionProgress(i, layerState.TransitionProgress);
+                    
+                    // Restore blend positions for both states
+                    var fromBlendPos = PreviewSettings.GetBlendPosition(layerState.TransitionFrom);
+                    var toBlendPos = PreviewSettings.GetBlendPosition(layerState.TransitionTo);
+                    layerPreview.SetLayerTransitionBlendPositions(i, 
+                        new float2(fromBlendPos.x, fromBlendPos.y),
+                        new float2(toBlendPos.x, toBlendPos.y));
+                }
+                else if (layerState.SelectedState != null)
+                {
+                    // Restore single state mode
+                    LogDebug($"  Layer {i}: Restoring state {layerState.SelectedState.name}");
+                    layerPreview.SetLayerState(i, layerState.SelectedState);
+                    layerPreview.SetLayerNormalizedTime(i, layerState.NormalizedTime);
+                    
+                    // Restore blend position
+                    var blendPos = PreviewSettings.GetBlendPosition(layerState.SelectedState);
+                    layerPreview.SetLayerBlendPosition(i, new float2(blendPos.x, blendPos.y));
+                }
             }
         }
 
@@ -1565,11 +1878,8 @@ namespace DMotion.Editor
                 {
                     previewSession.SetNormalizedTime(transitionTimeline.NormalizedTime);
                     
-                    // Apply blend curve to get actual blend weight
-                    // Uses CurveUtils for runtime-identical evaluation
-                    float rawProgress = transitionTimeline.TransitionProgress;
-                    var keyframes = transitionInspectorBuilder?.BlendCurveKeyframes;
-                    float blendWeight = CurveUtils.EvaluateCurveManaged(keyframes, rawProgress);
+                    // Use unified calculator's blend weight (already has curve applied)
+                    float blendWeight = transitionTimeline.BlendWeight;
                     
                     // Set transition progress for blend weights (from→to crossfade)
                     previewSession.SetTransitionProgress(blendWeight);
@@ -1628,7 +1938,7 @@ namespace DMotion.Editor
                 
                 if (animator == null || skinnedMesh == null)
                 {
-                    Debug.LogWarning("[AnimationPreview] Preview model must have an Animator and SkinnedMeshRenderer.");
+                    LogWarning("Preview model must have an Animator and SkinnedMeshRenderer.");
                     previewModelField.SetValueWithoutNotify(evt.previousValue);
                     return;
                 }

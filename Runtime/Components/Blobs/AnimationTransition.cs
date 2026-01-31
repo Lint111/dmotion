@@ -10,43 +10,43 @@ namespace DMotion
     /// Uses byte precision for memory efficiency (4 bytes per keyframe).
     /// Sufficient precision for transition blend curves in [0,1] range.
     /// </summary>
-    internal struct CurveKeyframe
+    public struct CurveKeyframe
     {
         /// <summary>Normalized time [0, 1] packed as byte (0-255)</summary>
-        internal byte TimeNorm;
+        public byte TimeNorm;
         /// <summary>Weight value [0, 1] packed as byte (0-255) - represents "To" state weight</summary>
-        internal byte ValueNorm;
+        public byte ValueNorm;
         /// <summary>Incoming tangent scaled by TangentScale, clamped to [-128, 127]</summary>
-        internal sbyte InTangentScaled;
+        public sbyte InTangentScaled;
         /// <summary>Outgoing tangent scaled by TangentScale, clamped to [-128, 127]</summary>
-        internal sbyte OutTangentScaled;
+        public sbyte OutTangentScaled;
         
         /// <summary>Scale factor for tangents. Effective range: -12.8 to +12.7</summary>
-        internal const float TangentScale = 10f;
+        public const float TangentScale = 10f;
         
         /// <summary>Unpacked time value [0, 1]</summary>
-        internal float Time
+        public float Time
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => TimeNorm / 255f;
         }
         
         /// <summary>Unpacked value [0, 1]</summary>
-        internal float Value
+        public float Value
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => ValueNorm / 255f;
         }
         
         /// <summary>Unpacked incoming tangent</summary>
-        internal float InTangent
+        public float InTangent
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => InTangentScaled / TangentScale;
         }
         
         /// <summary>Unpacked outgoing tangent</summary>
-        internal float OutTangent
+        public float OutTangent
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => OutTangentScaled / TangentScale;
@@ -54,7 +54,7 @@ namespace DMotion
         
         /// <summary>Creates a packed keyframe from float values.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal static CurveKeyframe Create(float time, float value, float inTangent, float outTangent)
+        public static CurveKeyframe Create(float time, float value, float inTangent, float outTangent)
         {
             return new CurveKeyframe
             {

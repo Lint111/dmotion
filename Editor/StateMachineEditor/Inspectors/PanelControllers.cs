@@ -53,7 +53,7 @@ namespace DMotion.Editor
             }
         }
         
-        private void OnEditorStatePropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+        private void OnEditorStatePropertyChanged(object sender, ObservablePropertyChangedEventArgs e)
         {
             switch (e.PropertyName)
             {

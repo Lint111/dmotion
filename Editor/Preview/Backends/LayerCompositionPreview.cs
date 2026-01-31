@@ -15,6 +15,7 @@ namespace DMotion.Editor
     /// Preview implementation for multi-layer animation composition.
     /// Uses AnimationLayerMixerPlayable to blend multiple layers with proper
     /// override/additive blending and avatar mask support.
+    /// Supports both single-state and transition preview per layer.
     /// </summary>
     internal class LayerCompositionPreview : ILayerCompositionPreview
     {
@@ -22,6 +23,7 @@ namespace DMotion.Editor
         
         /// <summary>
         /// Internal state for a single layer in the preview.
+        /// Uses StatePlayableBuilder for playable management.
         /// </summary>
         private class LayerData
         {
@@ -31,18 +33,32 @@ namespace DMotion.Editor
             public LayerBlendMode BlendMode;
             public bool IsEnabled;
             public AvatarMask AvatarMask;
+            
+            // Single-state mode
             public AnimationStateAsset CurrentState;
             public float NormalizedTime;
             public float2 BlendPosition;
+            public StatePlayableResult StateResult;
             
-            // Playable graph components
-            public AnimationMixerPlayable StateMixer;
-            public AnimationClipPlayable[] ClipPlayables;
-            public float[] ClipWeights;
-            public float[] ClipDurations;
-            public float[] ClipThresholds; // For 1D blend
-            public float2[] ClipPositions; // For 2D blend
-            public bool Is2DBlend;
+            // Transition mode
+            public bool IsTransitionMode;
+            public AnimationStateAsset FromState;
+            public AnimationStateAsset ToState;
+            public float TransitionProgress;
+            public float FromNormalizedTime;
+            public float ToNormalizedTime;
+            public float2 FromBlendPosition;
+            public float2 ToBlendPosition;
+            public StatePlayableResult FromResult;
+            public StatePlayableResult ToResult;
+            public AnimationMixerPlayable TransitionMixer;
+            
+            /// <summary>
+            /// The root playable for this layer (either StateResult.RootPlayable or TransitionMixer).
+            /// </summary>
+            public Playable RootPlayable => IsTransitionMode && TransitionMixer.IsValid() 
+                ? TransitionMixer 
+                : StateResult.RootPlayable;
         }
         
         #endregion
@@ -121,6 +137,12 @@ namespace DMotion.Editor
         #region ILayerCompositionPreview Properties
         
         public int LayerCount => layers.Count;
+        
+        /// <summary>
+        /// The state machine this preview is initialized for.
+        /// Used to check if preview needs to be recreated for a different state machine.
+        /// </summary>
+        public StateMachineAsset StateMachine => stateMachine;
         
         #endregion
         
@@ -242,7 +264,12 @@ namespace DMotion.Editor
                 HasBoneMask = layer.AvatarMask != null,
                 CurrentState = layer.CurrentState,
                 NormalizedTime = layer.NormalizedTime,
-                BlendPosition = layer.BlendPosition
+                BlendPosition = layer.BlendPosition,
+                // Transition state
+                IsTransitionMode = layer.IsTransitionMode,
+                TransitionFromState = layer.FromState,
+                TransitionToState = layer.ToState,
+                TransitionProgress = layer.TransitionProgress
             };
         }
         
@@ -287,22 +314,51 @@ namespace DMotion.Editor
         
         public void SetLayerState(int layerIndex, AnimationStateAsset state)
         {
-            if (layerIndex < 0 || layerIndex >= layers.Count) return;
+            if (layerIndex < 0 || layerIndex >= layers.Count)
+            {
+                Debug.LogWarning($"[LayerCompositionPreview] SetLayerState: Invalid layer index {layerIndex}, layers.Count={layers.Count}");
+                return;
+            }
 
             var layer = layers[layerIndex];
-            if (layer.CurrentState == state) return;
-
+            
+            // Clear transition mode when setting single state
+            if (layer.IsTransitionMode)
+            {
+                ClearLayerTransitionInternal(layer);
+            }
+            
+            // Always update and rebuild - don't early return on same state
+            // This ensures state changes are always reflected in the playable graph
+            bool stateChanged = layer.CurrentState != state;
             layer.CurrentState = state;
-            RebuildLayerPlayables(layer);
-            UpdateLayerMixerWeights(); // Ensure unassigned layers don't affect blend
+            
+            if (stateChanged || state != null)
+            {
+                RebuildLayerPlayables(layer);
+                UpdateLayerMixerWeights(); // Ensure unassigned layers don't affect blend
+            }
         }
         
         public void SetLayerNormalizedTime(int layerIndex, float normalizedTime)
         {
             if (layerIndex < 0 || layerIndex >= layers.Count) return;
 
-            layers[layerIndex].NormalizedTime = Mathf.Clamp01(normalizedTime);
-            SyncLayerClipTimes(layers[layerIndex]);
+            var layer = layers[layerIndex];
+            normalizedTime = Mathf.Clamp01(normalizedTime);
+            
+            if (layer.IsTransitionMode)
+            {
+                // In transition mode, set both from and to times
+                layer.FromNormalizedTime = normalizedTime;
+                layer.ToNormalizedTime = normalizedTime;
+            }
+            else
+            {
+                layer.NormalizedTime = normalizedTime;
+            }
+            
+            SyncLayerClipTimes(layer);
         }
         
         public void SetLayerBlendPosition(int layerIndex, float2 position)
@@ -312,6 +368,130 @@ namespace DMotion.Editor
             var layer = layers[layerIndex];
             layer.BlendPosition = position;
             UpdateLayerBlendWeights(layer);
+            
+            // Sync clip times when blend position changes
+            // This ensures newly-active clips (weight > 0) have correct times
+            SyncLayerClipTimes(layer);
+        }
+        
+        #endregion
+        
+        #region Per-Layer Transition Control
+        
+        public void SetLayerTransition(int layerIndex, AnimationStateAsset fromState, AnimationStateAsset toState)
+        {
+            if (layerIndex < 0 || layerIndex >= layers.Count)
+            {
+                Debug.LogWarning($"[LayerCompositionPreview] SetLayerTransition: Invalid layer index {layerIndex}");
+                return;
+            }
+            
+            if (toState == null)
+            {
+                Debug.LogWarning($"[LayerCompositionPreview] SetLayerTransition: toState cannot be null");
+                return;
+            }
+            
+            var layer = layers[layerIndex];
+            
+            // Clear any existing state/transition
+            ClearLayerTransitionInternal(layer);
+            DisposeLayerPlayables(layer);
+            
+            // Set up transition mode
+            layer.IsTransitionMode = true;
+            layer.FromState = fromState;
+            layer.ToState = toState;
+            layer.TransitionProgress = 0f;
+            layer.FromNormalizedTime = 0f;
+            layer.ToNormalizedTime = 0f;
+            layer.FromBlendPosition = float2.zero;
+            layer.ToBlendPosition = float2.zero;
+            layer.CurrentState = null; // Clear single-state mode
+            
+            // Build transition playables
+            RebuildLayerTransitionPlayables(layer);
+            UpdateLayerMixerWeights();
+        }
+        
+        public void SetLayerTransitionProgress(int layerIndex, float progress)
+        {
+            if (layerIndex < 0 || layerIndex >= layers.Count) return;
+            
+            var layer = layers[layerIndex];
+            if (!layer.IsTransitionMode) return;
+            
+            layer.TransitionProgress = Mathf.Clamp01(progress);
+            UpdateTransitionMixerWeights(layer);
+        }
+        
+        public void SetLayerTransitionBlendPositions(int layerIndex, float2 fromBlendPosition, float2 toBlendPosition)
+        {
+            if (layerIndex < 0 || layerIndex >= layers.Count) return;
+            
+            var layer = layers[layerIndex];
+            if (!layer.IsTransitionMode) return;
+            
+            layer.FromBlendPosition = fromBlendPosition;
+            layer.ToBlendPosition = toBlendPosition;
+            
+            // Update blend weights for both states
+            StatePlayableBuilder.UpdateBlendWeights(ref layer.FromResult, fromBlendPosition);
+            StatePlayableBuilder.UpdateBlendWeights(ref layer.ToResult, toBlendPosition);
+            
+            // Sync clip times after weight changes
+            SyncLayerClipTimes(layer);
+        }
+        
+        public void SetLayerTransitionNormalizedTimes(int layerIndex, float fromNormalizedTime, float toNormalizedTime)
+        {
+            if (layerIndex < 0 || layerIndex >= layers.Count) return;
+            
+            var layer = layers[layerIndex];
+            if (!layer.IsTransitionMode) return;
+            
+            layer.FromNormalizedTime = Mathf.Clamp01(fromNormalizedTime);
+            layer.ToNormalizedTime = Mathf.Clamp01(toNormalizedTime);
+            
+            SyncLayerClipTimes(layer);
+        }
+        
+        public void ClearLayerTransition(int layerIndex)
+        {
+            if (layerIndex < 0 || layerIndex >= layers.Count) return;
+            
+            var layer = layers[layerIndex];
+            if (!layer.IsTransitionMode) return;
+            
+            ClearLayerTransitionInternal(layer);
+            
+            // Rebuild as single-state (will be empty if no CurrentState)
+            RebuildLayerPlayables(layer);
+            UpdateLayerMixerWeights();
+        }
+        
+        private void ClearLayerTransitionInternal(LayerData layer)
+        {
+            if (!layer.IsTransitionMode) return;
+            
+            // Dispose transition playables
+            StatePlayableBuilder.Dispose(ref layer.FromResult);
+            StatePlayableBuilder.Dispose(ref layer.ToResult);
+            
+            if (layer.TransitionMixer.IsValid())
+            {
+                layer.TransitionMixer.Destroy();
+                layer.TransitionMixer = default;
+            }
+            
+            layer.IsTransitionMode = false;
+            layer.FromState = null;
+            layer.ToState = null;
+            layer.TransitionProgress = 0f;
+            layer.FromNormalizedTime = 0f;
+            layer.ToNormalizedTime = 0f;
+            layer.FromBlendPosition = float2.zero;
+            layer.ToBlendPosition = float2.zero;
         }
         
         #endregion
@@ -346,9 +526,18 @@ namespace DMotion.Editor
 
             if (isInitialized && skinnedMeshRenderer != null && playableGraph.IsValid())
             {
-                // Sample the graph at current time
-                // Note: The graph has already been evaluated via Evaluate() in SetGlobalNormalizedTime/SetLayerNormalizedTime
-                // This just samples the current pose for rendering
+                // Ensure clip times and transition weights are synced immediately before sampling
+                foreach (var layer in layers)
+                {
+                    SyncLayerClipTimes(layer);
+                    if (layer.IsTransitionMode)
+                    {
+                        UpdateTransitionMixerWeights(layer);
+                    }
+                }
+                
+                // Sample the graph for rendering
+                // Time parameter is 0 because we set individual clip times manually via SetTime()
                 AnimationMode.BeginSampling();
                 AnimationMode.SamplePlayableGraph(playableGraph, 0, 0);
                 AnimationMode.EndSampling();
@@ -416,6 +605,12 @@ namespace DMotion.Editor
         
         public void Dispose()
         {
+            // Dispose layer playables before destroying graph
+            foreach (var layer in layers)
+            {
+                DisposeLayerPlayables(layer);
+            }
+            
             if (playableGraph.IsValid())
             {
                 playableGraph.Destroy();
@@ -611,161 +806,102 @@ namespace DMotion.Editor
         
         private void RebuildLayerPlayables(LayerData layer)
         {
-            if (!playableGraph.IsValid()) return;
-            
-            // Disconnect old playables
-            if (layer.StateMixer.IsValid())
+            if (!playableGraph.IsValid())
             {
-                playableGraph.Disconnect(layerMixer, layer.Index);
-                layer.StateMixer.Destroy();
+                Debug.LogWarning($"[LayerCompositionPreview] RebuildLayerPlayables: Playable graph is not valid!");
+                return;
             }
             
-            if (layer.ClipPlayables != null)
-            {
-                foreach (var clip in layer.ClipPlayables)
-                {
-                    if (clip.IsValid()) clip.Destroy();
-                }
-            }
+            // Dispose old playables
+            DisposeLayerPlayables(layer);
             
-            var state = layer.CurrentState;
-            if (state == null)
+            // Build new state playables using StatePlayableBuilder
+            layer.StateResult = StatePlayableBuilder.BuildForState(playableGraph, layer.CurrentState);
+            
+            // Update blend weights if this is a blend state
+            if (layer.StateResult.IsValid)
             {
-                // Create empty playable
-                layer.StateMixer = AnimationMixerPlayable.Create(playableGraph, 0);
-                layer.ClipPlayables = Array.Empty<AnimationClipPlayable>();
-                layer.ClipWeights = Array.Empty<float>();
-                layer.ClipDurations = Array.Empty<float>();
-                layer.ClipThresholds = Array.Empty<float>();
-                layer.ClipPositions = Array.Empty<float2>();
-                layer.Is2DBlend = false;
-            }
-            else
-            {
-                BuildStatePlayables(layer, state);
+                StatePlayableBuilder.UpdateBlendWeights(ref layer.StateResult, layer.BlendPosition);
             }
             
             // Connect to layer mixer
-            playableGraph.Connect(layer.StateMixer, 0, layerMixer, layer.Index);
+            if (layer.StateResult.IsValid)
+            {
+                playableGraph.Connect(layer.StateResult.RootPlayable, 0, layerMixer, layer.Index);
+            }
             
             // Sync times
             SyncLayerClipTimes(layer);
         }
         
-        private void BuildStatePlayables(LayerData layer, AnimationStateAsset state)
+        private void RebuildLayerTransitionPlayables(LayerData layer)
         {
-            switch (state)
+            if (!playableGraph.IsValid())
             {
-                case SingleClipStateAsset singleClip:
-                    BuildSingleClipPlayables(layer, singleClip);
-                    break;
-                    
-                case LinearBlendStateAsset linearBlend:
-                    BuildLinearBlendPlayables(layer, linearBlend);
-                    break;
-                    
-                case Directional2DBlendStateAsset blend2D:
-                    Build2DBlendPlayables(layer, blend2D);
-                    break;
-                    
-                default:
-                    // Unsupported state type - create empty
-                    layer.StateMixer = AnimationMixerPlayable.Create(playableGraph, 0);
-                    layer.ClipPlayables = Array.Empty<AnimationClipPlayable>();
-                    layer.ClipWeights = Array.Empty<float>();
-                    layer.ClipDurations = Array.Empty<float>();
-                    layer.ClipThresholds = Array.Empty<float>();
-                    layer.ClipPositions = Array.Empty<float2>();
-                    layer.Is2DBlend = false;
-                    break;
+                Debug.LogWarning($"[LayerCompositionPreview] RebuildLayerTransitionPlayables: Playable graph is not valid!");
+                return;
+            }
+            
+            // Build from and to state playables
+            layer.FromResult = StatePlayableBuilder.BuildForState(playableGraph, layer.FromState);
+            layer.ToResult = StatePlayableBuilder.BuildForState(playableGraph, layer.ToState);
+            
+            // Create transition mixer (2 inputs: from and to)
+            layer.TransitionMixer = AnimationMixerPlayable.Create(playableGraph, 2);
+            
+            // Connect from and to playables to transition mixer
+            if (layer.FromResult.IsValid)
+            {
+                playableGraph.Connect(layer.FromResult.RootPlayable, 0, layer.TransitionMixer, 0);
+            }
+            if (layer.ToResult.IsValid)
+            {
+                playableGraph.Connect(layer.ToResult.RootPlayable, 0, layer.TransitionMixer, 1);
+            }
+            
+            // Set initial weights
+            UpdateTransitionMixerWeights(layer);
+            
+            // Update blend weights for both states
+            StatePlayableBuilder.UpdateBlendWeights(ref layer.FromResult, layer.FromBlendPosition);
+            StatePlayableBuilder.UpdateBlendWeights(ref layer.ToResult, layer.ToBlendPosition);
+            
+            // Connect transition mixer to layer mixer
+            playableGraph.Connect(layer.TransitionMixer, 0, layerMixer, layer.Index);
+            
+            // Sync times
+            SyncLayerClipTimes(layer);
+        }
+        
+        private void DisposeLayerPlayables(LayerData layer)
+        {
+            // Disconnect from layer mixer first
+            if (layerMixer.IsValid())
+            {
+                playableGraph.Disconnect(layerMixer, layer.Index);
+            }
+            
+            // Dispose single-state playables
+            StatePlayableBuilder.Dispose(ref layer.StateResult);
+            
+            // Dispose transition playables
+            StatePlayableBuilder.Dispose(ref layer.FromResult);
+            StatePlayableBuilder.Dispose(ref layer.ToResult);
+            
+            if (layer.TransitionMixer.IsValid())
+            {
+                layer.TransitionMixer.Destroy();
+                layer.TransitionMixer = default;
             }
         }
         
-        private void BuildSingleClipPlayables(LayerData layer, SingleClipStateAsset state)
+        private void UpdateTransitionMixerWeights(LayerData layer)
         {
-            var clip = state.Clip?.Clip;
+            if (!layer.TransitionMixer.IsValid()) return;
             
-            layer.StateMixer = AnimationMixerPlayable.Create(playableGraph, 1);
-            layer.Is2DBlend = false;
-            
-            if (clip != null)
-            {
-                var clipPlayable = AnimationClipPlayable.Create(playableGraph, clip);
-                layer.ClipPlayables = new[] { clipPlayable };
-                layer.ClipWeights = new[] { 1f };
-                layer.ClipDurations = new[] { clip.length };
-                layer.ClipThresholds = new[] { 0f };
-                layer.ClipPositions = new[] { float2.zero };
-                
-                playableGraph.Connect(clipPlayable, 0, layer.StateMixer, 0);
-                layer.StateMixer.SetInputWeight(0, 1f);
-            }
-            else
-            {
-                layer.ClipPlayables = Array.Empty<AnimationClipPlayable>();
-                layer.ClipWeights = Array.Empty<float>();
-                layer.ClipDurations = Array.Empty<float>();
-                layer.ClipThresholds = Array.Empty<float>();
-                layer.ClipPositions = Array.Empty<float2>();
-            }
-        }
-        
-        private void BuildLinearBlendPlayables(LayerData layer, LinearBlendStateAsset state)
-        {
-            var blendClips = state.BlendClips?.Where(c => c.Clip?.Clip != null).ToArray() 
-                             ?? Array.Empty<ClipWithThreshold>();
-            
-            layer.StateMixer = AnimationMixerPlayable.Create(playableGraph, blendClips.Length);
-            layer.Is2DBlend = false;
-            
-            layer.ClipPlayables = new AnimationClipPlayable[blendClips.Length];
-            layer.ClipWeights = new float[blendClips.Length];
-            layer.ClipDurations = new float[blendClips.Length];
-            layer.ClipThresholds = new float[blendClips.Length];
-            layer.ClipPositions = new float2[blendClips.Length];
-            
-            for (int i = 0; i < blendClips.Length; i++)
-            {
-                var clip = blendClips[i].Clip.Clip;
-                var clipPlayable = AnimationClipPlayable.Create(playableGraph, clip);
-                layer.ClipPlayables[i] = clipPlayable;
-                layer.ClipDurations[i] = clip.length;
-                layer.ClipThresholds[i] = blendClips[i].Threshold;
-                layer.ClipPositions[i] = new float2(blendClips[i].Threshold, 0);
-                
-                playableGraph.Connect(clipPlayable, 0, layer.StateMixer, i);
-            }
-            
-            UpdateLayerBlendWeights(layer);
-        }
-        
-        private void Build2DBlendPlayables(LayerData layer, Directional2DBlendStateAsset state)
-        {
-            var blendClips = state.BlendClips?.Where(c => c.Clip?.Clip != null).ToArray() 
-                             ?? Array.Empty<Directional2DClipWithPosition>();
-            
-            layer.StateMixer = AnimationMixerPlayable.Create(playableGraph, blendClips.Length);
-            layer.Is2DBlend = true;
-            
-            layer.ClipPlayables = new AnimationClipPlayable[blendClips.Length];
-            layer.ClipWeights = new float[blendClips.Length];
-            layer.ClipDurations = new float[blendClips.Length];
-            layer.ClipThresholds = new float[blendClips.Length];
-            layer.ClipPositions = new float2[blendClips.Length];
-            
-            for (int i = 0; i < blendClips.Length; i++)
-            {
-                var clip = blendClips[i].Clip.Clip;
-                var clipPlayable = AnimationClipPlayable.Create(playableGraph, clip);
-                layer.ClipPlayables[i] = clipPlayable;
-                layer.ClipDurations[i] = clip.length;
-                layer.ClipThresholds[i] = blendClips[i].Position.x;
-                layer.ClipPositions[i] = blendClips[i].Position;
-                
-                playableGraph.Connect(clipPlayable, 0, layer.StateMixer, i);
-            }
-            
-            UpdateLayerBlendWeights(layer);
+            float progress = layer.TransitionProgress;
+            layer.TransitionMixer.SetInputWeight(0, 1f - progress); // from fades out
+            layer.TransitionMixer.SetInputWeight(1, progress);       // to fades in
         }
         
         #endregion
@@ -779,8 +915,8 @@ namespace DMotion.Editor
             for (int i = 0; i < layers.Count; i++)
             {
                 var layer = layers[i];
-                // Unassigned layers (no CurrentState) should not contribute to the final animation
-                bool isAssigned = layer.CurrentState != null;
+                // Layer is assigned if it has a state (single mode) or is in transition mode
+                bool isAssigned = layer.CurrentState != null || layer.IsTransitionMode;
                 float weight = (layer.IsEnabled && isAssigned) ? layer.Weight : 0f;
                 layerMixer.SetInputWeight(i, weight);
             }
@@ -788,47 +924,31 @@ namespace DMotion.Editor
         
         private void UpdateLayerBlendWeights(LayerData layer)
         {
-            if (layer.ClipWeights == null || layer.ClipWeights.Length == 0) return;
-            
-            if (layer.Is2DBlend)
+            if (layer.IsTransitionMode)
             {
-                Directional2DBlendUtils.CalculateWeights(
-                    layer.BlendPosition, 
-                    layer.ClipPositions, 
-                    layer.ClipWeights,
-                    Blend2DAlgorithm.SimpleDirectional);
+                // In transition mode, update both from and to states
+                StatePlayableBuilder.UpdateBlendWeights(ref layer.FromResult, layer.FromBlendPosition);
+                StatePlayableBuilder.UpdateBlendWeights(ref layer.ToResult, layer.ToBlendPosition);
             }
             else
             {
-                LinearBlendStateUtils.CalculateWeights(
-                    layer.BlendPosition.x, 
-                    layer.ClipThresholds, 
-                    layer.ClipWeights);
-            }
-            
-            // Apply weights to mixer
-            if (layer.StateMixer.IsValid())
-            {
-                for (int i = 0; i < layer.ClipWeights.Length; i++)
-                {
-                    layer.StateMixer.SetInputWeight(i, layer.ClipWeights[i]);
-                }
+                // Single-state mode
+                StatePlayableBuilder.UpdateBlendWeights(ref layer.StateResult, layer.BlendPosition);
             }
         }
         
         private void SyncLayerClipTimes(LayerData layer)
         {
-            if (layer.ClipPlayables == null) return;
-            
-            for (int i = 0; i < layer.ClipPlayables.Length; i++)
+            if (layer.IsTransitionMode)
             {
-                if (!layer.ClipPlayables[i].IsValid()) continue;
-                
-                float duration = layer.ClipDurations[i];
-                if (duration <= 0) continue;
-                
-                float clipTime = layer.NormalizedTime * duration;
-                layer.ClipPlayables[i].SetTime(clipTime);
+                // Sync both from and to states with their respective times
+                StatePlayableBuilder.SyncClipTimes(ref layer.FromResult, layer.FromNormalizedTime);
+                StatePlayableBuilder.SyncClipTimes(ref layer.ToResult, layer.ToNormalizedTime);
+            }
+            else
+            {
+                // Single-state mode
+                StatePlayableBuilder.SyncClipTimes(ref layer.StateResult, layer.NormalizedTime);
             }
         }
         

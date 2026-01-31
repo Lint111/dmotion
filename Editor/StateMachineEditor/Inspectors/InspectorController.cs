@@ -1,6 +1,5 @@
 using DMotion.Authoring;
-using System.ComponentModel;
- 
+
 namespace DMotion.Editor
 {
     /// <summary>
@@ -49,7 +48,7 @@ namespace DMotion.Editor
             currentMachine = machine;
         }
 
-        private void OnEditorStatePropertyChanged(object sender, PropertyChangedEventArgs e)
+        private void OnEditorStatePropertyChanged(object sender, ObservablePropertyChangedEventArgs e)
         {
             // We care about selection changes only.
             switch (e.PropertyName)

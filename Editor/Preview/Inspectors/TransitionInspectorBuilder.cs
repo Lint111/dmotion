@@ -169,7 +169,7 @@ namespace DMotion.Editor
             container.Add(propertiesSection);
             
             // From state blend controls (if from state is a blend state)
-            if (IsBlendState(fromState))
+            if (BlendSpaceUIBuilder.IsBlendState(fromState))
             {
                 var fromBlendSection = CreateSection("From State Blend");
                 BuildBlendControls(fromBlendSection, fromState, isFromState: true);
@@ -177,7 +177,7 @@ namespace DMotion.Editor
             }
             
             // To state blend controls (if to state is a blend state)
-            if (IsBlendState(toState))
+            if (BlendSpaceUIBuilder.IsBlendState(toState))
             {
                 var toBlendSection = CreateSection("To State Blend");
                 BuildBlendControls(toBlendSection, toState, isFromState: false);
@@ -749,23 +749,19 @@ namespace DMotion.Editor
         
         #region Private - Blend Controls (Polymorphic)
         
-        private static bool IsBlendState(AnimationStateAsset state)
-        {
-            return AnimationStateUtils.IsBlendState(state);
-        }
-        
         /// <summary>
-        /// Builds blend controls for a state using polymorphism.
+        /// Builds blend controls for a state using BlendSpaceUIBuilder.
         /// Creates the appropriate visual element type based on state type.
-        /// Uses pure UIToolkit for consistent event handling.
         /// </summary>
         private void BuildBlendControls(VisualElement section, AnimationStateAsset state, bool isFromState)
         {
             if (state == null) return;
             
-            // Create the appropriate visual element based on state type
-            var (element, blendInfo) = CreateBlendSpaceElement(state);
-            if (element == null) return;
+            // Create blend space element using the builder
+            var result = BlendSpaceUIBuilder.CreateForPreview(state);
+            if (!result.IsValid) return;
+            
+            var element = result.Element;
             
             // Store reference
             if (isFromState)
@@ -773,15 +769,11 @@ namespace DMotion.Editor
             else
                 toBlendSpaceElement = element;
             
-            // Configure element
-            element.ShowPreviewIndicator = true;
-            element.EditMode = false;
-            element.ShowModeToggle = false;
-            
             // Build parameter info
-            foreach (var (label, name) in blendInfo.ParameterNames)
+            section.Add(CreatePropertyRow("Parameter", result.Parameters.ParameterX));
+            if (result.Parameters.HasY)
             {
-                section.Add(CreatePropertyRow(label, name));
+                section.Add(CreatePropertyRow("Parameter Y", result.Parameters.ParameterY));
             }
             
             // Build sliders based on dimensionality
@@ -789,16 +781,13 @@ namespace DMotion.Editor
             Slider xSlider = null, ySlider = null;
             FloatField xField = null, yField = null;
             
-            // Restore persisted blend position for this state
-            Vector2 currentPosition = blendInfo.Is2D 
-                ? PreviewSettings.instance.GetBlendValue2D(state) 
-                : new Vector2(PreviewSettings.instance.GetBlendValue1D(state), 0);
-            element.PreviewPosition = currentPosition;
+            // Use persisted position from builder result
+            Vector2 currentPosition = result.InitialPosition;
             
-            if (blendInfo.Is2D)
+            if (result.Is2D)
             {
-                // X slider - use persisted value
-                var xRow = CreateSliderWithField("X", blendInfo.MinX, blendInfo.MaxX, currentPosition.x,
+                // X slider
+                var xRow = CreateSliderWithField("X", result.Range.MinX, result.Range.MaxX, currentPosition.x,
                     out xSlider, out xField,
                     newValue =>
                     {
@@ -808,8 +797,8 @@ namespace DMotion.Editor
                     });
                 section.Add(xRow);
                 
-                // Y slider - use persisted value
-                var yRow = CreateSliderWithField("Y", blendInfo.MinY, blendInfo.MaxY, currentPosition.y,
+                // Y slider
+                var yRow = CreateSliderWithField("Y", result.Range.MinY, result.Range.MaxY, currentPosition.y,
                     out ySlider, out yField,
                     newValue =>
                     {
@@ -821,8 +810,8 @@ namespace DMotion.Editor
             }
             else
             {
-                // Single blend value slider - use persisted value
-                var sliderRow = CreateSliderWithField("Blend Value", blendInfo.MinX, blendInfo.MaxX, currentPosition.x,
+                // Single blend value slider
+                var sliderRow = CreateSliderWithField("Blend Value", result.Range.MinX, result.Range.MaxX, currentPosition.x,
                     out xSlider, out xField,
                     newValue =>
                     {
@@ -833,8 +822,8 @@ namespace DMotion.Editor
                 section.Add(sliderRow);
             }
             
-            // Add UIToolkit visual element directly (no IMGUIContainer wrapper needed)
-            element.AddToClassList(blendInfo.Is2D ? "transition-blend-space-2d" : "transition-blend-space-1d");
+            // Add visual element with appropriate CSS class
+            element.AddToClassList(result.Is2D ? "transition-blend-space-2d" : "transition-blend-space-1d");
             section.Add(element);
             
             // Wire up position change from visual element (bidirectional sync)
@@ -848,7 +837,7 @@ namespace DMotion.Editor
                 ySlider?.SetValueWithoutNotify(pos.y);
                 yField?.SetValueWithoutNotify(pos.y);
                 
-                SaveAndRaiseBlendPositionChanged(state, pos, isFromState, blendInfo.Is2D);
+                SaveAndRaiseBlendPositionChanged(state, pos, isFromState, result.Is2D);
                 OnRepaintRequested?.Invoke();
             };
             element.OnPreviewPositionChanged += positionHandler;
@@ -862,101 +851,6 @@ namespace DMotion.Editor
             {
                 toBlendPositionHandler = positionHandler;
             }
-        }
-        
-        /// <summary>
-        /// Creates the appropriate blend space visual element and extracts blend info from the state.
-        /// Uses pure UIToolkit elements for consistent event handling.
-        /// </summary>
-        private static (BlendSpaceVisualElement element, BlendInfo info) CreateBlendSpaceElement(AnimationStateAsset state)
-        {
-            switch (state)
-            {
-                case LinearBlendStateAsset linearBlend:
-                    var element1D = new BlendSpace1DVisualElement();
-                    element1D.SetTarget(linearBlend);
-                    return (element1D, GetBlendInfo(linearBlend));
-                    
-                case Directional2DBlendStateAsset blend2D:
-                    var element2D = new BlendSpace2DVisualElement();
-                    element2D.SetTarget(blend2D);
-                    return (element2D, GetBlendInfo(blend2D));
-                    
-                default:
-                    return (null, default);
-            }
-        }
-        
-        /// <summary>
-        /// Extracts blend range and parameter info from a 1D blend state.
-        /// </summary>
-        private static BlendInfo GetBlendInfo(LinearBlendStateAsset state)
-        {
-            float min = 0f, max = 1f;
-            
-            if (state.BlendClips != null && state.BlendClips.Length > 0)
-            {
-                min = float.MaxValue;
-                max = float.MinValue;
-                foreach (var clip in state.BlendClips)
-                {
-                    min = Mathf.Min(min, clip.Threshold);
-                    max = Mathf.Max(max, clip.Threshold);
-                }
-                var range = max - min;
-                if (range < 0.1f) range = 1f;
-                min -= range * 0.1f;
-                max += range * 0.1f;
-            }
-            
-            return new BlendInfo
-            {
-                Is2D = false,
-                MinX = min, MaxX = max,
-                MinY = 0, MaxY = 0,
-                ParameterNames = new[] { ("Parameter", state.BlendParameter?.name ?? "(none)") }
-            };
-        }
-        
-        /// <summary>
-        /// Extracts blend range and parameter info from a 2D blend state.
-        /// </summary>
-        private static BlendInfo GetBlendInfo(Directional2DBlendStateAsset state)
-        {
-            float minX = -1f, maxX = 1f, minY = -1f, maxY = 1f;
-            
-            if (state.BlendClips != null && state.BlendClips.Length > 0)
-            {
-                minX = float.MaxValue; maxX = float.MinValue;
-                minY = float.MaxValue; maxY = float.MinValue;
-                foreach (var clip in state.BlendClips)
-                {
-                    minX = Mathf.Min(minX, clip.Position.x);
-                    maxX = Mathf.Max(maxX, clip.Position.x);
-                    minY = Mathf.Min(minY, clip.Position.y);
-                    maxY = Mathf.Max(maxY, clip.Position.y);
-                }
-                var rangeX = maxX - minX;
-                var rangeY = maxY - minY;
-                if (rangeX < 0.1f) rangeX = 1f;
-                if (rangeY < 0.1f) rangeY = 1f;
-                minX -= rangeX * 0.1f;
-                maxX += rangeX * 0.1f;
-                minY -= rangeY * 0.1f;
-                maxY += rangeY * 0.1f;
-            }
-            
-            return new BlendInfo
-            {
-                Is2D = true,
-                MinX = minX, MaxX = maxX,
-                MinY = minY, MaxY = maxY,
-                ParameterNames = new[]
-                {
-                    ("Parameter X", state.BlendParameterX?.name ?? "(none)"),
-                    ("Parameter Y", state.BlendParameterY?.name ?? "(none)")
-                }
-            };
         }
         
         private void SaveAndRaiseBlendPositionChanged(AnimationStateAsset state, Vector2 position, bool isFromState, bool is2D)
@@ -982,17 +876,6 @@ namespace DMotion.Editor
                 if (positionHandler != null) element.OnPreviewPositionChanged -= positionHandler;
                 element = null;
             }
-        }
-        
-        /// <summary>
-        /// Blend space configuration extracted from a state.
-        /// </summary>
-        private struct BlendInfo
-        {
-            public bool Is2D;
-            public float MinX, MaxX;
-            public float MinY, MaxY;
-            public (string label, string name)[] ParameterNames;
         }
         
         #endregion

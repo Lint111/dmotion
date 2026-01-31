@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using DMotion.Authoring;
 using UnityEditor;
 using UnityEditor.UIElements;
@@ -699,8 +698,6 @@ namespace DMotion.Editor
             var layerState = compositionState?.GetLayer(section.LayerIndex);
             if (layerState == null) return;
 
-            layerState.BlendPosition = new Unity.Mathematics.float2(value, layerState.BlendPosition.y);
-
             // Persist to PreviewSettings for the 'from' state
             var fromState = layerState.TransitionFrom;
             if (fromState is LinearBlendStateAsset)
@@ -711,17 +708,20 @@ namespace DMotion.Editor
             {
                 PreviewSettings.instance.SetBlendValue2D(fromState, new UnityEngine.Vector2(value, 0));
             }
+            
+            // Propagate both blend positions to preview backend
+            var fromBlendPos = PreviewSettings.GetBlendPosition(fromState);
+            var toBlendPos = PreviewSettings.GetBlendPosition(layerState.TransitionTo);
+            preview?.SetLayerTransitionBlendPositions(
+                section.LayerIndex,
+                new Unity.Mathematics.float2(fromBlendPos.x, fromBlendPos.y),
+                new Unity.Mathematics.float2(toBlendPos.x, toBlendPos.y));
         }
 
         private void OnToBlendPositionChanged(LayerSection section, float value)
         {
             var layerState = compositionState?.GetLayer(section.LayerIndex);
             if (layerState == null) return;
-
-            // Note: ToBlendPosition was a property on the old PreviewState for transition blending
-            // This needs to be implemented if transition blend position is needed
-            // For now, just update the main BlendPosition
-            layerState.BlendPosition = new Unity.Mathematics.float2(value, layerState.BlendPosition.y);
 
             // Persist to PreviewSettings for the 'to' state
             var toState = layerState.TransitionTo;
@@ -733,16 +733,23 @@ namespace DMotion.Editor
             {
                 PreviewSettings.instance.SetBlendValue2D(toState, new UnityEngine.Vector2(value, 0));
             }
+            
+            // Propagate both blend positions to preview backend
+            var fromBlendPos = PreviewSettings.GetBlendPosition(layerState.TransitionFrom);
+            var toBlendPos = PreviewSettings.GetBlendPosition(toState);
+            preview?.SetLayerTransitionBlendPositions(
+                section.LayerIndex,
+                new Unity.Mathematics.float2(fromBlendPos.x, fromBlendPos.y),
+                new Unity.Mathematics.float2(toBlendPos.x, toBlendPos.y));
         }
         
         private void OnTriggerTransition(LayerSection section)
         {
             // TODO: Implement transition triggering
             // This would show a dropdown of available transitions from the current state
-            Debug.Log($"Trigger transition for layer {section.LayerIndex}");
         }
         
-        private void OnCompositionStatePropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+        private void OnCompositionStatePropertyChanged(object sender, ObservablePropertyChangedEventArgs e)
         {
             switch (e.PropertyName)
             {
