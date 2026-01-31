@@ -27,28 +27,14 @@ namespace DMotion
     }
     
     /// <summary>
-    /// Helper struct for managing notification suppression in classes implementing ISuppressable.
-    /// Tracks pending property notifications and flushes them when suppression ends.
+    /// DEPRECATED: This struct has a broken Dispose pattern due to struct copy semantics.
+    /// Use <see cref="SuppressionHelper"/> class instead, which works correctly.
     /// </summary>
     /// <remarks>
-    /// Usage in a class:
-    /// <code>
-    /// private SuppressionState _suppression = new();
-    /// 
-    /// public bool IsSuppressed => _suppression.IsSuppressed;
-    /// 
-    /// public IDisposable SuppressNotifications() => _suppression.Begin(this);
-    /// 
-    /// protected void OnPropertyChanged(string name, object oldValue, object newValue)
-    /// {
-    ///     if (_suppression.TryQueue(name, oldValue, newValue))
-    ///         return; // Queued for later
-    ///     
-    ///     // Fire immediately
-    ///     PropertyChanged?.Invoke(this, name);
-    /// }
-    /// </code>
+    /// The nested Scope struct cannot modify the parent struct's state on Dispose
+    /// because structs are copied by value. This is a fundamental limitation.
     /// </remarks>
+    [Obsolete("Use SuppressionHelper class instead. SuppressionState struct has broken disposal semantics.")]
     public struct SuppressionState
     {
         private int _depth;
