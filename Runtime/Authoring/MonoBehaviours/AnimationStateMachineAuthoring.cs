@@ -118,9 +118,9 @@ namespace DMotion.Authoring
                         EnableEvents = true;
                     }
                     
-                    // Create mask blob if layer has a mask (layer implements ILayerBoneMask)
+                    // Create mask blob if layer has a mask
                     var boneMaskBlob = layer.HasMask 
-                        ? baker.CreateBoneMaskBlob(authoring.Animator, layer)
+                        ? baker.CreateBoneMaskBlob(authoring.Animator, layer.AvatarMask)
                         : default;
                     
                     layerHandles.Add(new LayerBlobHandles

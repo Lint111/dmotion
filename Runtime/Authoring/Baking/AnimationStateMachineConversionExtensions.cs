@@ -62,19 +62,19 @@ namespace DMotion.Authoring
         }
         
         /// <summary>
-        /// Creates a BoneMaskBlob from an ILayerBoneMask.
+        /// Creates a BoneMaskBlob from an AvatarMask.
         /// Converts AvatarMask transform paths to a bitmask of bone indices.
         /// </summary>
         /// <param name="baker">The baker instance.</param>
         /// <param name="animator">The animator with the skeleton hierarchy.</param>
-        /// <param name="boneMask">The bone mask interface implementation.</param>
+        /// <param name="avatarMask">The avatar mask defining which bones are included.</param>
         /// <returns>BlobAssetReference to the created mask, or default if no valid mask.</returns>
         public static BlobAssetReference<BoneMaskBlob> CreateBoneMaskBlob(
             this IBaker baker,
             Animator animator,
-            ILayerBoneMask boneMask)
+            AvatarMask avatarMask)
         {
-            if (boneMask == null || !boneMask.HasMask || animator == null)
+            if (avatarMask == null || animator == null)
                 return default;
             
             // Get the skeleton root transform
@@ -102,7 +102,7 @@ namespace DMotion.Authoring
             // Build the bitmask
             var maskData = new ulong[maskLength];
             
-            foreach (var bonePath in boneMask.GetIncludedBonePaths(skeletonRoot))
+            foreach (var bonePath in avatarMask.GetIncludedBonePaths())
             {
                 if (bonePathToIndex.TryGetValue(bonePath, out int boneIndex))
                 {

@@ -65,7 +65,7 @@ namespace DMotion.Authoring
     /// - Runtime preview state ([NonSerialized]) for animation playback
     /// </summary>
     [CreateAssetMenu(fileName = "NewLayer", menuName = "DMotion/Animation Layer")]
-    public class LayerStateAsset : AnimationStateAsset, INestedStateMachineContainer, ILayerBoneMask, ISuppressable
+    public class LayerStateAsset : AnimationStateAsset, INestedStateMachineContainer, ISuppressable
     {
         #region Persistent State (Serialized)
 
@@ -535,20 +535,7 @@ namespace DMotion.Authoring
         /// </summary>
         public bool HasValidStateMachine => nestedStateMachine != null;
         
-        #region ILayerBoneMask Implementation
-        
-        // Internal wrapper for interface implementation
-        private AvatarMaskBoneMask maskWrapper;
-        
-        private AvatarMaskBoneMask MaskWrapper
-        {
-            get
-            {
-                if (maskWrapper == null || maskWrapper.AvatarMask != avatarMask)
-                    maskWrapper = new AvatarMaskBoneMask(avatarMask);
-                return maskWrapper;
-            }
-        }
+        #region Bone Mask
         
         /// <summary>
         /// Whether this layer has a bone mask defined.
@@ -567,18 +554,6 @@ namespace DMotion.Authoring
         {
             get => avatarMask;
             set => avatarMask = value;
-        }
-        
-        /// <inheritdoc/>
-        public IEnumerable<string> GetIncludedBonePaths(Transform skeletonRoot)
-        {
-            return MaskWrapper.GetIncludedBonePaths(skeletonRoot);
-        }
-        
-        /// <inheritdoc/>
-        public bool IsBoneIncluded(string bonePath)
-        {
-            return MaskWrapper.IsBoneIncluded(bonePath);
         }
         
         #endregion
