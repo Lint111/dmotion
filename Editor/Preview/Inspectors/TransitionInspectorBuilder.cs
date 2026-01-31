@@ -856,10 +856,7 @@ namespace DMotion.Editor
         private void SaveAndRaiseBlendPositionChanged(AnimationStateAsset state, Vector2 position, bool isFromState, bool is2D)
         {
             // Persist to settings (shared across all previews of this state)
-            if (is2D)
-                PreviewSettings.instance.SetBlendValue2D(state, position);
-            else
-                PreviewSettings.instance.SetBlendValue1D(state, position.x);
+            PreviewSettings.SetBlendPosition(state, position);
             
             // Update EditorState preview state
             var float2Position = new Unity.Mathematics.float2(position.x, position.y);

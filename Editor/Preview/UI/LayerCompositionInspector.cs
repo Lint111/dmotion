@@ -672,16 +672,8 @@ namespace DMotion.Editor
 
             layerState.BlendPosition = new Unity.Mathematics.float2(value, 0);
 
-            // Persist to PreviewSettings based on state type
-            var selectedState = layerState.SelectedState;
-            if (selectedState is LinearBlendStateAsset)
-            {
-                PreviewSettings.instance.SetBlendValue1D(selectedState, value);
-            }
-            else if (selectedState is Directional2DBlendStateAsset)
-            {
-                PreviewSettings.instance.SetBlendValue2D(selectedState, new UnityEngine.Vector2(value, 0));
-            }
+            // Persist to PreviewSettings
+            PreviewSettings.SetBlendPosition(layerState.SelectedState, value);
         }
         
         private void OnTransitionProgressChanged(LayerSection section, float value)
@@ -698,19 +690,11 @@ namespace DMotion.Editor
             var layerState = compositionState?.GetLayer(section.LayerIndex);
             if (layerState == null) return;
 
-            // Persist to PreviewSettings for the 'from' state
-            var fromState = layerState.TransitionFrom;
-            if (fromState is LinearBlendStateAsset)
-            {
-                PreviewSettings.instance.SetBlendValue1D(fromState, value);
-            }
-            else if (fromState is Directional2DBlendStateAsset)
-            {
-                PreviewSettings.instance.SetBlendValue2D(fromState, new UnityEngine.Vector2(value, 0));
-            }
+            // Persist to PreviewSettings
+            PreviewSettings.SetBlendPosition(layerState.TransitionFrom, value);
             
             // Propagate both blend positions to preview backend
-            var fromBlendPos = PreviewSettings.GetBlendPosition(fromState);
+            var fromBlendPos = PreviewSettings.GetBlendPosition(layerState.TransitionFrom);
             var toBlendPos = PreviewSettings.GetBlendPosition(layerState.TransitionTo);
             preview?.SetLayerTransitionBlendPositions(
                 section.LayerIndex,
@@ -723,20 +707,12 @@ namespace DMotion.Editor
             var layerState = compositionState?.GetLayer(section.LayerIndex);
             if (layerState == null) return;
 
-            // Persist to PreviewSettings for the 'to' state
-            var toState = layerState.TransitionTo;
-            if (toState is LinearBlendStateAsset)
-            {
-                PreviewSettings.instance.SetBlendValue1D(toState, value);
-            }
-            else if (toState is Directional2DBlendStateAsset)
-            {
-                PreviewSettings.instance.SetBlendValue2D(toState, new UnityEngine.Vector2(value, 0));
-            }
+            // Persist to PreviewSettings
+            PreviewSettings.SetBlendPosition(layerState.TransitionTo, value);
             
             // Propagate both blend positions to preview backend
             var fromBlendPos = PreviewSettings.GetBlendPosition(layerState.TransitionFrom);
-            var toBlendPos = PreviewSettings.GetBlendPosition(toState);
+            var toBlendPos = PreviewSettings.GetBlendPosition(layerState.TransitionTo);
             preview?.SetLayerTransitionBlendPositions(
                 section.LayerIndex,
                 new Unity.Mathematics.float2(fromBlendPos.x, fromBlendPos.y),

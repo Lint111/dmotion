@@ -173,6 +173,53 @@ namespace DMotion.Editor
             };
         }
         
+        /// <summary>
+        /// Sets the persisted blend position for a state asset.
+        /// Centralizes blend position storage to avoid duplication across files.
+        /// </summary>
+        public static void SetBlendPosition(AnimationStateAsset state, Vector2 position)
+        {
+            if (state == null) return;
+            
+            switch (state)
+            {
+                case LinearBlendStateAsset:
+                    instance.SetBlendValue1D(state, position.x);
+                    break;
+                case Directional2DBlendStateAsset:
+                    instance.SetBlendValue2D(state, position);
+                    break;
+            }
+        }
+        
+        /// <summary>
+        /// Sets the persisted blend position for a state asset (1D convenience overload).
+        /// </summary>
+        public static void SetBlendPosition(AnimationStateAsset state, float value)
+        {
+            SetBlendPosition(state, new Vector2(value, 0));
+        }
+        
+        /// <summary>
+        /// Sets the persisted blend position, preserving the Y component for 2D blend states.
+        /// Use this when only the X value changes (e.g., slider input).
+        /// </summary>
+        public static void SetBlendPositionX(AnimationStateAsset state, float x)
+        {
+            if (state == null) return;
+            
+            switch (state)
+            {
+                case LinearBlendStateAsset:
+                    instance.SetBlendValue1D(state, x);
+                    break;
+                case Directional2DBlendStateAsset:
+                    var current = GetBlendPosition(state);
+                    instance.SetBlendValue2D(state, new Vector2(x, current.y));
+                    break;
+            }
+        }
+        
         #endregion
         
         #region Layer Composition State

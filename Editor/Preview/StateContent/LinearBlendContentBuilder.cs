@@ -104,7 +104,7 @@ namespace DMotion.Editor
             previewBlendValue = value;
             
             // Persist to settings (shared across all previews of this state)
-            PreviewSettings.instance.SetBlendValue1D(state, value);
+            PreviewSettings.SetBlendPosition(state, value);
             
             // Update visual element
             if (blendSpaceElement != null)

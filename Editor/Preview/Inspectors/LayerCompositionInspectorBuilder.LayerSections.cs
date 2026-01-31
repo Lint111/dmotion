@@ -585,12 +585,8 @@ namespace DMotion.Editor
             // Propagate to preview backend
             preview?.SetLayerBlendPosition(section.LayerIndex, layer.BlendPosition);
 
-            // Persist via PreviewSettings
-            var selectedState = layer.SelectedState;
-            if (selectedState is LinearBlendStateAsset)
-                PreviewSettings.instance.SetBlendValue1D(selectedState, value);
-            else if (selectedState is Directional2DBlendStateAsset)
-                PreviewSettings.instance.SetBlendValue2D(selectedState, new Vector2(value, layer.BlendPosition.y));
+            // Persist via PreviewSettings (preserves Y for 2D blend states)
+            PreviewSettings.SetBlendPositionX(layer.SelectedState, value);
             
             // Update timeline duration (changes with blend position for blend states)
             ConfigureLayerTimeline(section, layer);
@@ -608,9 +604,7 @@ namespace DMotion.Editor
 
             // Visual element already updated by the caller
             // Persist via PreviewSettings
-            var selectedState = layer.SelectedState;
-            if (selectedState is Directional2DBlendStateAsset)
-                PreviewSettings.instance.SetBlendValue2D(selectedState, value);
+            PreviewSettings.SetBlendPosition(layer.SelectedState, value);
             
             // Update timeline duration (changes with blend position for blend states)
             ConfigureLayerTimeline(section, layer);
@@ -797,15 +791,11 @@ namespace DMotion.Editor
             if (section.FromBlendSpaceElement != null)
                 section.FromBlendSpaceElement.PreviewPosition = new Vector2(value, section.FromBlendSpaceElement.PreviewPosition.y);
 
-            // Persist via PreviewSettings for the from state
-            var fromState = layer.TransitionFrom;
-            if (fromState is LinearBlendStateAsset)
-                PreviewSettings.instance.SetBlendValue1D(fromState, value);
-            else if (fromState is Directional2DBlendStateAsset)
-                PreviewSettings.instance.SetBlendValue2D(fromState, new Vector2(value, 0));
+            // Persist via PreviewSettings
+            PreviewSettings.SetBlendPosition(layer.TransitionFrom, value);
 
             // Propagate both blend positions to preview backend for transition
-            var fromBlendPos = PreviewSettings.GetBlendPosition(fromState);
+            var fromBlendPos = PreviewSettings.GetBlendPosition(layer.TransitionFrom);
             var toBlendPos = PreviewSettings.GetBlendPosition(layer.TransitionTo);
             preview?.SetLayerTransitionBlendPositions(
                 section.LayerIndex,
@@ -822,16 +812,12 @@ namespace DMotion.Editor
             if (section.ToBlendSpaceElement != null)
                 section.ToBlendSpaceElement.PreviewPosition = new Vector2(value, section.ToBlendSpaceElement.PreviewPosition.y);
 
-            // Persist via PreviewSettings for the to state
-            var toState = layer.TransitionTo;
-            if (toState is LinearBlendStateAsset)
-                PreviewSettings.instance.SetBlendValue1D(toState, value);
-            else if (toState is Directional2DBlendStateAsset)
-                PreviewSettings.instance.SetBlendValue2D(toState, new Vector2(value, 0));
+            // Persist via PreviewSettings
+            PreviewSettings.SetBlendPosition(layer.TransitionTo, value);
 
             // Propagate both blend positions to preview backend for transition
             var fromBlendPos = PreviewSettings.GetBlendPosition(layer.TransitionFrom);
-            var toBlendPos = PreviewSettings.GetBlendPosition(toState);
+            var toBlendPos = PreviewSettings.GetBlendPosition(layer.TransitionTo);
             preview?.SetLayerTransitionBlendPositions(
                 section.LayerIndex,
                 new Unity.Mathematics.float2(fromBlendPos.x, fromBlendPos.y),
