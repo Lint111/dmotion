@@ -4,6 +4,198 @@ This document provides a comprehensive plan for improving Burst compatibility, v
 
 ---
 
+## Performance Extrapolation from Current Benchmarks
+
+### Current Baseline Performance
+
+From README.md and performance tests:
+
+| Metric | Value |
+|--------|-------|
+| **Benchmark Entity Count** | 10,000 animated skeletons |
+| **vs Unity Mecanim** | ~6x faster |
+| **Test Configurations** | 1,000 / 10,000 / 100,000 entities |
+
+### Benchmark State Machine Complexity
+
+Based on `StateMachinePerformanceTestSystem.cs`:
+
+```
+State Machine Structure (Stress Test):
+├── LinearBlend State (1D blend tree)
+│   ├── Float parameter (0-1 range, continuous update)
+│   ├── ~2-3 clips in blend tree
+│   └── Blend ratio changes every frame
+├── Bool Parameter Transitions
+│   └── State switching every ~2 seconds (30% probability)
+├── OneShot Clip Support
+│   └── Random trigger (40% probability on switch event)
+└── Estimated Structure:
+    ├── States: 2-4 total
+    ├── Active Samplers: 3-5 per entity
+    └── Parameters: 1 float + 1 bool minimum
+```
+
+### Current Performance Estimate
+
+Assuming 60 FPS target (16.67ms frame budget):
+
+| Entity Count | Estimated Animation Time | Frame Budget Used |
+|--------------|-------------------------|-------------------|
+| 1,000 | ~0.3-0.5 ms | ~2-3% |
+| 10,000 | ~3-5 ms | ~18-30% |
+| 100,000 | ~30-50 ms | ~180-300% ❌ |
+
+### Projected Performance with Optimizations
+
+#### Optimization Stack (Cumulative Multipliers)
+
+| Phase | Optimization | Multiplier | Cumulative |
+|-------|-------------|------------|------------|
+| Baseline | Current DMotion | 1.0x | 1.0x |
+| Phase 3 | Parallel State Processing | 1.5-2.0x | 1.5-2.0x |
+| Phase 4 | State-Coherent Batching + Static Arrays | 3.5-5.0x | **5.0-10.0x** |
+| Phase 5 | Data Compaction | 1.1-1.2x | 5.5-12.0x |
+| Phase 6 | Additional Vectorization | 1.05-1.1x | 5.8-13.2x |
+
+**Conservative Estimate: 5-6x improvement**
+**Optimistic Estimate: 10-13x improvement**
+
+#### Projected Entity Counts at 60 FPS
+
+| Scenario | Current | With Optimizations | Improvement |
+|----------|---------|-------------------|-------------|
+| **Light (3ms budget)** | ~6,000 | 30,000-60,000 | 5-10x |
+| **Moderate (5ms budget)** | ~10,000 | 50,000-100,000 | 5-10x |
+| **Heavy (10ms budget)** | ~20,000 | 100,000-200,000 | 5-10x |
+| **Maximum (16ms budget)** | ~33,000 | **165,000-330,000** | 5-10x |
+
+### Detailed Breakdown: 10,000 Entity Scenario
+
+```
+CURRENT ARCHITECTURE (10,000 entities, estimated ~4ms):
+───────────────────────────────────────────────────────
+UpdateStateMachineJob:           ~1.0 ms  (per-entity state evaluation)
+UpdateAnimationStatesSystem:     ~1.5 ms  (sequential: Single→Linear→2D)
+ClipSamplingSystem:              ~1.0 ms  (ACL decompression - I/O bound)
+BlendAnimationStatesSystem:      ~0.5 ms  (weight blending)
+                                 ─────────
+Total:                           ~4.0 ms
+
+
+OPTIMIZED ARCHITECTURE (10,000 entities, estimated ~0.6-0.8ms):
+───────────────────────────────────────────────────────────────
+Phase 0: Reset Counters:         ~0.01 ms  (MemClear of small arrays)
+Phase 1: Fill Static Arrays:     ~0.08 ms  (parallel atomic writes)
+Phase 2: SIMD Batch Process:     ~0.12 ms  (2,500 SIMD iters vs 10,000)
+Phase 3: Write Back:             ~0.08 ms  (parallel, direct index)
+ClipSamplingSystem:              ~0.30 ms  (optimized prefetch, same ACL)
+BlendAnimationStatesSystem:      ~0.10 ms  (better cache locality)
+                                 ─────────
+Total:                           ~0.7 ms
+
+Speedup: 4.0ms → 0.7ms = ~5.7x improvement
+```
+
+### State-Coherent Batching Impact Analysis
+
+Assuming state distribution for 10,000 entities:
+- 40% Idle (SingleClip): 4,000 entities
+- 35% Walk (LinearBlend): 3,500 entities
+- 25% Run (LinearBlend): 2,500 entities
+
+```
+BEFORE: Per-Entity Processing
+─────────────────────────────
+Iterations:        10,000 (one per entity)
+Code path:         Divergent (branch on state type)
+SIMD utilization:  0%
+Cache pattern:     Random (each entity reads blob independently)
+Blob reads:        10,000
+
+AFTER: State-Coherent Batch Processing
+──────────────────────────────────────
+State Batches:
+  └─ Idle (SingleClip):  4,000 entities → 1,000 SIMD iterations (÷4)
+  └─ Walk (LinearBlend): 3,500 entities →   875 SIMD iterations (÷4)
+  └─ Run (LinearBlend):  2,500 entities →   625 SIMD iterations (÷4)
+                                          ───────
+Total SIMD iterations:                     2,500
+
+Improvement:
+  Iterations:       10,000 → 2,500 (4x reduction)
+  SIMD utilization: 0% → 95%
+  Cache pattern:    Random → Contiguous per-state
+  Blob reads:       10,000 → 3 (one per state group)
+  Branch prediction: Poor → Perfect (no divergence)
+```
+
+### Memory Budget
+
+```
+Static Batch Buffers (4 states × 2,560 max entities/state = 10,240 slots):
+
+┌─────────────────────┬───────────────┬────────────┐
+│ Array               │ Per Element   │ Total      │
+├─────────────────────┼───────────────┼────────────┤
+│ Entities            │ 8 bytes       │ 80 KB      │
+│ Times               │ 4 bytes       │ 40 KB      │
+│ PreviousTimes       │ 4 bytes       │ 40 KB      │
+│ Speeds              │ 4 bytes       │ 40 KB      │
+│ Weights             │ 4 bytes       │ 40 KB      │
+│ BlendRatios         │ 4 bytes       │ 40 KB      │
+│ SamplerIds          │ 1 byte        │ 10 KB      │
+│ Loops               │ 1 byte        │ 10 KB      │
+│ NewTimes            │ 4 bytes       │ 40 KB      │
+│ NewPreviousTimes    │ 4 bytes       │ 40 KB      │
+│ NewWeights          │ 4 bytes       │ 40 KB      │
+├─────────────────────┼───────────────┼────────────┤
+│ TOTAL               │ 42 bytes/slot │ ~420 KB    │
+└─────────────────────┴───────────────┴────────────┘
+
+Scaling:
+  10,000 entities  → 420 KB (fixed)
+  100,000 entities → 4.2 MB (increase MaxEntitiesPerState)
+
+Memory efficiency: 42 bytes/entity vs ~80+ bytes with dynamic containers
+```
+
+### Projected Scaling Table
+
+| Entities | Current | Optimized | vs Mecanim (current 6x) |
+|----------|---------|-----------|------------------------|
+| 1,000 | ~0.4 ms | ~0.07 ms | ~35x faster |
+| 10,000 | ~4.0 ms | ~0.7 ms | ~35x faster |
+| 50,000 | ~20 ms | ~3.5 ms | ~35x faster |
+| 100,000 | ~40 ms | ~7.0 ms | ~35x faster |
+| 200,000 | ❌ CPU-bound | ~14 ms | ~35x faster |
+| 330,000 | ❌ CPU-bound | ~23 ms (30fps) | ~35x faster |
+
+### Summary
+
+With the full optimization stack implemented:
+
+| Metric | Current | Projected | Improvement |
+|--------|---------|-----------|-------------|
+| **Max entities @ 60fps** | ~15,000-20,000 | **100,000-200,000** | 5-10x |
+| **vs Mecanim** | 6x faster | **30-40x faster** | 5-7x |
+| **Time per 10k entities** | ~4ms | ~0.7ms | 5.7x |
+| **Memory overhead** | Dynamic | Fixed 420KB | Predictable |
+
+### ROI-Based Implementation Priority
+
+| Priority | Phase | Effort | Impact | ROI |
+|----------|-------|--------|--------|-----|
+| **1** | State-Coherent Batching | 5-7 days | **3-5x** | ⭐⭐⭐⭐⭐ |
+| **2** | Static Arrays | 2-3 days | **1.2-1.5x** | ⭐⭐⭐⭐ |
+| 3 | Parallel State Processing | 3-5 days | 1.3-1.5x | ⭐⭐⭐ |
+| 4 | Data Compaction | 3-5 days | 1.1-1.2x | ⭐⭐ |
+| 5 | Additional Vectorization | 3-5 days | 1.05-1.1x | ⭐ |
+
+**Recommendation**: Implement Phase 4 (State-Coherent + Static Arrays) first for maximum ROI: **4-6x improvement in ~10 days**.
+
+---
+
 ## Table of Contents
 
 1. [Executive Summary](#executive-summary)
@@ -2324,4 +2516,4 @@ The following are **minimum supported versions** for optimizations in this plan.
 
 *Last Updated: 2026-02-02*
 *Branch: claude/add-dmotion-optimization-plan-YL52I*
-*Revision 4: Added pre-baked static array architecture - zero-allocation runtime with fixed-size buffers sized to blob state count*
+*Revision 5: Added performance extrapolation - projects 100k-200k entities @ 60fps (vs current ~15k-20k), ~35x faster than Mecanim*
