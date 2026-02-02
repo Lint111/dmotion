@@ -1197,6 +1197,622 @@ public partial struct StateCoherentAnimationSystem : ISystem
 
 ---
 
+#### Advanced: Pre-Baked Static Array Architecture
+
+Since the state machine blob is **baked at build time**, we know the complete state space ahead of time. This enables a fully static, zero-allocation runtime architecture.
+
+##### Key Insight
+
+```
+BAKE TIME (known):                    RUNTIME (dynamic):
+─────────────────                     ─────────────────
+• Number of states                    • Which entities are in which state
+• State types (Single/Linear/2D)      • Entity count per state
+• Clip counts, thresholds, speeds     • Actual parameter values
+• All structural metadata
+```
+
+We can **pre-allocate fixed-size arrays** for all possible states, eliminating:
+- Runtime hashmap lookups
+- Dynamic memory allocation
+- Capacity checks and resizing
+- Container overhead
+
+##### Pre-Baked Group Registry (Blob Extension)
+
+```csharp
+// Added to StateMachineBlob at bake time
+public struct StateMachineBlob
+{
+    // Existing fields...
+    internal BlobArray<AnimationStateBlob> States;
+    internal BlobArray<SingleClipStateBlob> SingleClipStates;
+    internal BlobArray<LinearBlendStateBlob> LinearBlendStates;
+
+    // NEW: Pre-baked group metadata (one per state)
+    internal BlobArray<StateGroupMetadata> GroupMetadata;
+
+    // NEW: Flattened shared data for all blend states
+    internal BlobArray<float> AllThresholds;  // All thresholds concatenated
+    internal BlobArray<float> AllClipSpeeds;  // All clip speeds concatenated
+}
+
+public struct StateGroupMetadata
+{
+    public StateType Type;
+    public byte ClipCount;              // For LinearBlend/Directional2D
+    public ushort ThresholdsOffset;     // Index into AllThresholds
+    public ushort SpeedsOffset;         // Index into AllClipSpeeds
+    public float ClipDuration;          // For SingleClip (pre-fetched)
+    public ushort ClipIndex;            // For SingleClip
+}
+```
+
+##### Static Batch Buffers (Zero-Allocation Runtime)
+
+```csharp
+/// <summary>
+/// Pre-allocated fixed-size buffers for state-coherent batch processing.
+/// Allocated once per blob type at load time, reused every frame.
+///
+/// Memory Layout:
+/// ┌─────────────────┬─────────────────┬─────────────────┐
+/// │  State 0 slots  │  State 1 slots  │  State 2 slots  │
+/// │  [0..1023]      │  [1024..2047]   │  [2048..3071]   │
+/// └─────────────────┴─────────────────┴─────────────────┘
+/// Direct index: State N, Entity M → Array[N * MaxPerState + M]
+/// </summary>
+public struct StaticBatchBuffers : IDisposable
+{
+    // Configuration (set at creation, never changes)
+    public readonly int StateCount;           // From blob.States.Length
+    public readonly int MaxEntitiesPerState;  // Configurable cap (e.g., 1024)
+    public readonly int TotalCapacity;        // StateCount × MaxEntitiesPerState
+
+    // Per-state counters (fixed size = StateCount)
+    public NativeArray<int> EntityCounts;     // How many entities in each state this frame
+    public NativeArray<int> WriteIndices;     // Atomic counter for parallel fill
+
+    // SoA data arrays (fixed size = TotalCapacity)
+    // Layout: [State0 entities...][State1 entities...][StateN entities...]
+    public NativeArray<Entity> Entities;
+    public NativeArray<float> Times;
+    public NativeArray<float> PreviousTimes;
+    public NativeArray<float> Speeds;
+    public NativeArray<float> Weights;
+    public NativeArray<float> BlendRatios;    // For blend states
+    public NativeArray<byte> SamplerIds;
+    public NativeArray<byte> Loops;           // 1 = loop, 0 = no loop
+
+    // Output arrays (same layout, written by SIMD jobs)
+    public NativeArray<float> NewTimes;
+    public NativeArray<float> NewPreviousTimes;
+    public NativeArray<float> NewWeights;
+
+    /// <summary>
+    /// Creates static buffers sized to match the blob's state count.
+    /// Call once at blob load time, reuse for lifetime of blob.
+    /// </summary>
+    public static StaticBatchBuffers Create(
+        BlobAssetReference<StateMachineBlob> blob,
+        int maxEntitiesPerState = 1024)
+    {
+        int stateCount = blob.Value.States.Length;
+        int totalCapacity = stateCount * maxEntitiesPerState;
+
+        return new StaticBatchBuffers
+        {
+            StateCount = stateCount,
+            MaxEntitiesPerState = maxEntitiesPerState,
+            TotalCapacity = totalCapacity,
+
+            // Small per-state arrays
+            EntityCounts = new NativeArray<int>(stateCount, Allocator.Persistent),
+            WriteIndices = new NativeArray<int>(stateCount, Allocator.Persistent),
+
+            // Large data arrays (contiguous allocation)
+            Entities = new NativeArray<Entity>(totalCapacity, Allocator.Persistent),
+            Times = new NativeArray<float>(totalCapacity, Allocator.Persistent),
+            PreviousTimes = new NativeArray<float>(totalCapacity, Allocator.Persistent),
+            Speeds = new NativeArray<float>(totalCapacity, Allocator.Persistent),
+            Weights = new NativeArray<float>(totalCapacity, Allocator.Persistent),
+            BlendRatios = new NativeArray<float>(totalCapacity, Allocator.Persistent),
+            SamplerIds = new NativeArray<byte>(totalCapacity, Allocator.Persistent),
+            Loops = new NativeArray<byte>(totalCapacity, Allocator.Persistent),
+
+            NewTimes = new NativeArray<float>(totalCapacity, Allocator.Persistent),
+            NewPreviousTimes = new NativeArray<float>(totalCapacity, Allocator.Persistent),
+            NewWeights = new NativeArray<float>(totalCapacity, Allocator.Persistent),
+        };
+    }
+
+    /// <summary>
+    /// Direct index calculation - no container overhead.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public int GetSliceStart(int stateIndex) => stateIndex * MaxEntitiesPerState;
+
+    /// <summary>
+    /// Reset counters for new frame. Fast - just zeros small arrays.
+    /// </summary>
+    public void ResetForFrame()
+    {
+        UnsafeUtility.MemClear(EntityCounts.GetUnsafePtr(), StateCount * sizeof(int));
+        UnsafeUtility.MemClear(WriteIndices.GetUnsafePtr(), StateCount * sizeof(int));
+    }
+
+    public void Dispose()
+    {
+        EntityCounts.Dispose();
+        WriteIndices.Dispose();
+        Entities.Dispose();
+        Times.Dispose();
+        PreviousTimes.Dispose();
+        Speeds.Dispose();
+        Weights.Dispose();
+        BlendRatios.Dispose();
+        SamplerIds.Dispose();
+        Loops.Dispose();
+        NewTimes.Dispose();
+        NewPreviousTimes.Dispose();
+        NewWeights.Dispose();
+    }
+}
+```
+
+##### Runtime Flow (Zero Allocation)
+
+```csharp
+[BurstCompile]
+public partial struct StaticBatchAnimationSystem : ISystem
+{
+    // Persistent buffer storage - one per unique blob, allocated at load
+    private NativeHashMap<int, StaticBatchBuffers> _blobBuffers;
+
+    public void OnCreate(ref SystemState state)
+    {
+        _blobBuffers = new NativeHashMap<int, StaticBatchBuffers>(8, Allocator.Persistent);
+    }
+
+    public void OnDestroy(ref SystemState state)
+    {
+        foreach (var kvp in _blobBuffers)
+            kvp.Value.Dispose();
+        _blobBuffers.Dispose();
+    }
+
+    public void OnUpdate(ref SystemState state)
+    {
+        float dt = SystemAPI.Time.DeltaTime;
+
+        // ═══════════════════════════════════════════════════════════════
+        // PHASE 0: Reset counters (fast MemClear, no allocation)
+        // ═══════════════════════════════════════════════════════════════
+        foreach (var kvp in _blobBuffers)
+            kvp.Value.ResetForFrame();
+
+        // ═══════════════════════════════════════════════════════════════
+        // PHASE 1: Fill static arrays (parallel, atomic write index)
+        // ═══════════════════════════════════════════════════════════════
+        var fillHandle = new FillStaticArraysJob
+        {
+            BlobBuffers = _blobBuffers
+        }.ScheduleParallel(state.Dependency);
+
+        fillHandle.Complete();  // Need counts for job scheduling
+
+        // ═══════════════════════════════════════════════════════════════
+        // PHASE 2: Schedule SIMD jobs per state (all run in parallel)
+        // ═══════════════════════════════════════════════════════════════
+        var processHandles = new NativeList<JobHandle>(Allocator.Temp);
+
+        foreach (var kvp in _blobBuffers)
+        {
+            int blobHash = kvp.Key;
+            var buffers = kvp.Value;
+            var blob = GetBlobForHash(blobHash);
+
+            for (int stateIdx = 0; stateIdx < buffers.StateCount; stateIdx++)
+            {
+                int count = buffers.EntityCounts[stateIdx];
+                if (count == 0) continue;
+
+                int sliceStart = buffers.GetSliceStart(stateIdx);
+                ref var metadata = ref blob.Value.GroupMetadata[stateIdx];
+
+                JobHandle handle = metadata.Type switch
+                {
+                    StateType.Single => new ProcessSingleClipStaticJob
+                    {
+                        DeltaTime = dt,
+                        ClipDuration = metadata.ClipDuration,
+                        SliceStart = sliceStart,
+                        Count = count,
+                        Times = buffers.Times,
+                        Speeds = buffers.Speeds,
+                        Loops = buffers.Loops,
+                        NewTimes = buffers.NewTimes,
+                        NewPreviousTimes = buffers.NewPreviousTimes,
+                    }.Schedule(),
+
+                    StateType.LinearBlend => new ProcessLinearBlendStaticJob
+                    {
+                        DeltaTime = dt,
+                        ClipCount = metadata.ClipCount,
+                        SliceStart = sliceStart,
+                        Count = count,
+                        ThresholdsSlice = blob.Value.AllThresholds.ToNativeArray()
+                            .GetSubArray(metadata.ThresholdsOffset, metadata.ClipCount),
+                        BlendRatios = buffers.BlendRatios,
+                        AnimWeights = buffers.Weights,
+                        Times = buffers.Times,
+                        NewTimes = buffers.NewTimes,
+                        NewPreviousTimes = buffers.NewPreviousTimes,
+                        NewWeights = buffers.NewWeights,
+                    }.Schedule(),
+
+                    _ => default
+                };
+
+                processHandles.Add(handle);
+            }
+        }
+
+        var allProcessed = JobHandle.CombineDependencies(processHandles.AsArray());
+
+        // ═══════════════════════════════════════════════════════════════
+        // PHASE 3: Write back results to entity buffers
+        // ═══════════════════════════════════════════════════════════════
+        state.Dependency = new WriteBackStaticJob
+        {
+            BlobBuffers = _blobBuffers
+        }.ScheduleParallel(allProcessed);
+    }
+}
+```
+
+##### Fill Job (Parallel, Atomic Index)
+
+```csharp
+[BurstCompile]
+internal partial struct FillStaticArraysJob : IJobEntity
+{
+    [NativeDisableParallelForRestriction]
+    public NativeHashMap<int, StaticBatchBuffers> BlobBuffers;
+
+    internal void Execute(
+        Entity entity,
+        in AnimationStateMachine stateMachine,
+        in DynamicBuffer<AnimationState> animationStates,
+        in DynamicBuffer<ClipSampler> samplers,
+        in DynamicBuffer<FloatParameter> floatParams)
+    {
+        int blobHash = stateMachine.StateMachineBlob.GetHashCode();
+        int stateIndex = stateMachine.CurrentState.StateIndex;
+
+        var buffers = BlobBuffers[blobHash];
+
+        // Atomic increment to get write slot - O(1), lock-free
+        unsafe
+        {
+            int* countPtr = (int*)buffers.WriteIndices.GetUnsafePtr() + stateIndex;
+            int localIndex = Interlocked.Increment(ref *countPtr) - 1;
+
+            // Update entity count
+            int* entityCountPtr = (int*)buffers.EntityCounts.GetUnsafePtr() + stateIndex;
+            Interlocked.Increment(ref *entityCountPtr);
+
+            // Bounds safety
+            if (localIndex >= buffers.MaxEntitiesPerState) return;
+
+            // Direct index into static array
+            int writeIndex = buffers.GetSliceStart(stateIndex) + localIndex;
+
+            // Extract entity data
+            if (!animationStates.TryGetWithId(
+                stateMachine.CurrentState.AnimationStateId, out var animState)) return;
+
+            int samplerIndex = samplers.IdToIndex(animState.StartSamplerId);
+            var sampler = samplers[samplerIndex];
+
+            // Direct write to static arrays - no bounds check, no allocation
+            buffers.Entities[writeIndex] = entity;
+            buffers.Times[writeIndex] = sampler.Time;
+            buffers.PreviousTimes[writeIndex] = sampler.PreviousTime;
+            buffers.Speeds[writeIndex] = animState.Speed;
+            buffers.Weights[writeIndex] = animState.Weight;
+            buffers.SamplerIds[writeIndex] = sampler.Id;
+            buffers.Loops[writeIndex] = animState.Loop ? (byte)1 : (byte)0;
+
+            // Blend ratio for blend states
+            ref var metadata = ref stateMachine.StateMachineBlob.Value.GroupMetadata[stateIndex];
+            if (metadata.Type == StateType.LinearBlend)
+            {
+                ref var linearBlend = ref stateMachine.StateMachineBlob.Value
+                    .LinearBlendStates[metadata.StateTypeIndex];
+                float blendRatio = floatParams[linearBlend.BlendParameterIndex].Value;
+                buffers.BlendRatios[writeIndex] = blendRatio;
+            }
+        }
+    }
+}
+```
+
+##### SIMD Processing Job (Static Arrays)
+
+```csharp
+[BurstCompile]
+internal struct ProcessSingleClipStaticJob : IJob
+{
+    public float DeltaTime;
+    public float ClipDuration;
+    public int SliceStart;
+    public int Count;
+
+    [ReadOnly] public NativeArray<float> Times;
+    [ReadOnly] public NativeArray<float> Speeds;
+    [ReadOnly] public NativeArray<byte> Loops;
+
+    [WriteOnly] [NativeDisableParallelForRestriction]
+    public NativeArray<float> NewTimes;
+    [WriteOnly] [NativeDisableParallelForRestriction]
+    public NativeArray<float> NewPreviousTimes;
+
+    public void Execute()
+    {
+        int end = SliceStart + Count;
+        int simdEnd = SliceStart + (Count & ~3);  // Round down to multiple of 4
+
+        float4 dt4 = DeltaTime;
+        float4 duration4 = ClipDuration;
+
+        // ═══════════════════════════════════════════════════════════════
+        // SIMD LOOP: Process 4 entities per iteration
+        // Memory access is contiguous → optimal cache utilization
+        // ═══════════════════════════════════════════════════════════════
+        for (int i = SliceStart; i < simdEnd; i += 4)
+        {
+            // Load 4 contiguous values (single cache line)
+            float4 times = new float4(Times[i], Times[i+1], Times[i+2], Times[i+3]);
+            float4 speeds = new float4(Speeds[i], Speeds[i+1], Speeds[i+2], Speeds[i+3]);
+            float4 loops = new float4(Loops[i], Loops[i+1], Loops[i+2], Loops[i+3]);
+
+            // Store previous times
+            NewPreviousTimes[i] = times.x;
+            NewPreviousTimes[i+1] = times.y;
+            NewPreviousTimes[i+2] = times.z;
+            NewPreviousTimes[i+3] = times.w;
+
+            // SIMD compute: 4 entities in single operation
+            float4 newTimes = times + dt4 * speeds;
+
+            // Branchless loop handling
+            float4 looped = math.fmod(newTimes, duration4);
+            looped = math.select(looped, looped + duration4, looped < 0);
+            newTimes = math.select(newTimes, looped, loops > 0.5f);
+
+            // Store results (contiguous write)
+            NewTimes[i] = newTimes.x;
+            NewTimes[i+1] = newTimes.y;
+            NewTimes[i+2] = newTimes.z;
+            NewTimes[i+3] = newTimes.w;
+        }
+
+        // Scalar remainder (0-3 entities)
+        for (int i = simdEnd; i < end; i++)
+        {
+            NewPreviousTimes[i] = Times[i];
+            float newTime = Times[i] + DeltaTime * Speeds[i];
+            if (Loops[i] > 0)
+            {
+                newTime = math.fmod(newTime, ClipDuration);
+                if (newTime < 0) newTime += ClipDuration;
+            }
+            NewTimes[i] = newTime;
+        }
+    }
+}
+```
+
+##### Write-Back Job
+
+```csharp
+[BurstCompile]
+internal partial struct WriteBackStaticJob : IJobEntity
+{
+    [ReadOnly] public NativeHashMap<int, StaticBatchBuffers> BlobBuffers;
+
+    internal void Execute(
+        Entity entity,
+        in AnimationStateMachine stateMachine,
+        ref DynamicBuffer<ClipSampler> samplers,
+        in DynamicBuffer<AnimationState> animationStates)
+    {
+        int blobHash = stateMachine.StateMachineBlob.GetHashCode();
+        int stateIndex = stateMachine.CurrentState.StateIndex;
+
+        var buffers = BlobBuffers[blobHash];
+        int sliceStart = buffers.GetSliceStart(stateIndex);
+        int count = buffers.EntityCounts[stateIndex];
+
+        // Find this entity in the batch
+        for (int i = 0; i < count; i++)
+        {
+            int idx = sliceStart + i;
+            if (buffers.Entities[idx] == entity)
+            {
+                // Apply results to sampler
+                byte samplerId = buffers.SamplerIds[idx];
+                int samplerIndex = samplers.IdToIndex(samplerId);
+
+                var sampler = samplers[samplerIndex];
+                sampler.Time = buffers.NewTimes[idx];
+                sampler.PreviousTime = buffers.NewPreviousTimes[idx];
+                sampler.Weight = buffers.NewWeights[idx];
+                samplers[samplerIndex] = sampler;
+
+                return;
+            }
+        }
+    }
+}
+```
+
+##### Memory Layout Diagram
+
+```
+StaticBatchBuffers Memory Layout (10 states, 1024 max entities/state):
+
+                    ┌─ State 0 ─┐┌─ State 1 ─┐┌─ State 2 ─┐     ┌─ State 9 ─┐
+                    │           ││           ││           │     │           │
+EntityCounts[10]:   [    500    ][    300    ][    200    ].....[    150    ]
+                         │            │            │                  │
+                         ▼            ▼            ▼                  ▼
+                    ┌────────────────────────────────────────────────────────┐
+Times[10240]:       │ S0: 500 used │ S1: 300 used │ S2: 200 used │...│ S9    │
+                    │ [0..499]     │ [1024..1323] │ [2048..2247] │   │       │
+                    └────────────────────────────────────────────────────────┘
+                    ▲              ▲              ▲
+                    │              │              │
+Index calculation:  State N, Local M  →  Array[N × 1024 + M]
+                    State 0, Entity 50 →  Times[0 × 1024 + 50] = Times[50]
+                    State 1, Entity 50 →  Times[1 × 1024 + 50] = Times[1074]
+                    State 2, Entity 50 →  Times[2 × 1024 + 50] = Times[2098]
+
+Benefits:
+  ✓ No pointer chasing (direct index math)
+  ✓ Contiguous memory (cache-friendly)
+  ✓ Fixed size (no reallocation)
+  ✓ SIMD-aligned (NativeArray guarantees)
+```
+
+##### Memory Budget
+
+```
+Per StateMachineBlob (10 states, 1024 max entities/state = 10,240 slots):
+
+Fixed Arrays:
+┌─────────────────────┬───────────────┬────────────┐
+│ Array               │ Size/Element  │ Total      │
+├─────────────────────┼───────────────┼────────────┤
+│ EntityCounts[10]    │ 4 bytes       │ 40 B       │
+│ WriteIndices[10]    │ 4 bytes       │ 40 B       │
+├─────────────────────┼───────────────┼────────────┤
+│ Entities[10240]     │ 8 bytes       │ 80 KB      │
+│ Times[10240]        │ 4 bytes       │ 40 KB      │
+│ PreviousTimes[10240]│ 4 bytes       │ 40 KB      │
+│ Speeds[10240]       │ 4 bytes       │ 40 KB      │
+│ Weights[10240]      │ 4 bytes       │ 40 KB      │
+│ BlendRatios[10240]  │ 4 bytes       │ 40 KB      │
+│ SamplerIds[10240]   │ 1 byte        │ 10 KB      │
+│ Loops[10240]        │ 1 byte        │ 10 KB      │
+├─────────────────────┼───────────────┼────────────┤
+│ NewTimes[10240]     │ 4 bytes       │ 40 KB      │
+│ NewPreviousTimes    │ 4 bytes       │ 40 KB      │
+│ NewWeights[10240]   │ 4 bytes       │ 40 KB      │
+├─────────────────────┼───────────────┼────────────┤
+│ TOTAL               │               │ ~420 KB    │
+└─────────────────────┴───────────────┴────────────┘
+
+Scaling:
+  5,000 entities  → 420 KB (fixed)
+  50,000 entities → 420 KB (increase MaxEntitiesPerState to 5000 → 4.2 MB)
+
+Comparison to Dynamic:
+  Dynamic NativeList: ~40 bytes overhead per element + resize allocations
+  Static NativeArray: 0 bytes overhead, 0 allocations after init
+```
+
+##### Performance Comparison
+
+| Aspect | Dynamic (NativeList) | Static (NativeArray) | Improvement |
+|--------|---------------------|----------------------|-------------|
+| Frame allocation | O(N) possible | **Zero** | ∞ |
+| Bounds checking | Every access | **None** (controlled indices) | ~5% |
+| Container overhead | 24 bytes/list | **0 bytes** | 100% |
+| Cache locality | Good | **Optimal** (contiguous) | ~10-20% |
+| Index calculation | Pointer + offset | **Direct arithmetic** | ~2% |
+| Memory layout | Heap fragmented | **Flat, predictable** | Better prefetch |
+| SIMD alignment | Maybe | **Guaranteed** | Consistent |
+
+##### Baking the Group Registry
+
+```csharp
+// In StateMachineBlobConverter.BuildBlob()
+private void BakeGroupRegistry(ref BlobBuilder builder, ref StateMachineBlob blob)
+{
+    int stateCount = blob.States.Length;
+    var metadataBuilder = builder.Allocate(ref blob.GroupMetadata, stateCount);
+
+    // Accumulate offsets for flattened threshold/speed arrays
+    int thresholdOffset = 0;
+    int speedOffset = 0;
+    var allThresholds = new List<float>();
+    var allSpeeds = new List<float>();
+
+    for (int i = 0; i < stateCount; i++)
+    {
+        ref var state = ref blob.States[i];
+        var metadata = new StateGroupMetadata { Type = state.StateType };
+
+        switch (state.StateType)
+        {
+            case StateType.Single:
+                ref var single = ref blob.SingleClipStates[state.StateTypeIndex];
+                metadata.ClipDuration = single.ClipDuration;
+                metadata.ClipIndex = single.ClipIndex;
+                metadata.ClipCount = 1;
+                break;
+
+            case StateType.LinearBlend:
+                ref var linear = ref blob.LinearBlendStates[state.StateTypeIndex];
+                metadata.ClipCount = (byte)linear.SortedClipThresholds.Length;
+                metadata.ThresholdsOffset = (ushort)thresholdOffset;
+                metadata.SpeedsOffset = (ushort)speedOffset;
+
+                // Flatten thresholds and speeds into blob arrays
+                for (int j = 0; j < metadata.ClipCount; j++)
+                {
+                    allThresholds.Add(linear.SortedClipThresholds[j]);
+                    allSpeeds.Add(linear.SortedClipSpeeds[j]);
+                }
+
+                thresholdOffset += metadata.ClipCount;
+                speedOffset += metadata.ClipCount;
+                break;
+
+            case StateType.Directional2D:
+                // Similar handling for 2D blend states
+                break;
+        }
+
+        metadataBuilder[i] = metadata;
+    }
+
+    // Allocate flattened arrays
+    var thresholdsBuilder = builder.Allocate(ref blob.AllThresholds, allThresholds.Count);
+    var speedsBuilder = builder.Allocate(ref blob.AllClipSpeeds, allSpeeds.Count);
+
+    for (int i = 0; i < allThresholds.Count; i++)
+        thresholdsBuilder[i] = allThresholds[i];
+    for (int i = 0; i < allSpeeds.Count; i++)
+        speedsBuilder[i] = allSpeeds[i];
+}
+```
+
+##### Implementation Priority Update
+
+This static array architecture should be implemented as part of **Phase 4: State-Coherent Batch Processing**:
+
+1. First implement dynamic version (validates correctness)
+2. Profile to confirm batch processing gains
+3. Convert to static arrays (eliminates allocation overhead)
+4. Profile again to measure additional gains
+
+**Expected Additional Gain from Static Arrays**: 10-20% over dynamic version (primarily from eliminated allocations and better cache behavior)
+
+---
+
 ### 3. Batched Animation Event Processing
 
 **Current**: Per-entity event checking in `RaiseAnimationEventsJob`
@@ -1708,4 +2324,4 @@ The following are **minimum supported versions** for optimizations in this plan.
 
 *Last Updated: 2026-02-02*
 *Branch: claude/add-dmotion-optimization-plan-YL52I*
-*Revision 3: Added state-coherent batch processing architecture - group entities by state for SIMD vectorization (3-5x gains on 5000+ entities)*
+*Revision 4: Added pre-baked static array architecture - zero-allocation runtime with fixed-size buffers sized to blob state count*
