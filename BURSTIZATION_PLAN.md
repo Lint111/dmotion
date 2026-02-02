@@ -366,30 +366,351 @@ for (var i = 0; i < boolTransitions.Length && shouldTriggerTransition; i++)
 
 ## Async Job Opportunities
 
-### 1. State Type Job Scheduling - Safety Constraint
+### 1. Parallel State Processing Architecture
 
-**Current**: Sequential job scheduling in `UpdateAnimationStatesSystem.cs`
+**Current Constraint**: Sequential job scheduling because all jobs write to `DynamicBuffer<ClipSampler>`.
+
+**Key Insight**: State machine blob data is **read-only** at runtime. The only writes are to `ClipSampler` fields (`Time`, `PreviousTime`, `Weight`). This enables several parallel architectures:
+
+---
+
+#### Option A: Queue-Based Parallel Processing (Recommended)
+
+Instead of writing directly to `ClipSampler` buffer, jobs write update commands to parallel-safe queues. A final merge job applies all updates.
+
 ```csharp
-handle = new UpdateSingleClipStatesJob{}.ScheduleParallel(handle);
-handle = new UpdateLinearBlendStateMachineStatesJob{}.ScheduleParallel(handle);
-handle = new UpdateDirectional2DBlendStateMachineStatesJob{}.ScheduleParallel(handle);
+// Sampler update command - written by parallel jobs
+public struct SamplerUpdateCommand
+{
+    public Entity Entity;           // Target entity
+    public byte SamplerId;          // Which sampler to update
+    public float Time;              // New time value
+    public float PreviousTime;      // New previous time
+    public float Weight;            // New weight
+}
+
+// Per-thread stream for lock-free parallel writes
+public struct SamplerUpdateStream
+{
+    public NativeStream.Writer Writer;
+}
 ```
 
-> **⚠️ Safety Constraint**: Although these jobs target different entity archetypes (SingleClip vs LinearBlend vs Directional2D), they all write to the same `DynamicBuffer<ClipSampler>` type. Unity's safety system requires explicit dependency chaining for all writers of a shared buffer type, and **cannot infer safety from archetype separation alone**.
->
-> The existing sequential scheduling is correct and required. See `UpdateAnimationStatesSystem.cs` lines 42-44 and 75-77 for the documented rationale.
+**Parallel Update Jobs** (all run simultaneously):
 
-**Why Parallelization Won't Work**:
-1. All three jobs write to `DynamicBuffer<ClipSampler>`
-2. Unity's job safety system tracks buffer types, not archetypes
-3. Parallel scheduling would cause a "multiple writers" safety error at runtime
+```csharp
+[BurstCompile]
+internal partial struct UpdateSingleClipStatesParallelJob : IJobEntity
+{
+    public float DeltaTime;
+    [NativeDisableParallelForRestriction]
+    public NativeStream.Writer CommandWriter;
+    [NativeSetThreadIndex] private int _threadIndex;
 
-**Future Parallelization Path** (if needed):
-To enable parallel execution, the buffer access pattern would need fundamental changes:
-- Split `ClipSampler` into archetype-specific buffer types (`SingleClipSampler`, `LinearBlendSampler`, etc.)
-- Or use `[NativeDisableParallelForRestriction]` with careful manual verification (not recommended)
+    internal void Execute(
+        Entity entity,
+        in DynamicBuffer<ClipSampler> clipSamplers,  // READ-ONLY now
+        in DynamicBuffer<SingleClipState> singleClipStates,
+        in DynamicBuffer<AnimationState> animationStates)
+    {
+        CommandWriter.BeginForEachIndex(_threadIndex);
 
-**Current Recommendation**: The sequential scheduling is correct. Focus optimization efforts elsewhere.
+        for (var i = 0; i < singleClipStates.Length; i++)
+        {
+            if (animationStates.TryGetWithId(singleClipStates[i].AnimationStateId, out var animationState))
+            {
+                var samplerIndex = clipSamplers.IdToIndex(animationState.StartSamplerId);
+                var sampler = clipSamplers[samplerIndex];
+
+                // Calculate new values (pure computation, no writes)
+                var newTime = sampler.Time + DeltaTime * animationState.Speed;
+                if (animationState.Loop)
+                {
+                    newTime = sampler.Clip.LoopToClipTime(newTime);
+                }
+
+                // Write command instead of mutating buffer directly
+                CommandWriter.Write(new SamplerUpdateCommand
+                {
+                    Entity = entity,
+                    SamplerId = animationState.StartSamplerId,
+                    Time = newTime,
+                    PreviousTime = sampler.Time,
+                    Weight = animationState.Weight
+                });
+            }
+        }
+
+        CommandWriter.EndForEachIndex();
+    }
+}
+```
+
+**Final Merge Job** (runs after all parallel jobs complete):
+
+```csharp
+[BurstCompile]
+internal partial struct ApplySamplerUpdatesJob : IJobEntity
+{
+    [ReadOnly] public NativeStream.Reader CommandReader;
+
+    internal void Execute(Entity entity, ref DynamicBuffer<ClipSampler> clipSamplers)
+    {
+        // Read commands for this entity and apply
+        var count = CommandReader.RemainingItemCount;
+        for (int i = 0; i < count; i++)
+        {
+            var cmd = CommandReader.Read<SamplerUpdateCommand>();
+            if (cmd.Entity == entity)
+            {
+                var index = clipSamplers.IdToIndex(cmd.SamplerId);
+                var sampler = clipSamplers[index];
+                sampler.Time = cmd.Time;
+                sampler.PreviousTime = cmd.PreviousTime;
+                sampler.Weight = cmd.Weight;
+                clipSamplers[index] = sampler;
+            }
+        }
+    }
+}
+```
+
+**System Scheduling**:
+
+```csharp
+[BurstCompile]
+public void OnUpdate(ref SystemState state)
+{
+    var dt = SystemAPI.Time.DeltaTime;
+
+    // Allocate command stream (sized for expected entity count)
+    var entityCount = _query.CalculateEntityCount();
+    var commandStream = new NativeStream(entityCount, Allocator.TempJob);
+
+    // All update jobs run in PARALLEL (different archetypes, write to stream not buffer)
+    var singleHandle = new UpdateSingleClipStatesParallelJob
+    {
+        DeltaTime = dt,
+        CommandWriter = commandStream.AsWriter()
+    }.ScheduleParallel(state.Dependency);
+
+    var linearHandle = new UpdateLinearBlendParallelJob
+    {
+        DeltaTime = dt,
+        CommandWriter = commandStream.AsWriter()
+    }.ScheduleParallel(state.Dependency);
+
+    var dir2DHandle = new UpdateDirectional2DBlendParallelJob
+    {
+        DeltaTime = dt,
+        CommandWriter = commandStream.AsWriter()
+    }.ScheduleParallel(state.Dependency);
+
+    // Combine all parallel handles
+    var allUpdates = JobHandle.CombineDependencies(singleHandle, linearHandle, dir2DHandle);
+
+    // Apply all commands (must wait for all updates)
+    var applyHandle = new ApplySamplerUpdatesJob
+    {
+        CommandReader = commandStream.AsReader()
+    }.ScheduleParallel(allUpdates);
+
+    // Cleanup jobs run in parallel after apply
+    var cleanSingle = new CleanSingleClipStatesJob().ScheduleParallel(applyHandle);
+    var cleanLinear = new CleanLinearBlendStatesJob().ScheduleParallel(applyHandle);
+    var cleanDir2D = new CleanDirectional2DBlendStatesJob().ScheduleParallel(applyHandle);
+
+    state.Dependency = JobHandle.CombineDependencies(cleanSingle, cleanLinear, cleanDir2D);
+    commandStream.Dispose(state.Dependency);
+}
+```
+
+**Benefits**:
+- True parallel execution of all state type updates
+- No safety system conflicts (jobs write to stream, not shared buffer)
+- Clean separation of computation vs mutation
+- Scales with worker thread count
+
+**Trade-offs**:
+- Additional memory for command stream (~20 bytes per sampler update)
+- Extra pass to apply commands
+- Slightly more complex code structure
+
+---
+
+#### Option B: Per-State-Type Result Buffers
+
+Instead of one `ClipSampler` buffer, use separate buffers per state type:
+
+```csharp
+// Separate result buffers - each job type writes to its own
+public struct SingleClipSamplerData : IBufferElementData
+{
+    public byte SamplerId;
+    public float Time;
+    public float PreviousTime;
+    public float Weight;
+    public BlobAssetReference<SkeletonClipSetBlob> Clips;
+    public ushort ClipIndex;
+}
+
+public struct LinearBlendSamplerData : IBufferElementData
+{
+    public byte SamplerId;
+    public float Time;
+    public float PreviousTime;
+    public float Weight;
+    public BlobAssetReference<SkeletonClipSetBlob> Clips;
+    public ushort ClipIndex;
+}
+
+public struct Directional2DSamplerData : IBufferElementData
+{
+    // Same structure
+}
+```
+
+**Jobs write to their own buffer type** (no conflicts):
+
+```csharp
+// SingleClip job writes ONLY to SingleClipSamplerData
+[BurstCompile]
+internal partial struct UpdateSingleClipStatesJob : IJobEntity
+{
+    internal float DeltaTime;
+
+    internal void Execute(
+        ref DynamicBuffer<SingleClipSamplerData> samplerData,  // Own buffer type
+        in DynamicBuffer<SingleClipState> singleClipStates,
+        in DynamicBuffer<AnimationState> animationStates)
+    {
+        // Update SingleClipSamplerData directly - no conflict with other job types
+    }
+}
+
+// LinearBlend job writes ONLY to LinearBlendSamplerData
+[BurstCompile]
+internal partial struct UpdateLinearBlendJob : IJobEntity
+{
+    internal float DeltaTime;
+
+    internal void Execute(
+        ref DynamicBuffer<LinearBlendSamplerData> samplerData,  // Own buffer type
+        in DynamicBuffer<LinearBlendStateMachineState> linearBlendStates,
+        in DynamicBuffer<AnimationState> animationStates,
+        in DynamicBuffer<FloatParameter> floatParameters,
+        in DynamicBuffer<IntParameter> intParameters)
+    {
+        // Update LinearBlendSamplerData directly - no conflict with other job types
+    }
+}
+```
+
+**Sampling phase reads from all buffers**:
+
+```csharp
+[BurstCompile]
+internal partial struct SampleAllAnimationsJob : IJobEntity
+{
+    internal void Execute(
+        ref DynamicBuffer<BoneTransform> boneTransforms,
+        in DynamicBuffer<SingleClipSamplerData> singleClipData,
+        in DynamicBuffer<LinearBlendSamplerData> linearBlendData,
+        in DynamicBuffer<Directional2DSamplerData> dir2DData)
+    {
+        // Sample from all buffer types, blend based on weights
+    }
+}
+```
+
+**Benefits**:
+- Cleanest parallel execution - no command stream overhead
+- Each job type fully owns its output
+- Buffer type safety system works correctly
+- Entities only have buffers for state types they use (archetype efficiency)
+
+**Trade-offs**:
+- More buffer types to manage
+- Sampling must iterate multiple buffers
+- Migration effort from current single-buffer approach
+
+---
+
+#### Option C: Per-Layer Sampler Buffers (Animation Layer Support)
+
+If you plan to support animation layers (base layer, additive layers, override layers), this architecture naturally extends:
+
+```csharp
+// Each layer has its own sampler buffer
+public struct AnimationLayer : IBufferElementData
+{
+    public byte LayerIndex;
+    public float Weight;
+    public BlendMode BlendMode;  // Override, Additive
+    public AvatarMask Mask;      // Optional per-layer masking
+}
+
+// Samplers are per-layer
+public struct LayerClipSampler : IBufferElementData
+{
+    public byte LayerId;         // Which layer this sampler belongs to
+    public byte SamplerId;       // Sampler ID within layer
+    public float Time;
+    public float PreviousTime;
+    public float Weight;
+    public BlobAssetReference<SkeletonClipSetBlob> Clips;
+    public ushort ClipIndex;
+}
+```
+
+**Layer-parallel processing**:
+
+```csharp
+[BurstCompile]
+public void OnUpdate(ref SystemState state)
+{
+    // Each layer can be processed independently
+    // Within each layer, state types can run in parallel (per Option A or B)
+
+    // Layer 0 (Base) - all state types in parallel
+    var layer0Single = new UpdateSingleClipLayer0Job{}.ScheduleParallel(state.Dependency);
+    var layer0Linear = new UpdateLinearBlendLayer0Job{}.ScheduleParallel(state.Dependency);
+    var layer0Handle = JobHandle.CombineDependencies(layer0Single, layer0Linear);
+
+    // Layer 1 (Additive) - can run parallel with Layer 0 if different entities
+    var layer1Single = new UpdateSingleClipLayer1Job{}.ScheduleParallel(state.Dependency);
+    var layer1Linear = new UpdateLinearBlendLayer1Job{}.ScheduleParallel(state.Dependency);
+    var layer1Handle = JobHandle.CombineDependencies(layer1Single, layer1Linear);
+
+    // Final blend combines all layers
+    state.Dependency = new BlendAllLayersJob{}
+        .ScheduleParallel(JobHandle.CombineDependencies(layer0Handle, layer1Handle));
+}
+```
+
+**Benefits**:
+- Natural support for animation layers (common in production)
+- Each layer is independent - maximum parallelism
+- Clean architecture for complex animation setups
+- Per-layer avatar masking becomes trivial
+
+**Trade-offs**:
+- More complex if you don't need layers
+- Per-entity layer count variation affects archetype fragmentation
+
+---
+
+### Recommended Implementation Path
+
+1. **Start with Option A (Queue-Based)** - Lowest migration risk, validates parallelism gains
+2. **Profile the overhead** - Is command stream cost < parallel speedup?
+3. **If positive**: Consider Option B for cleaner long-term architecture
+4. **If adding layers**: Option C provides natural extension
+
+**Expected Performance Gain**:
+- With 3 state types running in parallel: ~2-3x throughput on entities with mixed types
+- Queue overhead: ~5-10% per update pass
+- Net gain on 4+ core systems: 1.5-2.5x overall system throughput
 
 ### 2. Batched Animation Event Processing
 
@@ -782,26 +1103,49 @@ public struct ClipSamplersSoA : IComponentData
    - Pre-processing or post-processing stages
    - Event collection (write to separate queue, not shared buffer)
 
-### Phase 3: Data Compaction (3-5 days)
+### Phase 3: Parallel State Processing (3-5 days) ⭐ HIGH IMPACT
+
+> **Key Insight**: State machine blob data is read-only. Only `ClipSampler` fields are written. This enables parallel execution.
+
+1. **Implement Queue-Based Parallel Processing (Option A)**
+   - Create `SamplerUpdateCommand` struct
+   - Convert update jobs to write commands to `NativeStream`
+   - Implement `ApplySamplerUpdatesJob` to merge commands
+   - Profile overhead vs parallel gains
+
+2. **Alternative: Per-State-Type Buffers (Option B)**
+   - If queue overhead is high, split into `SingleClipSamplerData`, `LinearBlendSamplerData`, etc.
+   - Each job type writes to its own buffer
+   - Sampling phase reads from all buffers
+
+3. **Validation**
+   - Verify no race conditions with stress tests
+   - Profile with varying entity counts (100, 1000, 10000)
+   - Compare sequential vs parallel throughput
+
+**Expected Gain**: 1.5-2.5x throughput on multi-core systems
+
+### Phase 4: Data Compaction (3-5 days)
 
 1. **Implement packed bool parameters** with bitfield
 2. **Optimize AnimationState layout** with flags byte
 3. **Extract blob references** to entity-level component
 4. **Reduce ClipSampler size** from ~48 to ~16 bytes
 
-### Phase 4: Vectorization (5-7 days)
+### Phase 5: Vectorization (5-7 days)
 
 1. **Vectorize weight zeroing loops** with UnsafeUtility.MemClear
 2. **Vectorize weight normalization** with float4 operations
 3. **Batch angle calculations** with SIMD atan2
 4. **Implement early-exit** in transition evaluation
 
-### Phase 5: Advanced Optimizations (Optional)
+### Phase 6: Advanced Optimizations (Optional)
 
-1. **SoA layout for samplers** (if profiling shows benefit)
-2. **Generation-based sampler handles**
-3. **Packed transition conditions**
-4. **Background blob building**
+1. **Per-layer sampler buffers** (if adding animation layer support)
+2. **SoA layout for samplers** (if profiling shows benefit)
+3. **Generation-based sampler handles**
+4. **Packed transition conditions**
+5. **Background blob building**
 
 ---
 
@@ -854,4 +1198,4 @@ The following are **minimum supported versions** for optimizations in this plan.
 
 *Last Updated: 2026-02-02*
 *Branch: claude/add-dmotion-optimization-plan-YL52I*
-*Revision: Addressed Copilot review feedback - corrected inaccurate claims about missing Burst attributes and infeasible parallelization*
+*Revision 2: Added parallel state processing architecture (queue-based, per-state-type buffers, per-layer options) leveraging read-only state machine blob data*
