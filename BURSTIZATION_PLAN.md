@@ -20,13 +20,14 @@ This document provides a comprehensive plan for improving Burst compatibility, v
 
 ## Executive Summary
 
-DMotion is already well-optimized for DOTS with extensive `[BurstCompile]` usage across 30+ files. This plan identifies remaining optimization opportunities:
+DMotion is already well-optimized for DOTS with extensive `[BurstCompile]` usage across 30+ files. All jobs already have proper Burst compilation. This plan identifies remaining optimization opportunities:
 
 - **8 authoring classes** that could be converted to structs (editor-time only, low priority)
-- **3 jobs** missing `[BurstCompile]` attribute
 - **12+ vectorization opportunities** in loop-heavy operations
 - **4 async job patterns** for workload distribution
 - **6 data compaction opportunities** for better cache utilization
+
+> **Note**: An earlier version of this document incorrectly claimed 3 jobs were missing `[BurstCompile]` attributes. This has been verified as incorrect - all jobs are properly Burst-compiled.
 
 ---
 
@@ -37,12 +38,13 @@ DMotion is already well-optimized for DOTS with extensive `[BurstCompile]` usage
 | Category | Files with [BurstCompile] | Total Files | Coverage |
 |----------|---------------------------|-------------|----------|
 | Systems | 11 | 11 | 100% |
-| Jobs (IJobEntity) | 17 | 20 | 85% |
-| Utility Classes | 5 | 8 | 62% |
+| Jobs (IJobEntity) | 20 | 20 | 100% |
 | Components | 6 | 16 | 37% |
-| Total Runtime | 30 | ~86 | 35% |
 
-**Note**: Many files don't require `[BurstCompile]` (interfaces, enums, authoring ScriptableObjects).
+**Notes on Coverage**:
+- Many files legitimately cannot or don't need `[BurstCompile]` (interfaces, enums, authoring ScriptableObjects, managed classes)
+- Static utility classes cannot have `[BurstCompile]` applied at the class level (only individual methods within job structs can be Burst-compiled)
+- The 37% component coverage includes files that cannot use Burst (managed IComponentData for debug purposes)
 
 ### Key Patterns Already Used
 
@@ -112,43 +114,37 @@ public class StateOutTransition
 
 ---
 
-## Missing Burst Attributes
+## Burst Compilation Status
 
-### Jobs Without [BurstCompile]
+### Jobs - Fully Burst-Compiled ✓
 
-| Job | File | Line | Priority |
-|-----|------|------|----------|
-| `SampleNonOptimizedBones` | `SampleNonOptimizedBones.cs:18` | Missing attribute | HIGH |
-| `SampleRootDeltasJob` | `SampleRootDeltasJob.cs:12` | Missing attribute | HIGH |
-| `TransferRootMotionJob` | `TransferRootMotionJob.cs:17` | Missing attribute | HIGH |
+All IJobEntity jobs in DMotion already have the `[BurstCompile]` attribute:
 
-**Fix**:
-```csharp
-// SampleNonOptimizedBones.cs - Add attribute
-[BurstCompile]  // ADD THIS
-[WithNone(typeof(SkeletonRootTag))]
-internal partial struct SampleNonOptimizedBones : IJobEntity
+| Job | File | Status |
+|-----|------|--------|
+| `SampleNonOptimizedBones` | `SampleNonOptimizedBones.cs:16` | ✓ Has [BurstCompile] |
+| `SampleRootDeltasJob` | `SampleRootDeltasJob.cs:10` | ✓ Has [BurstCompile] |
+| `TransferRootMotionJob` | `TransferRootMotionJob.cs:14` | ✓ Has [BurstCompile] |
 
-// SampleRootDeltasJob.cs - Add attribute
-[BurstCompile]  // ADD THIS
-[WithAll(typeof(SkeletonRootTag))]
-internal partial struct SampleRootDeltasJob : IJobEntity
+No additional Burst attributes needed for jobs.
 
-// TransferRootMotionJob.cs - Add attribute
-[BurstCompile]  // ADD THIS
-[WithAll(typeof(TransferRootMotionToOwner))]
-internal partial struct TransferRootMotionJob : IJobEntity
-```
+### Static Utility Classes - Cannot Use [BurstCompile]
 
-### Utility Methods Missing [BurstCompile]
+> **Important**: Static classes in C# cannot have the `[BurstCompile]` attribute. The attribute can only be applied to:
+> - Struct types that implement job interfaces (IJob, IJobEntity, etc.)
+> - Individual static methods marked with `[BurstCompile]` when called from Burst-compiled code via function pointers
 
-| Method/Class | File | Action |
-|--------------|------|--------|
-| `Directional2DBlendUtils` | `Directional2DBlendUtils.cs` | Add `[BurstCompile]` to class |
-| `LinearBlendStateUtils` | `LinearBlendStateUtils.cs` | Add `[BurstCompile]` to class |
-| `SingleClipStateUtils` | `SingleClipStateUtils.cs` | Add `[BurstCompile]` to class |
-| `Directional2DBlendStateUtils` | `Directional2DBlendStateUtils.cs` | Add `[BurstCompile]` to class |
-| `CollectionUtils` | `CollectionUtils.cs` | Add `[BurstCompile]` to class |
+The following utility classes are static and their methods are already called from Burst-compiled jobs:
+
+| Class | File | Notes |
+|-------|------|-------|
+| `Directional2DBlendUtils` | `Directional2DBlendUtils.cs` | Methods called from Burst jobs - automatically compiled |
+| `LinearBlendStateUtils` | `LinearBlendStateUtils.cs` | Methods called from Burst jobs - automatically compiled |
+| `SingleClipStateUtils` | `SingleClipStateUtils.cs` | Methods called from Burst jobs - automatically compiled |
+| `Directional2DBlendStateUtils` | `Directional2DBlendStateUtils.cs` | Methods called from Burst jobs - automatically compiled |
+| `CollectionUtils` | `CollectionUtils.cs` | Methods called from Burst jobs - automatically compiled |
+
+**Recommendation**: Add `[MethodImpl(MethodImplOptions.AggressiveInlining)]` to hot methods in these classes to ensure they inline properly in Burst-compiled callers.
 
 ---
 
@@ -194,9 +190,10 @@ for (var i = startIndex; i <= endIndex; i++)
 [MethodImpl(MethodImplOptions.AggressiveInlining)]
 internal static void ZeroWeightsInRange(ref DynamicBuffer<ClipSampler> samplers, int startIndex, int count)
 {
-    // ClipSampler.Weight offset from struct start
-    const int weightOffset = /* calculate offset */;
-    const int samplerStride = /* sizeof(ClipSampler) */;
+    // Calculate offsets at runtime using UnsafeUtility
+    int samplerStride = UnsafeUtility.SizeOf<ClipSampler>();
+    int weightOffset = UnsafeUtility.GetFieldOffset(typeof(ClipSampler).GetField("Weight",
+        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance));
 
     unsafe
     {
@@ -210,6 +207,8 @@ internal static void ZeroWeightsInRange(ref DynamicBuffer<ClipSampler> samplers,
 }
 ```
 
+> **Note**: The reflection-based `GetFieldOffset` won't work in Burst. For Burst compatibility, use a hardcoded offset based on the struct layout, or cache the offset value at startup. Alternatively, consider if this optimization provides measurable benefit over the simple loop - profile first.
+
 #### 1.3 NormalizedSamplersWeights - Sum and Normalize
 ```csharp
 // Runtime/Systems/NormalizedSamplersWeights.cs:13-26
@@ -222,22 +221,20 @@ for (var i = 0; i < clipSamplers.Length; i++)
 ```
 
 **Vectorization**:
+
+> **Implementation Note**: True SIMD vectorization of `DynamicBuffer` weight normalization is complex because weights are embedded in a struct (AoS layout). The approach below shows what vectorization would require - extracting to a temp array first. For small sampler counts (typical), the overhead may exceed the benefit. **Profile before implementing**.
+
 ```csharp
-[BurstCompile]
+[MethodImpl(MethodImplOptions.AggressiveInlining)]
 internal static void NormalizeWeights(ref DynamicBuffer<ClipSampler> clipSamplers)
 {
     int length = clipSamplers.Length;
     if (length == 0) return;
 
-    // Process 4 elements at a time using float4
-    float4 sum4 = float4.zero;
-    int i = 0;
-
-    // Vectorized sum (requires extracting weights to temp array first)
-    // Or use math.csum for final reduction
-
+    // For small counts, scalar loop is likely faster than vectorization overhead
+    // Typical sampler counts are 2-8, where SIMD setup cost exceeds benefit
     var sumWeights = 0.0f;
-    for (i = 0; i < length; i++)
+    for (int i = 0; i < length; i++)
     {
         sumWeights += clipSamplers[i].Weight;
     }
@@ -245,7 +242,7 @@ internal static void NormalizeWeights(ref DynamicBuffer<ClipSampler> clipSampler
     if (!mathex.approximately(sumWeights, 1f))
     {
         float invSum = 1.0f / sumWeights;
-        for (i = 0; i < length; i++)
+        for (int i = 0; i < length; i++)
         {
             var sampler = clipSamplers[i];
             sampler.Weight *= invSum;
@@ -254,6 +251,9 @@ internal static void NormalizeWeights(ref DynamicBuffer<ClipSampler> clipSampler
     }
 }
 ```
+
+**Alternative - Pre-multiply optimization** (avoids division in loop):
+The current code already uses `invSum = 1.0f / sumWeights` to convert division to multiplication. This is the key optimization; further vectorization has diminishing returns for typical sampler counts.
 
 ### Priority 2: Time Update Loops (Medium Impact)
 
@@ -303,15 +303,43 @@ for (int i = 0; i < positions.Length; i++)
 ```csharp
 // Pre-calculate all angles at once using vectorized atan2
 var angles = new NativeArray<float>(positions.Length, Allocator.Temp);
-for (int i = 0; i < positions.Length; i += 4)
+
+// Process as many elements as possible in blocks of 4
+int simdLength = positions.Length & ~3; // Largest multiple of 4 <= positions.Length
+
+for (int i = 0; i < simdLength; i += 4)
 {
     // Process 4 positions at once
-    float4 x = new float4(positions[i].x, positions[i+1].x, positions[i+2].x, positions[i+3].x);
-    float4 y = new float4(positions[i].y, positions[i+1].y, positions[i+2].y, positions[i+3].y);
+    float4 x = new float4(
+        positions[i].x,
+        positions[i + 1].x,
+        positions[i + 2].x,
+        positions[i + 3].x
+    );
+    float4 y = new float4(
+        positions[i].y,
+        positions[i + 1].y,
+        positions[i + 2].y,
+        positions[i + 3].y
+    );
+
     float4 result = math.atan2(y, x);
-    // Store results
+
+    // Store results back into the angles array
+    angles[i] = result.x;
+    angles[i + 1] = result.y;
+    angles[i + 2] = result.z;
+    angles[i + 3] = result.w;
+}
+
+// Handle remaining elements (if positions.Length is not a multiple of 4)
+for (int i = simdLength; i < positions.Length; i++)
+{
+    angles[i] = math.atan2(positions[i].y, positions[i].x);
 }
 ```
+
+> **Note**: This optimization has limited benefit when `positions.Length` is typically small (e.g., <8 blend tree children). Profile to verify improvement before implementing.
 
 ### Priority 4: Transition Evaluation (Medium Impact)
 
@@ -338,7 +366,7 @@ for (var i = 0; i < boolTransitions.Length && shouldTriggerTransition; i++)
 
 ## Async Job Opportunities
 
-### 1. Parallel State Type Processing
+### 1. State Type Job Scheduling - Safety Constraint
 
 **Current**: Sequential job scheduling in `UpdateAnimationStatesSystem.cs`
 ```csharp
@@ -347,34 +375,21 @@ handle = new UpdateLinearBlendStateMachineStatesJob{}.ScheduleParallel(handle);
 handle = new UpdateDirectional2DBlendStateMachineStatesJob{}.ScheduleParallel(handle);
 ```
 
-**Optimization**: If entities have distinct archetypes (SingleClip vs LinearBlend vs Directional2D), these can run in parallel:
+> **⚠️ Safety Constraint**: Although these jobs target different entity archetypes (SingleClip vs LinearBlend vs Directional2D), they all write to the same `DynamicBuffer<ClipSampler>` type. Unity's safety system requires explicit dependency chaining for all writers of a shared buffer type, and **cannot infer safety from archetype separation alone**.
+>
+> The existing sequential scheduling is correct and required. See `UpdateAnimationStatesSystem.cs` lines 42-44 and 75-77 for the documented rationale.
 
-```csharp
-[BurstCompile]
-public void OnUpdate(ref SystemState state)
-{
-    var dt = SystemAPI.Time.DeltaTime;
+**Why Parallelization Won't Work**:
+1. All three jobs write to `DynamicBuffer<ClipSampler>`
+2. Unity's job safety system tracks buffer types, not archetypes
+3. Parallel scheduling would cause a "multiple writers" safety error at runtime
 
-    // All update jobs can run in parallel (different entity archetypes)
-    var singleHandle = new UpdateSingleClipStatesJob { DeltaTime = dt }
-        .ScheduleParallel(state.Dependency);
-    var linearHandle = new UpdateLinearBlendStateMachineStatesJob { DeltaTime = dt }
-        .ScheduleParallel(state.Dependency);
-    var dir2DHandle = new UpdateDirectional2DBlendStateMachineStatesJob { DeltaTime = dt }
-        .ScheduleParallel(state.Dependency);
+**Future Parallelization Path** (if needed):
+To enable parallel execution, the buffer access pattern would need fundamental changes:
+- Split `ClipSampler` into archetype-specific buffer types (`SingleClipSampler`, `LinearBlendSampler`, etc.)
+- Or use `[NativeDisableParallelForRestriction]` with careful manual verification (not recommended)
 
-    var allUpdates = JobHandle.CombineDependencies(singleHandle, linearHandle, dir2DHandle);
-
-    // Clean jobs must wait for all updates
-    var cleanSingle = new CleanSingleClipStatesJob().ScheduleParallel(allUpdates);
-    var cleanLinear = new CleanLinearBlendStatesJob().ScheduleParallel(allUpdates);
-    var cleanDir2D = new CleanDirectional2DBlendStatesJob().ScheduleParallel(allUpdates);
-
-    state.Dependency = JobHandle.CombineDependencies(cleanSingle, cleanLinear, cleanDir2D);
-}
-```
-
-**Prerequisite**: Verify entities with SingleClipState don't also have LinearBlendState (mutually exclusive archetypes).
+**Current Recommendation**: The sequential scheduling is correct. Focus optimization efforts elsewhere.
 
 ### 2. Batched Animation Event Processing
 
@@ -439,21 +454,55 @@ internal partial struct PrepareActiveSamplersJob : IJobEntity
 
 **Current**: Synchronous blob building during baking
 
-**Optimization**: Schedule blob building as jobs:
+> **⚠️ Implementation Challenge**: `StateMachineBlobConverter` contains managed references and non-blittable data that cannot be used directly in Burst-compiled jobs. Converting to async blob building requires extracting blittable data first.
+
+**Optimization Approach** (if profiling shows baking is slow):
 
 ```csharp
+// Step 1: Extract blittable data on main thread
+public struct StateMachineBlobBuildData
+{
+    // Only blittable fields here - populated from StateMachineBlobConverter
+    public NativeArray<StateData> States;
+    public NativeArray<TransitionData> Transitions;
+    public NativeArray<int> ParameterHashes;
+    // ... other blittable data needed for blob building
+}
+
+// Step 2: Build blob in job using only blittable data
 [BurstCompile]
 internal struct BuildStateMachineBlobJob : IJob
 {
-    public StateMachineBlobConverter Converter;
+    [ReadOnly] public StateMachineBlobBuildData BuildData;
     public NativeReference<BlobAssetReference<StateMachineBlob>> Result;
 
     public void Execute()
     {
-        Result.Value = Converter.BuildBlob();
+        // Build blob using only blittable BuildData
+        var builder = new BlobBuilder(Allocator.Temp);
+        // ... populate blob from BuildData
+        Result.Value = builder.CreateBlobAssetReference<StateMachineBlob>(Allocator.Persistent);
     }
 }
+
+// Step 3: Schedule from converter
+public BlobAssetReference<StateMachineBlob> BuildBlobAsync()
+{
+    var buildData = ExtractBlittableData(); // Main thread extraction
+    var result = new NativeReference<BlobAssetReference<StateMachineBlob>>(Allocator.TempJob);
+
+    var job = new BuildStateMachineBlobJob
+    {
+        BuildData = buildData,
+        Result = result
+    }.Schedule();
+
+    job.Complete(); // Or store handle for later completion
+    return result.Value;
+}
 ```
+
+**Trade-off**: Significant refactoring required. Only worth pursuing if profiling shows baking is a bottleneck.
 
 ---
 
@@ -472,10 +521,19 @@ public struct BoolParameter : IBufferElementData  // 8 bytes (4 hash + 1 bool + 
 
 **Optimized**:
 ```csharp
-public struct BoolParameter : IBufferElementData  // 5 bytes, pack multiple
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct BoolParameter : IBufferElementData  // 5 bytes with explicit packing
 {
     public int Hash;
-    public byte Value;  // Use byte instead of bool
+    private byte _value;  // Store as byte internally
+
+    public bool Value
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _value != 0;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        set => _value = value ? (byte)1 : (byte)0;
+    }
 }
 
 // Or pack 32 bools into one int with bitfield
@@ -629,6 +687,8 @@ internal struct SamplerHandle
 
 ## Memory Layout Optimization
 
+> **⚠️ General Warning**: The optimizations in this section involve significant architectural changes with high implementation complexity. Only pursue these after profiling confirms the current layout is a bottleneck, and carefully weigh the maintenance burden against performance gains.
+
 ### 1. Hot/Cold Data Splitting
 
 Split frequently accessed data from rarely accessed:
@@ -652,6 +712,14 @@ public struct AnimationStateCold : IBufferElementData
 }
 ```
 
+> **⚠️ Implementation Complexity**: Hot/Cold splitting introduces significant complexity:
+> 1. **Index synchronization** - Must keep indices aligned between two separate buffers
+> 2. **API surface changes** - All code accessing `AnimationState` must access two buffers instead of one
+> 3. **Creation/deletion handling** - Adding or removing states requires coordinated updates to both buffers
+> 4. **Bug surface area** - Index mismatches between hot/cold buffers cause subtle, hard-to-diagnose bugs
+>
+> **Recommendation**: Only implement if profiling shows cache misses on `AnimationState` are a significant bottleneck. The current unified struct is simpler and already reasonably cache-friendly at 16 bytes.
+
 ### 2. SoA vs AoS for Samplers
 
 **Current**: Array of Structures (AoS)
@@ -670,7 +738,16 @@ public struct ClipSamplersSoA : IComponentData
 }
 ```
 
-**Trade-off**: Better vectorization vs. more complex buffer management.
+> **⚠️ High-Risk Change**: Converting from AoS to SoA would:
+> 1. **Break the existing `DynamicBuffer<ClipSampler>` API** used throughout the codebase
+> 2. **Require updating all sampler access code** to work with separate arrays
+> 3. **Change iteration patterns** - cannot iterate "per sampler" without zipping arrays
+> 4. **Complicate ID-based lookups** - the current ID mechanism relies on buffer element access
+> 5. **Require custom resize logic** - must keep all arrays in sync when adding/removing samplers
+>
+> **Trade-off**: Better SIMD vectorization potential, but **substantial refactoring cost** touching most of the animation system.
+>
+> **Recommendation**: This is a high-effort, high-risk optimization. Only consider if profiling shows sampler iteration is a dominant cost AND the typical sampler count is large enough (16+) to benefit from SIMD. For typical counts (2-8), AoS with good cache locality is often faster.
 
 ---
 
@@ -678,27 +755,32 @@ public struct ClipSamplersSoA : IComponentData
 
 ### Phase 1: Quick Wins (1-2 days)
 
-1. **Add missing [BurstCompile] attributes** (3 jobs)
-   - `SampleNonOptimizedBones`
-   - `SampleRootDeltasJob`
-   - `TransferRootMotionJob`
+> **Note**: All jobs already have `[BurstCompile]` attributes. Static classes cannot have this attribute.
 
-2. **Add [BurstCompile] to utility classes**
-   - `Directional2DBlendUtils`
-   - `LinearBlendStateUtils`
-   - `SingleClipStateUtils`
-   - `Directional2DBlendStateUtils`
-   - `CollectionUtils`
+1. **Verify Burst configuration**
+   - Ensure Burst is enabled for all relevant build targets
+   - Enable safety checks only where needed to balance performance and debugging
 
-3. **Add AggressiveInlining to hot methods**
+2. **Add AggressiveInlining to hot methods**
    - All `Evaluate` methods in transitions
    - All `Update*` methods in state utils
+   - Math-heavy helpers in utility classes (already called from Burst, but inlining helps)
 
-### Phase 2: Parallel Job Scheduling (2-3 days)
+3. **Reduce per-frame allocations in jobs**
+   - Audit for `Allocator.Temp` usage in hot paths
+   - Reuse native containers where possible
+   - Move temporary allocations out of tight update loops
 
-1. **Parallelize state type update jobs** in `UpdateAnimationStatesSystem`
-2. **Parallelize clean jobs** after updates complete
-3. **Verify archetype exclusivity** to ensure safe parallelism
+### Phase 2: Job Scheduling Audit (1-2 days)
+
+> **Note**: The state type update jobs (SingleClip, LinearBlend, Directional2D) cannot be parallelized because they all write to `DynamicBuffer<ClipSampler>`. This is by design.
+
+1. **Document job scheduling rationale** - Ensure comments explain why sequential scheduling is required
+2. **Validate job safety guarantees** - Confirm all writes to shared buffers respect Unity's safety system
+3. **Identify safe parallelism opportunities** - Look for jobs or stages that don't write to shared buffers:
+   - Read-only query jobs
+   - Pre-processing or post-processing stages
+   - Event collection (write to separate queue, not shared buffer)
 
 ### Phase 3: Data Compaction (3-5 days)
 
@@ -748,10 +830,16 @@ public struct ClipSamplersSoA : IComponentData
 
 ## Dependencies
 
-- Unity Entities 1.0+
-- Unity Burst 1.8+
-- Unity Collections 2.0+
-- Latios Framework (Kinemation)
+The following are **minimum supported versions** for optimizations in this plan. The plan is expected to work with any newer minor/patch release within the same major line. When upgrading to a new major version, re-validate the assumptions in this document.
+
+| Package | Minimum Version | Notes |
+|---------|-----------------|-------|
+| Unity Entities | 1.0+ | Assumes 1.x Entities API surface |
+| Unity Burst | 1.8+ | Assumes 1.x Burst compiler features |
+| Unity Collections | 2.0+ | Assumes 2.x Collections API (NativeArray, etc.) |
+| Latios Framework | (compatible) | Kinemation integration; version must match above packages |
+
+**Note**: Some optimizations (e.g., specific Burst intrinsics) may require newer versions. Check Burst release notes if specific SIMD features don't compile.
 
 ---
 
@@ -764,5 +852,6 @@ public struct ClipSamplersSoA : IComponentData
 
 ---
 
-*Last Updated: 2026-02-01*
-*Branch: claude/burst-vectorization-optimization-uzb1q*
+*Last Updated: 2026-02-02*
+*Branch: claude/add-dmotion-optimization-plan-YL52I*
+*Revision: Addressed Copilot review feedback - corrected inaccurate claims about missing Burst attributes and infeasible parallelization*
